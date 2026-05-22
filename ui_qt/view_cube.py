@@ -79,9 +79,9 @@ class ViewCube:
     view scale to compensate so the widget stays at a fixed screen size.
     """
 
-    HALF:   int = 42   # cube half-radius in screen pixels
-    MARGIN: int = 15   # corner margin from viewport edge in screen pixels
-    CRAD:   int = 7    # corner-dot radius in screen pixels
+    HALF:   int = 28   # cube half-radius in screen pixels  (2/3 of original 42)
+    MARGIN: int = 29   # corner margin — adjusted so centre stays at same 57 px from corner
+    CRAD:   int = 5    # corner-dot radius in screen pixels
 
     def __init__(self) -> None:
         self.hovered: str | None = None   # e.g. 'face:Top', 'corner:6', or None
