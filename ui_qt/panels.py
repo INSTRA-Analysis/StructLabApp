@@ -961,12 +961,15 @@ class ResultsPanel(QWidget):
 
     def populate(self, displacements, reactions, member_results, model_state,
                  dpn: int = 3,
-                 member_el_map: list | None = None) -> None:
+                 member_el_map: list | None = None,
+                 sub_results: list | None = None) -> None:
         """Fill all three tabs with solver results and rebuild row→ID maps.
 
         dpn: degrees of freedom per node — 3 for 2D models, 6 for 3D models.
-        member_el_map: list[list[int]] mapping UI member index → sub-element IDs.
-                       When provided, Summary/Detail tabs show peak forces and stresses.
+        member_el_map: list[list[int]] — member_el_map[i] = sub-element IDs for UI member i.
+        sub_results: raw per-sub-element ElementResult list from the solver.
+                     When both are provided, peak forces and stresses are computed by
+                     scanning all sub-element endpoints rather than just the member ends.
         """
         self._restore_force_tab()
         for tbl in (self._disp_table, self._react_table,
@@ -1005,14 +1008,25 @@ class ResultsPanel(QWidget):
             self._react_row_to_node.append(nd.id)
 
         # ── Member forces — Summary and Detail ─────────────────────────────────
-        res_by_id = {r.element_id: r for r in member_results}
+        # Build lookup from sub_results (per-sub-element) when available;
+        # fall back to member_results (one aggregated result per UI member).
+        if sub_results is not None and member_el_map is not None:
+            sub_by_id = {r.element_id: r for r in sub_results}
+            def _get_sub(i: int):
+                return [sub_by_id[eid]
+                        for eid in member_el_map[i]
+                        if eid in sub_by_id]
+        else:
+            # Fallback: treat each aggregated member result as a single "sub-element"
+            agg_by_uid = {r.element_id: r for r in member_results}
+            def _get_sub(i: int):
+                r = agg_by_uid.get(model_state.members[i].id)
+                return [r] if r is not None else []
 
-        # Summary: one row per UI member with peak forces and utilization
+        # Summary: one row per UI member — peak forces and utilization
         self._summary_table.setRowCount(len(model_state.members))
         for i, md in enumerate(model_state.members):
-            el_ids = (member_el_map[i]
-                      if member_el_map and i < len(member_el_map) else [])
-            sub_res = [res_by_id[eid] for eid in el_ids if eid in res_by_id]
+            sub_res = _get_sub(i)
 
             if sub_res:
                 N_vals = [r.N_i for r in sub_res] + [r.N_j for r in sub_res]
@@ -1053,16 +1067,14 @@ class ResultsPanel(QWidget):
         _T_POINTS = (0.0, 0.25, 0.5, 0.75, 1.0)
         self._detail_table.setRowCount(len(model_state.members) * len(_T_POINTS))
         for i, md in enumerate(model_state.members):
-            el_ids = (member_el_map[i]
-                      if member_el_map and i < len(member_el_map) else [])
-            sub_res = [res_by_id[eid] for eid in el_ids if eid in res_by_id]
+            sub_res = _get_sub(i)
             n_sub = len(sub_res)
 
             for ci, t in enumerate(_T_POINTS):
                 row = i * len(_T_POINTS) + ci
                 if n_sub > 0:
                     k = min(int(t * n_sub), n_sub - 1)
-                    s = t * n_sub - k   # local fraction within sub-element
+                    s = t * n_sub - k   # local fraction within sub-element [0,1)
                     r = sub_res[k]
                     N = (1 - s) * r.N_i + s * r.N_j
                     V = (1 - s) * r.V_i + s * r.V_j
