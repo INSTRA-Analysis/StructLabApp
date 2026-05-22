@@ -42,18 +42,27 @@ class NodeLoad:
 
 @dataclass
 class MemberLoad:
-    """Loads applied along a member for one load case."""
-    w_start: float = 0.0                           # N/m at node_i, downward positive (local transverse Y)
-    w_end: float = 0.0                             # N/m at node_j
-    qx_start: float = 0.0                         # N/m at node_i, rightward positive (global X)
-    qx_end: float = 0.0                           # N/m at node_j
-    qz_start: float = 0.0                         # N/m at node_i, +Z positive (global Z, 3D only)
-    qz_end: float = 0.0                           # N/m at node_j
+    """Loads applied along a member for one load case.
+
+    Coordinate convention (matches canvas): X=right, Y=depth, Z=up.
+      w       — local transverse (perpendicular to member), ↓ positive relative to member
+      qx/qy/qz — global-axis distributed loads; positive = +axis direction
+                  qz positive = upward (opposing gravity); for gravity use negative qz or w
+    """
+    w_start: float = 0.0      # N/m at node_i, ↓ positive (local ⊥ to member)
+    w_end: float = 0.0        # N/m at node_j
+    qx_start: float = 0.0    # N/m at node_i, +X positive (global X, rightward)
+    qx_end: float = 0.0      # N/m at node_j
+    qy_start: float = 0.0    # N/m at node_i, +Y positive (global Y, depth — 3D only)
+    qy_end: float = 0.0      # N/m at node_j
+    qz_start: float = 0.0    # N/m at node_i, +Z positive (global Z, upward — 3D only)
+    qz_end: float = 0.0      # N/m at node_j
     point_loads: list = field(default_factory=list)  # list[PointLoadData]
 
     def is_zero(self) -> bool:
         return (self.w_start == 0.0 and self.w_end == 0.0
                 and self.qx_start == 0.0 and self.qx_end == 0.0
+                and self.qy_start == 0.0 and self.qy_end == 0.0
                 and self.qz_start == 0.0 and self.qz_end == 0.0
                 and not self.point_loads)
 
@@ -125,6 +134,8 @@ class LoadCase:
                     "w_end": ml.w_end,
                     "qx_start": ml.qx_start,
                     "qx_end": ml.qx_end,
+                    "qy_start": ml.qy_start,
+                    "qy_end": ml.qy_end,
                     "qz_start": ml.qz_start,
                     "qz_end": ml.qz_end,
                     "point_loads": [
@@ -169,6 +180,8 @@ class LoadCase:
                 w_end=ml_data.get("w_end", 0.0),
                 qx_start=ml_data.get("qx_start", 0.0),
                 qx_end=ml_data.get("qx_end", 0.0),
+                qy_start=ml_data.get("qy_start", 0.0),
+                qy_end=ml_data.get("qy_end", 0.0),
                 qz_start=ml_data.get("qz_start", 0.0),
                 qz_end=ml_data.get("qz_end", 0.0),
                 point_loads=point_loads,

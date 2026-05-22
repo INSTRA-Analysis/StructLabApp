@@ -334,20 +334,28 @@ class _MemberForm(QWidget):
         self._w_end    = _spin(ml.w_end    / 1e3, -1e6, 1e6, 1, 1)
         self._qx_start = _spin(ml.qx_start / 1e3, -1e6, 1e6, 1, 1)
         self._qx_end   = _spin(ml.qx_end   / 1e3, -1e6, 1e6, 1, 1)
+        self._qy_start = _spin(ml.qy_start / 1e3, -1e6, 1e6, 1, 1)
+        self._qy_end   = _spin(ml.qy_end   / 1e3, -1e6, 1e6, 1, 1)
         self._qz_start = _spin(ml.qz_start / 1e3, -1e6, 1e6, 1, 1)
         self._qz_end   = _spin(ml.qz_end   / 1e3, -1e6, 1e6, 1, 1)
-        lf.addRow("↓ w start (kN/m):", self._w_start)                          # row 0
-        lf.addRow("↓ w end   (kN/m):", self._w_end)                            # row 1
-        lf.addRow("", QLabel("Transverse (local ⊥) — ↓ positive"))             # row 2
-        lf.addRow("→ qx start (kN/m):", self._qx_start)                        # row 3
-        lf.addRow("→ qx end   (kN/m):", self._qx_end)                          # row 4
-        lf.addRow("", QLabel("Lateral (global X) — → positive"))               # row 5
-        lf.addRow("⊙ qz start (kN/m):", self._qz_start)                        # row 6
-        lf.addRow("⊙ qz end   (kN/m):", self._qz_end)                          # row 7
-        lf.addRow("", QLabel("Lateral (global Z) — ⊙ positive (3D)"))          # row 8
-        lf.setRowVisible(6, mode_3d)
-        lf.setRowVisible(7, mode_3d)
-        lf.setRowVisible(8, mode_3d)
+        lf.addRow("w start (kN/m):", self._w_start)                            # row 0
+        lf.addRow("w end   (kN/m):", self._w_end)                              # row 1
+        lf.addRow("", QLabel("Local ⊥ to member  —  ↓ positive"))             # row 2
+        lf.addRow("qx start (kN/m):", self._qx_start)                         # row 3
+        lf.addRow("qx end   (kN/m):", self._qx_end)                           # row 4
+        lf.addRow("", QLabel("Global X (→ right)  —  + rightward"))           # row 5
+        lf.addRow("qy start (kN/m):", self._qy_start)                         # row 6
+        lf.addRow("qy end   (kN/m):", self._qy_end)                           # row 7
+        lf.addRow("", QLabel("Global Y (↗ depth)  —  + into scene  (3D)"))   # row 8
+        lf.addRow("qz start (kN/m):", self._qz_start)                         # row 9
+        lf.addRow("qz end   (kN/m):", self._qz_end)                           # row 10
+        lf.addRow("", QLabel("Global Z (↑ up)  —  + upward  (3D)"))          # row 11
+        lf.setRowVisible(6,  mode_3d)
+        lf.setRowVisible(7,  mode_3d)
+        lf.setRowVisible(8,  mode_3d)
+        lf.setRowVisible(9,  mode_3d)
+        lf.setRowVisible(10, mode_3d)
+        lf.setRowVisible(11, mode_3d)
         layout.addWidget(load_box)
 
         # ── point loads on member ─────────────────────────────────────────────
@@ -454,6 +462,8 @@ class _MemberForm(QWidget):
                 w_end=self._w_end.value()       * 1e3,
                 qx_start=self._qx_start.value() * 1e3,
                 qx_end=self._qx_end.value()     * 1e3,
+                qy_start=self._qy_start.value() * 1e3,
+                qy_end=self._qy_end.value()     * 1e3,
                 qz_start=self._qz_start.value() * 1e3,
                 qz_end=self._qz_end.value()     * 1e3,
                 point_loads=point_loads,
@@ -666,10 +676,28 @@ class _MultiMemberForm(QWidget):
         self._w_end    = _spin(first_ml.w_end    / 1e3, -1e6, 1e6, 1, 1)
         self._qx_start = _spin(first_ml.qx_start / 1e3, -1e6, 1e6, 1, 1)
         self._qx_end   = _spin(first_ml.qx_end   / 1e3, -1e6, 1e6, 1, 1)
-        lf.addRow("↓ w start (kN/m):", self._w_start)
-        lf.addRow("↓ w end   (kN/m):", self._w_end)
-        lf.addRow("→ qx start (kN/m):", self._qx_start)
-        lf.addRow("→ qx end   (kN/m):", self._qx_end)
+        self._qy_start = _spin(first_ml.qy_start / 1e3, -1e6, 1e6, 1, 1)
+        self._qy_end   = _spin(first_ml.qy_end   / 1e3, -1e6, 1e6, 1, 1)
+        self._qz_start = _spin(first_ml.qz_start / 1e3, -1e6, 1e6, 1, 1)
+        self._qz_end   = _spin(first_ml.qz_end   / 1e3, -1e6, 1e6, 1, 1)
+        lf.addRow("w start (kN/m):", self._w_start)
+        lf.addRow("w end   (kN/m):", self._w_end)
+        lf.addRow("", QLabel("Local ⊥ to member  —  ↓ positive"))
+        lf.addRow("qx start (kN/m):", self._qx_start)
+        lf.addRow("qx end   (kN/m):", self._qx_end)
+        lf.addRow("", QLabel("Global X (→ right)  —  + rightward"))
+        lf.addRow("qy start (kN/m):", self._qy_start)
+        lf.addRow("qy end   (kN/m):", self._qy_end)
+        lf.addRow("", QLabel("Global Y (↗ depth)  —  + into scene  (3D)"))
+        lf.addRow("qz start (kN/m):", self._qz_start)
+        lf.addRow("qz end   (kN/m):", self._qz_end)
+        lf.addRow("", QLabel("Global Z (↑ up)  —  + upward  (3D)"))
+        lf.setRowVisible(6,  mode_3d)
+        lf.setRowVisible(7,  mode_3d)
+        lf.setRowVisible(8,  mode_3d)
+        lf.setRowVisible(9,  mode_3d)
+        lf.setRowVisible(10, mode_3d)
+        lf.setRowVisible(11, mode_3d)
         layout.addWidget(load_box)
 
         # ── mesh ──────────────────────────────────────────────────────────
@@ -721,6 +749,10 @@ class _MultiMemberForm(QWidget):
                     w_start=w_start, w_end=w_end,
                     qx_start=self._qx_start.value() * 1e3,
                     qx_end=self._qx_end.value()     * 1e3,
+                    qy_start=self._qy_start.value() * 1e3,
+                    qy_end=self._qy_end.value()     * 1e3,
+                    qz_start=self._qz_start.value() * 1e3,
+                    qz_end=self._qz_end.value()     * 1e3,
                 ))
         self._on_apply()
 

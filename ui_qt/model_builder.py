@@ -222,7 +222,19 @@ def build_model(state: ModelState,
                         node_id=nid, fx=fx_sub / 2.0,
                     ))
 
-        # Lateral (global Z) distributed load: lump as nodal Z-forces per sub-element.
+        # Global Y distributed load: lump as nodal Y-forces per sub-element.
+        if ml.qy_start != 0.0 or ml.qy_end != 0.0:
+            sub_L = member_length / n_sub
+            for k in range(n_sub):
+                qy_k  = ml.qy_start + k       / n_sub * (ml.qy_end - ml.qy_start)
+                qy_k1 = ml.qy_start + (k + 1) / n_sub * (ml.qy_end - ml.qy_start)
+                fy_sub = (qy_k + qy_k1) / 2.0 * sub_L
+                for nid in (chain[k], chain[k + 1]):
+                    model.nodal_loads.append(NodalLoad(
+                        node_id=nid, fy=fy_sub / 2.0,
+                    ))
+
+        # Global Z distributed load: lump as nodal Z-forces per sub-element.
         if ml.qz_start != 0.0 or ml.qz_end != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
@@ -346,10 +358,14 @@ def _merge_load_case_into(
             for pl in ml.point_loads
         ]
         target.member_loads[mid] = MemberLoad(
-            w_start     = ex.w_start  + factor * ml.w_start,
-            w_end       = ex.w_end    + factor * ml.w_end,
-            qx_start    = ex.qx_start + factor * ml.qx_start,
-            qx_end      = ex.qx_end   + factor * ml.qx_end,
+            w_start     = ex.w_start   + factor * ml.w_start,
+            w_end       = ex.w_end     + factor * ml.w_end,
+            qx_start    = ex.qx_start  + factor * ml.qx_start,
+            qx_end      = ex.qx_end    + factor * ml.qx_end,
+            qy_start    = ex.qy_start  + factor * ml.qy_start,
+            qy_end      = ex.qy_end    + factor * ml.qy_end,
+            qz_start    = ex.qz_start  + factor * ml.qz_start,
+            qz_end      = ex.qz_end    + factor * ml.qz_end,
             point_loads = ex.point_loads + scaled_pl,
         )
 
