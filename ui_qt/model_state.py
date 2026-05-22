@@ -26,6 +26,20 @@ class PointLoadData:
 
 
 @dataclass
+class PartialDistLoad:
+    """A partial-span distributed load acting between two positions on a member.
+
+    Intensity varies linearly from w_start at start_pos to w_end at end_pos.
+    Both positions are fractional (0.0 = node_i end, 1.0 = node_j end).
+    Sign convention: positive = downward (local ⊥ to member), same as w.
+    """
+    start_pos: float  # 0.0 – 1.0
+    end_pos:   float  # 0.0 – 1.0, must be > start_pos
+    w_start:   float  # N/m at start_pos, ↓ positive
+    w_end:     float  # N/m at end_pos
+
+
+@dataclass
 class NodeLoad:
     """Loads applied at a node for one load case (global axes)."""
     fx: float = 0.0       # N, positive → right
@@ -58,14 +72,16 @@ class MemberLoad:
     qy_end: float = 0.0      # N/m at node_j
     qz_start: float = 0.0    # N/m at node_i, ↓ positive (downward / gravity — 3D only)
     qz_end: float = 0.0      # N/m at node_j
-    point_loads: list = field(default_factory=list)  # list[PointLoadData]
+    point_loads:   list = field(default_factory=list)  # list[PointLoadData]
+    partial_loads: list = field(default_factory=list)  # list[PartialDistLoad]
 
     def is_zero(self) -> bool:
         return (self.w_start == 0.0 and self.w_end == 0.0
                 and self.qx_start == 0.0 and self.qx_end == 0.0
                 and self.qy_start == 0.0 and self.qy_end == 0.0
                 and self.qz_start == 0.0 and self.qz_end == 0.0
-                and not self.point_loads)
+                and not self.point_loads
+                and not self.partial_loads)
 
 
 # ── Load category (EN 1990) ───────────────────────────────────────────────────
@@ -144,6 +160,11 @@ class LoadCase:
                          "magnitude": pl.magnitude}
                         for pl in ml.point_loads
                     ],
+                    "partial_loads": [
+                        {"start_pos": p.start_pos, "end_pos": p.end_pos,
+                         "w_start": p.w_start, "w_end": p.w_end}
+                        for p in ml.partial_loads
+                    ],
                 }
                 for mid, ml in self.member_loads.items()
             },
@@ -176,6 +197,15 @@ class LoadCase:
                 )
                 for pl in ml_data.get("point_loads", [])
             ]
+            partial_loads = [
+                PartialDistLoad(
+                    start_pos=p["start_pos"],
+                    end_pos=p["end_pos"],
+                    w_start=p["w_start"],
+                    w_end=p["w_end"],
+                )
+                for p in ml_data.get("partial_loads", [])
+            ]
             lc.member_loads[int(mid_str)] = MemberLoad(
                 w_start=ml_data.get("w_start", 0.0),
                 w_end=ml_data.get("w_end", 0.0),
@@ -186,6 +216,7 @@ class LoadCase:
                 qz_start=ml_data.get("qz_start", 0.0),
                 qz_end=ml_data.get("qz_end", 0.0),
                 point_loads=point_loads,
+                partial_loads=partial_loads,
             )
         return lc
 

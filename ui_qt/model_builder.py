@@ -22,7 +22,7 @@ from elements.bar_element import BarElement
 
 from ui_qt.model_state import (
     ModelState, SupportType, ElementType,
-    LoadCase, NodeLoad, MemberLoad, PointLoadData, LoadCombination,
+    LoadCase, NodeLoad, MemberLoad, PointLoadData, PartialDistLoad, LoadCombination,
 )
 
 
@@ -209,6 +209,64 @@ def build_model(state: ModelState,
                     position=local_pos,
                 ))
 
+        # Partial-span distributed loads (local ⊥ to member, same convention as w).
+        # Each PartialDistLoad specifies an intensity ramp over a fraction [a, b] of
+        # the member.  Strategy:
+        #   • Sub-elements fully within [a, b] → exact UDL / UVL.
+        #   • Sub-elements partially overlapping [a, b] → single equivalent point
+        #     force at the centroid of the loaded portion (error O(L_sub²), <1 % with
+        #     n_sub ≥ 10).
+        for pdl in ml.partial_loads:
+            a = max(0.0, min(1.0, pdl.start_pos))
+            b = max(0.0, min(1.0, pdl.end_pos))
+            if b <= a + 1e-12:
+                continue
+            w_a, w_b = pdl.w_start, pdl.w_end
+
+            for k in range(n_sub):
+                t_k  = k       / n_sub
+                t_k1 = (k + 1) / n_sub
+                ol_s = max(a, t_k)
+                ol_e = min(b, t_k1)
+                if ol_s >= ol_e - 1e-14:
+                    continue
+
+                # Intensity at overlap boundaries via linear interpolation
+                span = b - a
+                w_ol_s = w_a + (ol_s - a) / span * (w_b - w_a)
+                w_ol_e = w_a + (ol_e - a) / span * (w_b - w_a)
+
+                full = (ol_s <= t_k + 1e-12) and (ol_e >= t_k1 - 1e-12)
+                if full:
+                    if abs(w_ol_s - w_ol_e) < 1e-12:
+                        model.element_loads.append(ElementLoad(
+                            element_id=el_ids[k],
+                            load_type=LoadType.UDL,
+                            magnitude=w_ol_s,
+                        ))
+                    else:
+                        model.element_loads.append(ElementLoad(
+                            element_id=el_ids[k],
+                            load_type=LoadType.UVL,
+                            magnitude=w_ol_s,
+                            position=w_ol_e,
+                        ))
+                else:
+                    # Partial overlap → equivalent point force at centroid
+                    overlap_len = (ol_e - ol_s) * member_length
+                    w_avg = (w_ol_s + w_ol_e) / 2.0
+                    P = w_avg * overlap_len
+                    if abs(P) < 1e-12:
+                        continue
+                    centroid_t = (ol_s + ol_e) / 2.0
+                    local_pos  = (centroid_t - t_k) * member_length
+                    model.element_loads.append(ElementLoad(
+                        element_id=el_ids[k],
+                        load_type=LoadType.POINT_FORCE,
+                        magnitude=P,
+                        position=local_pos,
+                    ))
+
         # Lateral (global X) distributed load: lump as nodal X-forces per sub-element.
         # Accuracy increases with n_sub (trapezoidal integration → exact in the limit).
         if ml.qx_start != 0.0 or ml.qx_end != 0.0:
@@ -359,16 +417,21 @@ def _merge_load_case_into(
             PointLoadData(pl.load_type, pl.position, factor * pl.magnitude)
             for pl in ml.point_loads
         ]
+        scaled_pdl = [
+            PartialDistLoad(p.start_pos, p.end_pos, factor * p.w_start, factor * p.w_end)
+            for p in ml.partial_loads
+        ]
         target.member_loads[mid] = MemberLoad(
-            w_start     = ex.w_start   + factor * ml.w_start,
-            w_end       = ex.w_end     + factor * ml.w_end,
-            qx_start    = ex.qx_start  + factor * ml.qx_start,
-            qx_end      = ex.qx_end    + factor * ml.qx_end,
-            qy_start    = ex.qy_start  + factor * ml.qy_start,
-            qy_end      = ex.qy_end    + factor * ml.qy_end,
-            qz_start    = ex.qz_start  + factor * ml.qz_start,
-            qz_end      = ex.qz_end    + factor * ml.qz_end,
-            point_loads = ex.point_loads + scaled_pl,
+            w_start       = ex.w_start   + factor * ml.w_start,
+            w_end         = ex.w_end     + factor * ml.w_end,
+            qx_start      = ex.qx_start  + factor * ml.qx_start,
+            qx_end        = ex.qx_end    + factor * ml.qx_end,
+            qy_start      = ex.qy_start  + factor * ml.qy_start,
+            qy_end        = ex.qy_end    + factor * ml.qy_end,
+            qz_start      = ex.qz_start  + factor * ml.qz_start,
+            qz_end        = ex.qz_end    + factor * ml.qz_end,
+            point_loads   = ex.point_loads   + scaled_pl,
+            partial_loads = ex.partial_loads + scaled_pdl,
         )
 
 
