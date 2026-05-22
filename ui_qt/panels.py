@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QBrush, QColor, QFont, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
@@ -892,12 +892,13 @@ class ResultsPanel(QWidget):
 
         self._disp_table  = self._make_table(["Node", "dx (mm)", "dy (mm)", "θ (mrad)"])
         self._react_table = self._make_table(["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"])
-        # Columns grouped by force type so both ends are adjacent
+        # N/V as end pairs; M replaced by peak sagging M+, peak hogging M- with x/L positions
         self._force_table = self._make_table([
             "Member",
             "N_i (kN)", "N_j (kN)",
             "V_i (kN)", "V_j (kN)",
-            "M_i (kN·m)", "M_j (kN·m)",
+            "M+ (kN·m)", "@ x/L",
+            "M- (kN·m)", "@ x/L",
         ])
 
         self._tabs.addTab(self._wrap(self._disp_table),  "Displacements")
@@ -949,10 +950,11 @@ class ResultsPanel(QWidget):
     # ── public ────────────────────────────────────────────────────────────────
 
     def populate(self, displacements, reactions, member_results, model_state,
-                 dpn: int = 3, **_kwargs) -> None:
+                 dpn: int = 3, **kwargs) -> None:
         """Fill all three tables with solver results and rebuild row→ID maps.
 
         dpn: degrees of freedom per node — 3 for 2D models, 6 for 3D models.
+        kwargs: sub_results, member_el_map — used for peak moment scanning.
         """
         self._restore_force_tab()
         for tbl in (self._disp_table, self._react_table, self._force_table):
@@ -988,16 +990,90 @@ class ResultsPanel(QWidget):
                           [str(nd.id), f"{fx:.3f}", f"{fy:.3f}", f"{m:.3f}"])
             self._react_row_to_node.append(nd.id)
 
-        # ── Member forces — one row per member, grouped by force type ──────────
-        self._force_table.setRowCount(len(member_results))
+        # ── Member forces — peak M scan using sub-element endpoints ─────────────
+        sub_results    = kwargs.get('sub_results')
+        member_el_map  = kwargs.get('member_el_map')
+        sub_by_id: dict = {r.element_id: r for r in sub_results} if sub_results else {}
+
+        n_members = len(member_results)
+        self._force_table.setRowCount(n_members + (2 if n_members > 0 else 0))
+
+        # Per-column value lists for footer (cols 1-4 = N/V, 5 = M+, 7 = M-)
+        col_vals: dict[int, list[float]] = {1: [], 2: [], 3: [], 4: [], 5: [], 7: []}
+        xL_plus:  list[float] = []  # x/L where M+ peak occurs per member
+        xL_minus: list[float] = []  # x/L where M- peak occurs per member
+
         for row, res in enumerate(member_results):
+            mid  = res.element_id
+            N_i  = res.N_i / 1e3
+            N_j  = res.N_j / 1e3
+            V_i  = res.V_i / 1e3
+            V_j  = res.V_j / 1e3
+
+            # Scan sub-element endpoints for peak sagging (M+) and hogging (M-)
+            M_plus  = 0.0;  xL_p = 0.0
+            M_minus = 0.0;  xL_m = 0.0
+
+            if member_el_map and sub_by_id and row < len(member_el_map):
+                sub_ids = member_el_map[row]
+                n_sub   = len(sub_ids)
+                for k, sid in enumerate(sub_ids):
+                    sr = sub_by_id.get(sid)
+                    if sr is None:
+                        continue
+                    for m_val, pos in [(sr.M_i, k / n_sub), (sr.M_j, (k + 1) / n_sub)]:
+                        if m_val > M_plus:
+                            M_plus = m_val;  xL_p = pos
+                        if m_val < M_minus:
+                            M_minus = m_val; xL_m = pos
+            else:
+                # fallback: only end-force values available
+                for m_val, pos in [(res.M_i, 0.0), (res.M_j, 1.0)]:
+                    if m_val > M_plus:
+                        M_plus = m_val;  xL_p = pos
+                    if m_val < M_minus:
+                        M_minus = m_val; xL_m = pos
+
+            Mp_kNm = M_plus  / 1e3
+            Mm_kNm = M_minus / 1e3
+
             self._set_row(self._force_table, row, [
-                str(res.element_id),
-                f"{res.N_i/1e3:.3f}", f"{res.N_j/1e3:.3f}",
-                f"{res.V_i/1e3:.3f}", f"{res.V_j/1e3:.3f}",
-                f"{res.M_i/1e3:.3f}", f"{res.M_j/1e3:.3f}",
+                str(mid),
+                f"{N_i:.3f}", f"{N_j:.3f}",
+                f"{V_i:.3f}", f"{V_j:.3f}",
+                f"{Mp_kNm:.3f}", f"{xL_p:.2f}",
+                f"{Mm_kNm:.3f}", f"{xL_m:.2f}",
             ])
-            self._force_row_to_member.append(res.element_id)
+            self._force_row_to_member.append(mid)
+
+            col_vals[1].append(N_i);  col_vals[2].append(N_j)
+            col_vals[3].append(V_i);  col_vals[4].append(V_j)
+            col_vals[5].append(Mp_kNm)
+            col_vals[7].append(Mm_kNm)
+            xL_plus.append(xL_p);    xL_minus.append(xL_m)
+
+        # Footer Max / Min rows
+        if n_members > 0:
+            max_v = {c: max(col_vals[c]) for c in col_vals}
+            min_v = {c: min(col_vals[c]) for c in col_vals}
+            # x/L for the member whose M+ is max, and whose M- is min (worst hogging)
+            xL_max_plus  = xL_plus [col_vals[5].index(max_v[5])]
+            xL_min_minus = xL_minus[col_vals[7].index(min_v[7])]
+            # x/L for the member whose M+ is min, and whose M- is max (least hogging)
+            xL_min_plus  = xL_plus [col_vals[5].index(min_v[5])]
+            xL_max_minus = xL_minus[col_vals[7].index(max_v[7])]
+            self._set_footer_row(self._force_table, n_members, "Max", [
+                f"{max_v[1]:.3f}", f"{max_v[2]:.3f}",
+                f"{max_v[3]:.3f}", f"{max_v[4]:.3f}",
+                f"{max_v[5]:.3f}", f"{xL_max_plus:.2f}",
+                f"{max_v[7]:.3f}", f"{xL_max_minus:.2f}",
+            ], bg="#2a1f00", fg="#ffb300")
+            self._set_footer_row(self._force_table, n_members + 1, "Min", [
+                f"{min_v[1]:.3f}", f"{min_v[2]:.3f}",
+                f"{min_v[3]:.3f}", f"{min_v[4]:.3f}",
+                f"{min_v[5]:.3f}", f"{xL_min_plus:.2f}",
+                f"{min_v[7]:.3f}", f"{xL_min_minus:.2f}",
+            ], bg="#001a2a", fg="#64b5f6")
 
         for tbl in (self._disp_table, self._react_table, self._force_table):
             tbl.blockSignals(False)
@@ -1112,7 +1188,7 @@ class ResultsPanel(QWidget):
         self._tabs.setCurrentIndex(2)   # jump straight to Member forces ▲
 
     def _restore_force_tab(self) -> None:
-        """Swap the Member forces tab back to the standard 7-column table."""
+        """Swap the Member forces tab back to the standard 9-column peak-moment table."""
         if self._env_force_table is None:
             return
         if self._tabs.tabText(2) == "Member forces ▲":
@@ -1222,6 +1298,23 @@ class ResultsPanel(QWidget):
         for col, val in enumerate(values):
             item = QTableWidgetItem(val)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(row, col, item)
+
+    @staticmethod
+    def _set_footer_row(table: QTableWidget, row: int, label: str,
+                        values: list[str], bg: str, fg: str) -> None:
+        """Insert a styled Max/Min summary row.  Col 0 = label, cols 1+ = values."""
+        bg_brush = QBrush(QColor(bg))
+        fg_brush = QBrush(QColor(fg))
+        font = QFont()
+        font.setBold(True)
+        for col in range(table.columnCount()):
+            text = label if col == 0 else (values[col - 1] if col - 1 < len(values) else "—")
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item.setBackground(bg_brush)
+            item.setForeground(fg_brush)
+            item.setFont(font)
             table.setItem(row, col, item)
 
     @staticmethod
