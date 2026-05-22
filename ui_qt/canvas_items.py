@@ -674,11 +674,10 @@ class MemberItem(QGraphicsLineItem):
                 color or QColor("#FF6F00"), "kN/m Y", perp_offset, lc_name,
             )
 
-        # Draw qz arrows (3D only) — straight up/down on screen
+        # Draw qz arrows (3D only) — positive = downward (gravity convention, same as w)
         if in_3d and (ml.qz_start != 0.0 or ml.qz_end != 0.0):
-            gdir = _proj_z_screen_dir()
             self._draw_global_axis_arrows(
-                ml.qz_start, ml.qz_end, gdir,
+                ml.qz_start, ml.qz_end, (0.0, 1.0),  # screen-down = gravity direction
                 self._qz_items, self._qz_label_items,
                 color or QColor("#1565C0"), "kN/m Z", perp_offset, lc_name,
             )

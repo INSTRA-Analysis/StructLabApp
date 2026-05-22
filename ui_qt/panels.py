@@ -349,7 +349,7 @@ class _MemberForm(QWidget):
         lf.addRow("", QLabel("Global Y (↗ depth)  —  + into scene  (3D)"))   # row 8
         lf.addRow("qz start (kN/m):", self._qz_start)                         # row 9
         lf.addRow("qz end   (kN/m):", self._qz_end)                           # row 10
-        lf.addRow("", QLabel("Global Z (↑ up)  —  + upward  (3D)"))          # row 11
+        lf.addRow("", QLabel("Global Z (↓ gravity)  —  + downward  (3D)"))          # row 11
         lf.setRowVisible(6,  mode_3d)
         lf.setRowVisible(7,  mode_3d)
         lf.setRowVisible(8,  mode_3d)
@@ -691,7 +691,7 @@ class _MultiMemberForm(QWidget):
         lf.addRow("", QLabel("Global Y (↗ depth)  —  + into scene  (3D)"))
         lf.addRow("qz start (kN/m):", self._qz_start)
         lf.addRow("qz end   (kN/m):", self._qz_end)
-        lf.addRow("", QLabel("Global Z (↑ up)  —  + upward  (3D)"))
+        lf.addRow("", QLabel("Global Z (↓ gravity)  —  + downward  (3D)"))
         lf.setRowVisible(6,  mode_3d)
         lf.setRowVisible(7,  mode_3d)
         lf.setRowVisible(8,  mode_3d)
