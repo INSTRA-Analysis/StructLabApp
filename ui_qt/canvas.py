@@ -10,14 +10,14 @@ from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsView,
-    QGraphicsLineItem,
+    QGraphicsLineItem, QMenu,
 )
 from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform
 
 from ui_qt.model_state import (
     ModelState, NodeData, MemberData,
-    ElementType,
+    ElementType, SupportType,
 )
 
 from ui_qt.canvas_items import (
@@ -769,6 +769,137 @@ class StructCanvas(QGraphicsScene):
     def get_member_item(self, member_id: int) -> MemberItem | None:
         return self._member_items.get(member_id)
 
+    # ── modeling tools ────────────────────────────────────────────────────────
+
+    def subdivide_member(self, member_id: int,
+                         n_divisions: int,
+                         nodes_only: bool = False) -> None:
+        """Split a member into n_divisions segments with intermediate nodes.
+
+        If nodes_only=True the original member is removed and only the
+        intermediate nodes are placed — no sub-members created.
+        """
+        ms = self.model_state
+        member = ms.get_member(member_id)
+        if member is None or n_divisions < 2:
+            return
+
+        self.save_snapshot()
+        self._suppress_changed = True
+
+        ni = ms.get_node(member.node_i)
+        nj = ms.get_node(member.node_j)
+
+        # Create intermediate nodes
+        inter: list[NodeData] = []
+        for k in range(1, n_divisions):
+            t = k / n_divisions
+            new_nd = ms.add_node(
+                ni.x + t * (nj.x - ni.x),
+                ni.y + t * (nj.y - ni.y),
+                ni.z + t * (nj.z - ni.z),
+            )
+            self._add_node_item(new_nd)
+            inter.append(new_nd)
+
+        if not nodes_only:
+            chain = [ni] + inter + [nj]
+            for k in range(n_divisions):
+                nm = ms.add_member(chain[k].id, chain[k + 1].id)
+                if nm:
+                    nm.element_type = member.element_type
+                    nm.E = member.E
+                    nm.A = member.A
+                    nm.I = member.I
+                    nm.I_y = member.I_y
+                    nm.J = member.J
+                    nm.n_sub = member.n_sub
+                    nm.density = member.density
+                    nm.beta_angle = member.beta_angle
+                    self._add_member_item(nm)
+
+        # Remove original member
+        mi = self._member_items.pop(member_id, None)
+        if mi:
+            mi.remove_extra_items()
+            self.removeItem(mi)
+        ms.remove_member(member_id)
+
+        self._suppress_changed = False
+        self.model_changed.emit()
+
+    def mirror_selection(self, plane: str,
+                         offset: float,
+                         keep_original: bool) -> None:
+        """Mirror selected nodes and members about the given plane.
+
+        plane : 'XY' | 'XZ' | 'YZ'
+        offset: coordinate of the mirror plane on the locked axis
+        """
+        ms = self.model_state
+        sel_nodes   = [it.node   for it in self.selectedItems() if isinstance(it, NodeItem)]
+        sel_members = [it.member for it in self.selectedItems() if isinstance(it, MemberItem)]
+        if not sel_nodes and not sel_members:
+            return
+
+        # Include endpoints of selected members even if nodes not explicitly selected
+        extra_node_ids = {m.node_i for m in sel_members} | {m.node_j for m in sel_members}
+        all_src_nodes  = {n.id: n for n in sel_nodes}
+        for nid in extra_node_ids:
+            nd = ms.get_node(nid)
+            if nd:
+                all_src_nodes[nid] = nd
+
+        self.save_snapshot()
+        self._suppress_changed = True
+
+        def _mirror_coord(x: float, y: float, z: float) -> tuple[float, float, float]:
+            if plane == "XY":
+                return x, y, 2 * offset - z
+            if plane == "XZ":
+                return x, 2 * offset - y, z
+            return 2 * offset - x, y, z  # YZ
+
+        id_map: dict[int, int] = {}
+        for src_id, src in all_src_nodes.items():
+            mx, my, mz = _mirror_coord(src.x, src.y, src.z)
+            existing = ms.node_at(mx, my, mz)
+            if existing:
+                id_map[src_id] = existing.id
+            else:
+                new_nd = ms.add_node(mx, my, mz)
+                self._add_node_item(new_nd)
+                id_map[src_id] = new_nd.id
+
+        for m in sel_members:
+            ni_id = id_map.get(m.node_i)
+            nj_id = id_map.get(m.node_j)
+            if ni_id is None or nj_id is None:
+                continue
+            nm = ms.add_member(ni_id, nj_id)
+            if nm:
+                nm.element_type = m.element_type
+                nm.E = m.E; nm.A = m.A; nm.I = m.I
+                nm.I_y = m.I_y; nm.J = m.J
+                nm.n_sub = m.n_sub; nm.density = m.density
+                nm.beta_angle = m.beta_angle
+                self._add_member_item(nm)
+
+        if not keep_original:
+            for m in list(sel_members):
+                mi = self._member_items.pop(m.id, None)
+                if mi:
+                    mi.remove_extra_items(); self.removeItem(mi)
+                ms.remove_member(m.id)
+            for src_id in list(all_src_nodes):
+                ni = self._node_items.pop(src_id, None)
+                if ni:
+                    ni.remove_extra_items(); self.removeItem(ni)
+                ms.remove_node(src_id)
+
+        self._suppress_changed = False
+        self.model_changed.emit()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # StructView
@@ -1073,3 +1204,96 @@ class StructView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    # ── right-click context menu ──────────────────────────────────────────────
+
+    def contextMenuEvent(self, event) -> None:
+        scene = self.scene()
+        sel   = scene.selectedItems()
+        nodes   = [it.node   for it in sel if isinstance(it, NodeItem)]
+        members = [it.member for it in sel if isinstance(it, MemberItem)]
+        is_3d   = scene.model_state.mode_3d
+
+        menu = QMenu(self)
+
+        # ── Delete ────────────────────────────────────────────────────────────
+        if nodes or members:
+            lbl = "Delete"
+            if nodes and not members:
+                lbl = f"Delete {len(nodes)} node(s)"
+            elif members and not nodes:
+                lbl = f"Delete {len(members)} member(s)"
+            act_del = menu.addAction(lbl)
+            act_del.setShortcut("Del")
+            act_del.triggered.connect(scene._delete_selected)
+            menu.addSeparator()
+
+        # ── Set Support (nodes only) ──────────────────────────────────────────
+        if nodes:
+            sup_menu = menu.addMenu("Set Support")
+            _SUPPORT_LABELS = [
+                ("Fixed",    SupportType.FIXED),
+                ("Pinned",   SupportType.PINNED),
+                ("Roller X", SupportType.ROLLER_X),
+                ("Roller Y", SupportType.ROLLER_Y),
+                ("None",     SupportType.FREE),
+            ]
+            if is_3d:
+                _SUPPORT_LABELS.insert(4, ("Roller Z", SupportType.ROLLER_Z))
+            for label, stype in _SUPPORT_LABELS:
+                a = sup_menu.addAction(label)
+                a.triggered.connect(
+                    lambda _checked=False, st=stype: self._set_support(nodes, st)
+                )
+            menu.addSeparator()
+
+        # ── Modeling tools (members selected) ────────────────────────────────
+        if members:
+            act_sub = menu.addAction("Subdivide…")
+            act_sub.triggered.connect(
+                lambda _checked=False, ms=members: self._on_subdivide(ms)
+            )
+            menu.addSeparator()
+
+        # ── Mirror (any selection) ────────────────────────────────────────────
+        if nodes or members:
+            act_mir = menu.addAction("Mirror…")
+            act_mir.triggered.connect(
+                lambda _checked=False: self._on_mirror(is_3d)
+            )
+
+        # ── Paste ─────────────────────────────────────────────────────────────
+        mw = self.window()
+        if hasattr(mw, '_on_paste') and hasattr(mw, '_clipboard') and mw._clipboard:
+            if nodes or members:
+                menu.addSeparator()
+            menu.addAction("Paste").triggered.connect(mw._on_paste)
+
+        if not menu.isEmpty():
+            menu.exec(event.globalPos())
+
+    def _set_support(self, nodes: list, stype: SupportType) -> None:
+        scene = self.scene()
+        scene.save_snapshot()
+        for nd in nodes:
+            nd.support_type = stype
+            item = scene.get_node_item(nd.id)
+            if item:
+                item._draw_support_symbol()
+        scene.model_changed.emit()
+
+    def _on_subdivide(self, members: list) -> None:
+        from ui_qt.dialogs import SubdivideDialog
+        dlg = SubdivideDialog(self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        scene = self.scene()
+        for m in members:
+            scene.subdivide_member(m.id, dlg.n_divisions, dlg.nodes_only)
+
+    def _on_mirror(self, is_3d: bool) -> None:
+        from ui_qt.dialogs import MirrorDialog
+        dlg = MirrorDialog(self, is_3d=is_3d)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        self.scene().mirror_selection(dlg.plane, dlg.offset, dlg.keep_original)

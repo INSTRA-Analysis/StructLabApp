@@ -9,7 +9,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHeaderView,
+    QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHeaderView,
     QHBoxLayout, QLabel, QLineEdit, QComboBox, QDoubleSpinBox,
     QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QTextEdit, QVBoxLayout,
@@ -289,3 +289,111 @@ class DuplicateDialog(QDialog):
     @property
     def copies(self) -> int:
         return self._copies_spin.value()
+
+
+# ── Subdivide dialog ──────────────────────────────────────────────────────────
+
+class SubdivideDialog(QDialog):
+    """Ask the user how many divisions to cut a member into."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Subdivide Member")
+        self.setFixedWidth(280)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self._div_spin = QSpinBox()
+        self._div_spin.setRange(2, 50)
+        self._div_spin.setValue(4)
+        form.addRow("Divisions:", self._div_spin)
+        layout.addLayout(form)
+
+        self._nodes_only = QCheckBox("Nodes only  (remove sub-member segments)")
+        layout.addWidget(self._nodes_only)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Subdivide")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    @property
+    def n_divisions(self) -> int:
+        return self._div_spin.value()
+
+    @property
+    def nodes_only(self) -> bool:
+        return self._nodes_only.isChecked()
+
+
+# ── Mirror dialog ─────────────────────────────────────────────────────────────
+
+class MirrorDialog(QDialog):
+    """Ask the user for mirror plane, offset, and whether to keep the original."""
+
+    def __init__(self, parent=None, is_3d: bool = True) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Mirror Selection")
+        self.setFixedWidth(280)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        plane_box = QGroupBox("Mirror plane")
+        plane_row = QHBoxLayout(plane_box)
+        self._plane_btns: dict[str, QRadioButton] = {}
+        planes = ["XY", "XZ", "YZ"] if is_3d else ["XY"]
+        for pl in planes:
+            rb = QRadioButton(pl)
+            plane_row.addWidget(rb)
+            self._plane_btns[pl] = rb
+        default = "XZ" if is_3d else "XY"
+        self._plane_btns[default].setChecked(True)
+        layout.addWidget(plane_box)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        self._offset_spin = QDoubleSpinBox()
+        self._offset_spin.setRange(-1000.0, 1000.0)
+        self._offset_spin.setSingleStep(0.5)
+        self._offset_spin.setDecimals(2)
+        self._offset_spin.setSuffix(" m")
+        self._offset_spin.setValue(0.0)
+        form.addRow("Plane offset:", self._offset_spin)
+        layout.addLayout(form)
+
+        self._keep_orig = QCheckBox("Keep original")
+        self._keep_orig.setChecked(True)
+        layout.addWidget(self._keep_orig)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Mirror")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    @property
+    def plane(self) -> str:
+        for pl, rb in self._plane_btns.items():
+            if rb.isChecked():
+                return pl
+        return "XZ"
+
+    @property
+    def offset(self) -> float:
+        return self._offset_spin.value()
+
+    @property
+    def keep_original(self) -> bool:
+        return self._keep_orig.isChecked()
