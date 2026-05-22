@@ -90,6 +90,13 @@ class StructCanvas(QGraphicsScene):
         self._redo_stack: list[dict] = []
         self._drag_snapshot_saved: bool = False  # avoid duplicate snapshots per drag
 
+        # ── G-grab state ──────────────────────────────────────────────────────
+        self._grab_active: bool = False
+        self._grab_axis: str | None = None          # None, 'X', 'Y', or 'Z'
+        self._grab_origin_pos: QPointF | None = None
+        self._grab_node_origins: dict[int, tuple[float, float, float]] = {}
+        self._grab_typed: str = ""                  # accumulated numeric input
+
         # ── overlay state ─────────────────────────────────────────────────────
         self._overlay_items: dict[str, list] = {}
         self._overlay_visible: dict[str, bool] = {
@@ -251,6 +258,13 @@ class StructCanvas(QGraphicsScene):
     # ── mouse events ──────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event) -> None:
+        if self._grab_active:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._confirm_grab()
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._cancel_grab()
+            return
+
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
@@ -309,6 +323,8 @@ class StructCanvas(QGraphicsScene):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._grab_active and not self._grab_typed:
+            self._apply_grab(event.scenePos())
         if self._mode == CanvasMode.ADD_MEMBER and self._ghost_line and self._member_start_node:
             pos = event.scenePos()
             sx = m_to_px(self._member_start_node.x)
@@ -342,6 +358,9 @@ class StructCanvas(QGraphicsScene):
         ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         key   = event.key()
+        if self._grab_active:
+            self._handle_grab_key(key, event.text())
+            return
         if key == Qt.Key.Key_Delete:
             self.save_snapshot()
             self._delete_selected()
@@ -357,10 +376,222 @@ class StructCanvas(QGraphicsScene):
             self.undo()
         elif key == Qt.Key.Key_Y and ctrl:
             self.redo()
+        elif key == Qt.Key.Key_G and not ctrl and not shift:
+            self._start_grab()
         elif self._is_3d_mode():
             self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
+
+    # ── G-grab ────────────────────────────────────────────────────────────────
+
+    def _start_grab(self) -> None:
+        """Enter G-grab mode: move all selected nodes interactively."""
+        sel_nodes = [it.node for it in self.selectedItems()
+                     if isinstance(it, NodeItem)]
+        if not sel_nodes:
+            return
+        views = self.views()
+        if not views:
+            return
+        from PyQt6.QtGui import QCursor
+        view = views[0]
+        scene_pos = view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+        self.save_snapshot()
+        self._grab_active    = True
+        self._grab_axis      = None
+        self._grab_origin_pos = scene_pos
+        self._grab_node_origins = {n.id: (n.x, n.y, n.z) for n in sel_nodes}
+        self._grab_typed     = ""
+        self.invalidate(self.sceneRect())
+
+    def _apply_grab(self, current_pos: QPointF) -> None:
+        """Reposition grabbed nodes to follow the mouse, respecting axis lock."""
+        if not self._grab_active or self._grab_origin_pos is None:
+            return
+        dsx = current_pos.x() - self._grab_origin_pos.x()
+        dsy = current_pos.y() - self._grab_origin_pos.y()
+        self._move_grabbed_nodes_screen(dsx, dsy)
+
+    def _move_grabbed_nodes_screen(self, dsx: float, dsy: float) -> None:
+        """Convert a screen (dsx, dsy) delta to world (dx, dy, dz) and apply."""
+        axis  = self._grab_axis
+        is_3d = self._is_3d_mode()
+        ppm   = PX_PER_M
+
+        if is_3d:
+            az = math.radians(_proj.ISO_AZIMUTH)
+            el = math.radians(_proj.ISO_ELEVATION)
+            cos_az, sin_az = math.cos(az), math.sin(az)
+            cos_el, sin_el = math.cos(el), math.sin(el)
+
+            if axis == 'X':
+                # screen dir of X axis: (cos_az, -sin_az*sin_el)
+                mag2 = cos_az**2 + (sin_az * sin_el)**2
+                if mag2 < 1e-9: return
+                dx = (dsx * cos_az + dsy * (-sin_az * sin_el)) / (ppm * mag2)
+                dy = dz = 0.0
+            elif axis == 'Y':
+                # screen dir of Y axis: (sin_az, cos_az*sin_el)
+                mag2 = sin_az**2 + (cos_az * sin_el)**2
+                if mag2 < 1e-9: return
+                dy = (dsx * sin_az + dsy * cos_az * sin_el) / (ppm * mag2)
+                dx = dz = 0.0
+            elif axis == 'Z':
+                # screen dir of Z axis: (0, -cos_el)
+                if abs(cos_el) < 1e-9: return
+                dz = -dsy / (ppm * cos_el)
+                dx = dy = 0.0
+            else:
+                # Free: project onto active workplane
+                plane = self._working_plane
+                z_val = self._plane_offset
+                if plane == WorkingPlane.XZ:
+                    # Solve: dsx = cos_az*dx*ppm ; dsy = (-sin_az*sin_el*dx - cos_el*dz)*ppm
+                    if abs(cos_az * cos_el) < 1e-9: return
+                    dx = (dsx / ppm) / cos_az
+                    dz = (dsy / ppm - (-sin_az * sin_el) * dx) / (-cos_el)
+                    dy = 0.0
+                elif plane == WorkingPlane.YZ:
+                    # Solve: dsx = sin_az*dy*ppm ; dsy = (cos_az*sin_el*dy - cos_el*dz)*ppm
+                    if abs(sin_az * cos_el) < 1e-9: return
+                    dy = (dsx / ppm) / sin_az
+                    dz = (dsy / ppm - cos_az * sin_el * dy) / (-cos_el)
+                    dx = 0.0
+                else:
+                    # XY / FREE — use inverse projection at fixed z
+                    assert self._grab_origin_pos is not None
+                    ox, oy = inverse_isometric(
+                        self._grab_origin_pos.x(), self._grab_origin_pos.y(),
+                        z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
+                    )
+                    cx, cy = inverse_isometric(
+                        self._grab_origin_pos.x() + dsx,
+                        self._grab_origin_pos.y() + dsy,
+                        z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
+                    )
+                    dx, dy, dz = cx - ox, cy - oy, 0.0
+        else:
+            # 2D mode
+            if axis == 'X':
+                dx, dy, dz = dsx / ppm, 0.0, 0.0
+            elif axis == 'Y':
+                dx, dy, dz = 0.0, -dsy / ppm, 0.0
+            else:
+                dx, dy, dz = dsx / ppm, -dsy / ppm, 0.0
+
+        self._apply_delta_to_grabbed(dx, dy, dz)
+
+    def _apply_delta_to_grabbed(self, dx: float, dy: float, dz: float) -> None:
+        """Apply world-space (dx, dy, dz) to all grabbed nodes from their origins."""
+        ms = self.model_state
+        self._suppress_changed = True
+        try:
+            for nid, (ox, oy, oz) in self._grab_node_origins.items():
+                node = ms.get_node(nid)
+                if node:
+                    node.x = ox + dx
+                    node.y = oy + dy
+                    node.z = oz + dz
+                    item = self._node_items.get(nid)
+                    if item:
+                        item.refresh()
+        finally:
+            self._suppress_changed = False
+        self.update_depth_order()
+        self.invalidate(self.sceneRect())
+
+    def _apply_grab_typed_value(self) -> None:
+        """Apply the typed numeric distance along the active constraint axis."""
+        try:
+            dist = float(self._grab_typed)
+        except ValueError:
+            return
+        axis = self._grab_axis
+        if axis == 'X':
+            self._apply_delta_to_grabbed(dist, 0.0, 0.0)
+        elif axis == 'Y':
+            self._apply_delta_to_grabbed(0.0, dist, 0.0)
+        elif axis == 'Z':
+            self._apply_delta_to_grabbed(0.0, 0.0, dist)
+
+    def _confirm_grab(self) -> None:
+        """Commit the grab: snap to 0.25 m grid and emit model_changed."""
+        if not self._grab_active:
+            return
+        self._grab_active = False
+        ms = self.model_state
+        for nid in self._grab_node_origins:
+            node = ms.get_node(nid)
+            if node:
+                node.x = round(node.x / 0.25) * 0.25
+                node.y = round(node.y / 0.25) * 0.25
+                node.z = round(node.z / 0.25) * 0.25
+                item = self._node_items.get(nid)
+                if item:
+                    item.refresh()
+        self._grab_node_origins = {}
+        self._grab_origin_pos   = None
+        self._grab_axis         = None
+        self._grab_typed        = ""
+        self.update_depth_order()
+        self.invalidate(self.sceneRect())
+        self.model_changed.emit()
+
+    def _cancel_grab(self) -> None:
+        """Cancel grab: restore original positions via undo."""
+        if not self._grab_active:
+            return
+        self._grab_active = False
+        self._grab_node_origins = {}
+        self._grab_origin_pos   = None
+        self._grab_axis         = None
+        self._grab_typed        = ""
+        self.undo()
+
+    def _handle_grab_key(self, key: int, text: str) -> None:
+        """Dispatch key events while grab mode is active."""
+        K = Qt.Key
+        if key in (K.Key_Return, K.Key_Enter):
+            if self._grab_typed:
+                self._apply_grab_typed_value()
+            self._confirm_grab()
+        elif key == K.Key_Escape:
+            self._cancel_grab()
+        elif key in (K.Key_X, K.Key_Y, K.Key_Z):
+            new_axis = text.upper()
+            # Toggle: pressing same axis again removes constraint
+            self._grab_axis = None if self._grab_axis == new_axis else new_axis
+            self._grab_typed = ""
+            # Re-apply from current mouse position
+            views = self.views()
+            if views:
+                from PyQt6.QtGui import QCursor
+                scene_pos = views[0].mapToScene(
+                    views[0].mapFromGlobal(QCursor.pos())
+                )
+                self._apply_grab(scene_pos)
+            self.invalidate(self.sceneRect())
+        elif key == K.Key_Backspace:
+            self._grab_typed = self._grab_typed[:-1]
+            if self._grab_typed:
+                self._apply_grab_typed_value()
+            else:
+                # Revert to mouse-driven
+                views = self.views()
+                if views:
+                    from PyQt6.QtGui import QCursor
+                    scene_pos = views[0].mapToScene(
+                        views[0].mapFromGlobal(QCursor.pos())
+                    )
+                    self._apply_grab(scene_pos)
+        elif text in '0123456789':
+            self._grab_typed += text
+            self._apply_grab_typed_value()
+        elif text == '-' and not self._grab_typed:
+            self._grab_typed = '-'
+        elif text == '.' and '.' not in self._grab_typed:
+            self._grab_typed += '.'
 
     def _is_3d_mode(self) -> bool:
         ms = self.model_state
@@ -993,6 +1224,37 @@ class StructView(QGraphicsView):
             self._draw_iso_grid(painter, rect)
         else:
             self._draw_flat_grid(painter, rect)
+
+        if self.scene()._grab_active:
+            self._draw_grab_status(painter, rect)
+
+    def _draw_grab_status(self, painter: QPainter, rect) -> None:
+        """Draw G-grab status bar at the bottom-left of the viewport."""
+        scene = self.scene()
+        axis   = scene._grab_axis
+        typed  = scene._grab_typed
+        scale  = self.transform().m11()
+
+        _axis_color = {'X': "#FF4444", 'Y': "#44EE44", 'Z': "#4488FF", None: "#00CCCC"}
+        pen = QPen(QColor(_axis_color.get(axis, "#00CCCC")))
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        if typed:
+            status = f"GRAB  {axis or ''}  {typed}_"
+        elif axis:
+            status = f"GRAB  {axis}  (move mouse or type distance)"
+        else:
+            status = "GRAB  (X/Y/Z to constrain · Enter/LMB confirm · Esc cancel)"
+
+        lbl_x = rect.left()  + 12 / scale
+        lbl_y = rect.bottom() - 14 / scale
+        painter.drawText(QPointF(lbl_x, lbl_y), status)
 
     def _draw_flat_grid(self, painter: QPainter, rect) -> None:
         """Standard rectangular 2D grid."""
