@@ -687,6 +687,16 @@ class MemberItem(QGraphicsLineItem):
         ms = self._scene.model_state
         in_3d = ms.mode_3d or is_3d_model(ms.nodes)
 
+        # Pre-compute model-wide maxima per direction so arrows on different
+        # members scale proportionally to each other (same logic as w_global_max).
+        _lc2    = ms.active_case
+        _mlist  = ms.members
+        def _gmax(attr_s: str, attr_e: str) -> float:
+            v = max((max(abs(getattr(_lc2.get_member_load(m.id), attr_s)),
+                         abs(getattr(_lc2.get_member_load(m.id), attr_e)))
+                     for m in _mlist), default=0.0)
+            return v or 0.0
+
         # Draw qx arrows
         if ml.qx_start != 0.0 or ml.qx_end != 0.0:
             gdir = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
@@ -694,6 +704,7 @@ class MemberItem(QGraphicsLineItem):
                 ml.qx_start, ml.qx_end, gdir,
                 self._qx_items, self._qx_label_items,
                 color or QColor("#E65100"), "kN/m X", perp_offset, lc_name,
+                global_max=_gmax("qx_start", "qx_end"),
             )
 
         # Draw qy arrows (3D only)
@@ -703,6 +714,7 @@ class MemberItem(QGraphicsLineItem):
                 ml.qy_start, ml.qy_end, gdir,
                 self._qy_items, self._qy_label_items,
                 color or QColor("#FF6F00"), "kN/m Y", perp_offset, lc_name,
+                global_max=_gmax("qy_start", "qy_end"),
             )
 
         # Draw qz arrows (3D only) — positive = downward (gravity convention, same as w)
@@ -711,6 +723,7 @@ class MemberItem(QGraphicsLineItem):
                 ml.qz_start, ml.qz_end, (0.0, 1.0),  # screen-down = gravity direction
                 self._qz_items, self._qz_label_items,
                 color or QColor("#1565C0"), "kN/m Z", perp_offset, lc_name,
+                global_max=_gmax("qz_start", "qz_end"),
             )
 
     def _draw_global_axis_arrows(
@@ -722,6 +735,7 @@ class MemberItem(QGraphicsLineItem):
         unit_label: str,
         perp_offset: float,
         lc_name: str,
+        global_max: float = 0.0,
     ) -> None:
         """Draw a set of distributed load arrows along the member for one global axis."""
         ni = self._scene.model_state.get_node(self.member.node_i)
@@ -742,6 +756,8 @@ class MemberItem(QGraphicsLineItem):
         q_ref = q_start if abs(q_start) >= abs(q_end) else q_end
         sign = 1.0 if q_ref > 0 else -1.0
         q_max = max(abs(q_start), abs(q_end))
+        # Use model-wide max when available so arrows across members are proportional
+        eff_max = global_max if global_max > 0 else q_max
 
         if perp_offset != 0.0:
             ix += px_n * perp_offset;  iy += py_n * perp_offset
@@ -754,7 +770,7 @@ class MemberItem(QGraphicsLineItem):
             t = i / n_arr
             bx = ix + t * dx;  by = iy + t * dy
             q_local = q_start + t * (q_end - q_start)
-            arr_len = UDL_LEN * abs(q_local) / q_max if q_max > 0 else UDL_LEN
+            arr_len = UDL_LEN * abs(q_local) / eff_max if eff_max > 0 else UDL_LEN
             tx = bx - sign * gx_sx * arr_len
             ty = by - sign * gx_sy * arr_len
             path.moveTo(tx, ty)
@@ -766,10 +782,10 @@ class MemberItem(QGraphicsLineItem):
             path.lineTo(bx, by)
             path.lineTo(back_x - perp_x * ah, back_y - perp_y * ah)
 
-        tip_ix = ix - sign * gx_sx * UDL_LEN * abs(q_start) / q_max if q_max > 0 else ix
-        tip_iy = iy - sign * gx_sy * UDL_LEN * abs(q_start) / q_max if q_max > 0 else iy
-        tip_jx = jx - sign * gx_sx * UDL_LEN * abs(q_end)   / q_max if q_max > 0 else jx
-        tip_jy = jy - sign * gx_sy * UDL_LEN * abs(q_end)   / q_max if q_max > 0 else jy
+        tip_ix = ix - sign * gx_sx * UDL_LEN * abs(q_start) / eff_max if eff_max > 0 else ix
+        tip_iy = iy - sign * gx_sy * UDL_LEN * abs(q_start) / eff_max if eff_max > 0 else iy
+        tip_jx = jx - sign * gx_sx * UDL_LEN * abs(q_end)   / eff_max if eff_max > 0 else jx
+        tip_jy = jy - sign * gx_sy * UDL_LEN * abs(q_end)   / eff_max if eff_max > 0 else jy
         path.moveTo(tip_ix, tip_iy)
         path.lineTo(tip_jx, tip_jy)
 
