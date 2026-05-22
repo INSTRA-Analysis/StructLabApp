@@ -337,11 +337,28 @@ class NodeItem(QGraphicsEllipseItem):
         ms = self._scene.model_state
         in_3d = ms.mode_3d or is_3d_model(ms.nodes)
 
+        # Scale arrow length relative to the largest nodal force in this load case
+        # so different magnitudes are visually distinguishable.
+        _lc = ms.active_case
+        _max_nf = max(
+            (max(abs(_lc.get_node_load(n.id).fx),
+                 abs(_lc.get_node_load(n.id).fy),
+                 abs(_lc.get_node_load(n.id).fz),
+                 abs(_lc.get_node_load(n.id).moment))
+             for n in ms.nodes),
+            default=1.0,
+        ) or 1.0
+        _this_f = max(abs(nl.fx), abs(nl.fy), abs(nl.fz), abs(nl.moment))
+        _f_ratio = max(0.35, _this_f / _max_nf)  # floor at 35 % so small loads stay visible
+        arr_len = ARROW_LEN * _f_ratio
+
         if nl.fx != 0.0:
+            _r = max(0.35, abs(nl.fx) / _max_nf)
+            _len = ARROW_LEN * _r
             sdx = 1.0 if nl.fx > 0 else -1.0
             dir_x, dir_y = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
-            tail_x = -sdx * dir_x * ARROW_LEN
-            tail_y = -sdx * dir_y * ARROW_LEN
+            tail_x = -sdx * dir_x * _len
+            tail_y = -sdx * dir_y * _len
             back_x = -sdx * dir_x * ah
             back_y = -sdx * dir_y * ah
             perp_x, perp_y = -dir_y, dir_x
@@ -358,10 +375,12 @@ class NodeItem(QGraphicsEllipseItem):
         if nl.fy != 0.0:
             # In 3D: fy is global Y (horizontal); project along Y screen axis.
             # In 2D: fy is vertical (screen up/down), dir = (0, -1) in Qt.
+            _r = max(0.35, abs(nl.fy) / _max_nf)
+            _len = ARROW_LEN * _r
             sdy = 1.0 if nl.fy > 0 else -1.0
             dir_x, dir_y = _proj_y_screen_dir() if in_3d else (0.0, -1.0)
-            tail_x = -sdy * dir_x * ARROW_LEN
-            tail_y = -sdy * dir_y * ARROW_LEN
+            tail_x = -sdy * dir_x * _len
+            tail_y = -sdy * dir_y * _len
             back_x = -sdy * dir_x * ah
             back_y = -sdy * dir_y * ah
             perp_x, perp_y = -dir_y, dir_x
@@ -377,13 +396,15 @@ class NodeItem(QGraphicsEllipseItem):
 
         if nl.fz != 0.0 and in_3d:
             # fz is global Z (vertical); always projects straight up/down on screen.
+            _r = max(0.35, abs(nl.fz) / _max_nf)
+            _len = ARROW_LEN * _r
             sdz = 1.0 if nl.fz > 0 else -1.0
             dir_x, dir_y = 0.0, -1.0  # +Z = screen up in Qt
-            tail_x = -sdz * dir_x * ARROW_LEN   # = 0
-            tail_y = -sdz * dir_y * ARROW_LEN   # = sdz * ARROW_LEN
-            back_x = -sdz * dir_x * ah          # = 0
-            back_y = -sdz * dir_y * ah          # = sdz * ah
-            perp_x, perp_y = -dir_y, dir_x     # = 1, 0
+            tail_x = -sdz * dir_x * _len   # = 0
+            tail_y = -sdz * dir_y * _len   # = sdz * _len
+            back_x = -sdz * dir_x * ah     # = 0
+            back_y = -sdz * dir_y * ah     # = sdz * ah
+            perp_x, perp_y = -dir_y, dir_x # = 1, 0
             path.moveTo(tail_x, tail_y)
             path.lineTo(0, 0)
             path.moveTo(back_x + perp_x * ah * 0.5, back_y + perp_y * ah * 0.5)
@@ -585,6 +606,16 @@ class MemberItem(QGraphicsLineItem):
         sign = 1.0 if w_ref > 0 else -1.0
         w_max = max(abs(w_start), abs(w_end))
 
+        # Normalise arrow lengths to the model-wide max UDL so members with
+        # different load intensities show proportionally different arrow lengths.
+        _lc2 = self._scene.model_state.active_case
+        w_global_max = max(
+            (max(abs(_lc2.get_member_load(m.id).w_start),
+                 abs(_lc2.get_member_load(m.id).w_end))
+             for m in self._scene.model_state.members),
+            default=w_max,
+        ) or w_max
+
         # Shift entire group away from member so multiple LCs stack without overlap
         if perp_offset != 0.0:
             off_x = -sign * px_n_m * perp_offset
@@ -601,7 +632,7 @@ class MemberItem(QGraphicsLineItem):
             bx = ix + t * dx
             by = iy + t * dy
             w_local = w_start + t * (w_end - w_start)
-            arr_len = UDL_LEN * abs(w_local) / w_max if w_max > 0 else UDL_LEN
+            arr_len = UDL_LEN * abs(w_local) / w_global_max if w_global_max > 0 else UDL_LEN
             tx = bx - sign * px_n * arr_len
             ty = by - sign * py_n * arr_len
             path.moveTo(tx, ty)
@@ -612,10 +643,10 @@ class MemberItem(QGraphicsLineItem):
             path.lineTo(bx - sign * px_n * ah - ux * ah,
                         by - sign * py_n * ah - uy * ah)
 
-        tip_ix = ix - sign * px_n * UDL_LEN * abs(w_start) / w_max if w_max > 0 else ix
-        tip_iy = iy - sign * py_n * UDL_LEN * abs(w_start) / w_max if w_max > 0 else iy
-        tip_jx = jx - sign * px_n * UDL_LEN * abs(w_end)   / w_max if w_max > 0 else jx
-        tip_jy = jy - sign * py_n * UDL_LEN * abs(w_end)   / w_max if w_max > 0 else jy
+        tip_ix = ix - sign * px_n * UDL_LEN * abs(w_start) / w_global_max if w_global_max > 0 else ix
+        tip_iy = iy - sign * py_n * UDL_LEN * abs(w_start) / w_global_max if w_global_max > 0 else iy
+        tip_jx = jx - sign * px_n * UDL_LEN * abs(w_end)   / w_global_max if w_global_max > 0 else jx
+        tip_jy = jy - sign * py_n * UDL_LEN * abs(w_end)   / w_global_max if w_global_max > 0 else jy
         path.moveTo(tip_ix, tip_iy)
         path.lineTo(tip_jx, tip_jy)
 
