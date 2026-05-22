@@ -1689,6 +1689,9 @@ class MainWindow(QMainWindow):
                 item.refresh()
             elif isinstance(item, MemberItem):
                 item.refresh()
+        # Redraw ALL load arrows so the model-wide max is recomputed and every
+        # member's arrow length is rescaled relative to the updated values.
+        self._scene.refresh_all_loads()
         self._sb.showMessage("Properties updated.")
 
     # ── autosave ──────────────────────────────────────────────────────────────
