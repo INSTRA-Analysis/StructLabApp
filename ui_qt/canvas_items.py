@@ -468,6 +468,8 @@ class MemberItem(QGraphicsLineItem):
         self._udl_label_items: list = []
         self._qx_items: list = []
         self._qx_label_items: list = []
+        self._qy_items: list = []
+        self._qy_label_items: list = []
         self._point_load_items: list = []
         self._update_pen()
         self._draw_udl_arrows()
@@ -625,27 +627,55 @@ class MemberItem(QGraphicsLineItem):
         self._scene.addItem(lbl)
         self._udl_label_items.append(lbl)
 
-    # ── lateral load arrows (global X direction) ──────────────────────────────
+    # ── lateral load arrows (global X and Y directions) ──────────────────────
 
     def _draw_lateral_arrows(self, clear: bool = True, color: QColor | None = None,
                              perp_offset: float = 0.0, lc_name: str = "") -> None:
         if clear:
-            for it in self._qx_items: self._scene.removeItem(it)
-            self._qx_items.clear()
+            for it in self._qx_items:      self._scene.removeItem(it)
             for it in self._qx_label_items: self._scene.removeItem(it)
-            self._qx_label_items.clear()
+            for it in self._qy_items:      self._scene.removeItem(it)
+            for it in self._qy_label_items: self._scene.removeItem(it)
+            self._qx_items.clear();  self._qx_label_items.clear()
+            self._qy_items.clear();  self._qy_label_items.clear()
 
         ml = self._scene.model_state.active_case.get_member_load(self.member.id)
-        qx_start = ml.qx_start
-        qx_end   = ml.qx_end
-        if qx_start == 0.0 and qx_end == 0.0:
-            return
+        ms = self._scene.model_state
+        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
 
+        # Draw qx arrows
+        if ml.qx_start != 0.0 or ml.qx_end != 0.0:
+            gdir = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
+            self._draw_global_axis_arrows(
+                ml.qx_start, ml.qx_end, gdir,
+                self._qx_items, self._qx_label_items,
+                color or QColor("#E65100"), "kN/m X", perp_offset, lc_name,
+            )
+
+        # Draw qy arrows (3D only)
+        if in_3d and (ml.qy_start != 0.0 or ml.qy_end != 0.0):
+            gdir = _proj_y_screen_dir()
+            self._draw_global_axis_arrows(
+                ml.qy_start, ml.qy_end, gdir,
+                self._qy_items, self._qy_label_items,
+                color or QColor("#FF6F00"), "kN/m Y", perp_offset, lc_name,
+            )
+
+    def _draw_global_axis_arrows(
+        self,
+        q_start: float, q_end: float,
+        gdir: tuple[float, float],
+        item_list: list, label_list: list,
+        draw_color: QColor,
+        unit_label: str,
+        perp_offset: float,
+        lc_name: str,
+    ) -> None:
+        """Draw a set of distributed load arrows along the member for one global axis."""
         ni = self._scene.model_state.get_node(self.member.node_i)
         nj = self._scene.model_state.get_node(self.member.node_j)
         if not ni or not nj:
             return
-
         ix, iy = _node_pos(ni, self._scene)
         jx, jy = _node_pos(nj, self._scene)
         dx = jx - ix;  dy = jy - iy
@@ -654,36 +684,25 @@ class MemberItem(QGraphicsLineItem):
             return
 
         ux, uy = dx / L_px, dy / L_px
-        px_n, py_n = -uy, ux  # member normal in screen (for LC stacking offset)
-        # Arrow direction: projected 3D X in 3D mode, horizontal in 2D
-        ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
-        if in_3d:
-            gx_sx, gx_sy = _proj_x_screen_dir()
-        else:
-            gx_sx, gx_sy = 1.0, 0.0
+        px_n, py_n = -uy, ux
+        gx_sx, gx_sy = gdir
 
-        qx_ref = qx_start if abs(qx_start) >= abs(qx_end) else qx_end
-        sign = 1.0 if qx_ref > 0 else -1.0
-        qx_max = max(abs(qx_start), abs(qx_end))
+        q_ref = q_start if abs(q_start) >= abs(q_end) else q_end
+        sign = 1.0 if q_ref > 0 else -1.0
+        q_max = max(abs(q_start), abs(q_end))
 
-        # Shift along member normal so successive LC groups fan out sideways
         if perp_offset != 0.0:
-            off_x = px_n * perp_offset
-            off_y = py_n * perp_offset
-            ix += off_x;  iy += off_y
-            jx += off_x;  jy += off_y
+            ix += px_n * perp_offset;  iy += py_n * perp_offset
+            jx += px_n * perp_offset;  jy += py_n * perp_offset
 
         n_arr = max(3, min(14, int(L_px / 25)))
         ah = 4
         path = QPainterPath()
-
         for i in range(n_arr + 1):
             t = i / n_arr
-            bx = ix + t * dx
-            by = iy + t * dy
-            qx_local = qx_start + t * (qx_end - qx_start)
-            arr_len = UDL_LEN * abs(qx_local) / qx_max if qx_max > 0 else UDL_LEN
+            bx = ix + t * dx;  by = iy + t * dy
+            q_local = q_start + t * (q_end - q_start)
+            arr_len = UDL_LEN * abs(q_local) / q_max if q_max > 0 else UDL_LEN
             tx = bx - sign * gx_sx * arr_len
             ty = by - sign * gx_sy * arr_len
             path.moveTo(tx, ty)
@@ -695,30 +714,29 @@ class MemberItem(QGraphicsLineItem):
             path.lineTo(bx, by)
             path.lineTo(back_x - perp_x * ah, back_y - perp_y * ah)
 
-        tip_ix = ix - sign * gx_sx * UDL_LEN * abs(qx_start) / qx_max if qx_max > 0 else ix
-        tip_iy = iy - sign * gx_sy * UDL_LEN * abs(qx_start) / qx_max if qx_max > 0 else iy
-        tip_jx = jx - sign * gx_sx * UDL_LEN * abs(qx_end)   / qx_max if qx_max > 0 else jx
-        tip_jy = jy - sign * gx_sy * UDL_LEN * abs(qx_end)   / qx_max if qx_max > 0 else jy
+        tip_ix = ix - sign * gx_sx * UDL_LEN * abs(q_start) / q_max if q_max > 0 else ix
+        tip_iy = iy - sign * gx_sy * UDL_LEN * abs(q_start) / q_max if q_max > 0 else iy
+        tip_jx = jx - sign * gx_sx * UDL_LEN * abs(q_end)   / q_max if q_max > 0 else jx
+        tip_jy = jy - sign * gx_sy * UDL_LEN * abs(q_end)   / q_max if q_max > 0 else jy
         path.moveTo(tip_ix, tip_iy)
         path.lineTo(tip_jx, tip_jy)
 
-        draw_color = color if color else QColor("#E65100")
         item = QGraphicsPathItem(path)
         item.setPen(QPen(draw_color, 1.5))
         item.setZValue(0.5)
         self._scene.addItem(item)
-        self._qx_items.append(item)
+        item_list.append(item)
 
-        if abs(qx_start - qx_end) < 1e-9:
-            val_text = _fmt(qx_start / 1e3, "kN/m ↔")
+        if abs(q_start - q_end) < 1e-9:
+            val_text = _fmt(q_start / 1e3, f"kN/m {unit_label[-1]}")
         else:
-            val_text = f"{qx_start/1e3:.1f}→{qx_end/1e3:.1f} kN/m ↔"
+            val_text = f"{q_start/1e3:.1f}→{q_end/1e3:.1f} {unit_label}"
         prefix = f"{lc_name}: " if lc_name else ""
         mid_x = (tip_ix + tip_jx) / 2 - sign * gx_sx * 8
         mid_y = (tip_iy + tip_jy) / 2 - sign * gx_sy * 8 - 10
         lbl = _make_label(prefix + val_text, mid_x, mid_y, z=1.8, color=draw_color)
         self._scene.addItem(lbl)
-        self._qx_label_items.append(lbl)
+        label_list.append(lbl)
 
     # ── point load arrows ─────────────────────────────────────────────────────
 
@@ -831,10 +849,14 @@ class MemberItem(QGraphicsLineItem):
         self._udl_items.clear()
         for it in self._udl_label_items: self._scene.removeItem(it)
         self._udl_label_items.clear()
-        for it in self._qx_items: self._scene.removeItem(it)
+        for it in self._qx_items:       self._scene.removeItem(it)
         self._qx_items.clear()
         for it in self._qx_label_items: self._scene.removeItem(it)
         self._qx_label_items.clear()
+        for it in self._qy_items:       self._scene.removeItem(it)
+        self._qy_items.clear()
+        for it in self._qy_label_items: self._scene.removeItem(it)
+        self._qy_label_items.clear()
         for item in self._point_load_items:
             self._scene.removeItem(item)
         self._point_load_items.clear()
