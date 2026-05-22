@@ -106,6 +106,14 @@ def _proj_y_screen_dir() -> tuple[float, float]:
     return (sx / mag, sy / mag) if mag > 1e-9 else (0.0, 1.0)
 
 
+def _proj_z_screen_dir() -> tuple[float, float]:
+    """Normalized screen direction of the 3D Z axis (always straight up on screen)."""
+    el = math.radians(_proj_mod.ISO_ELEVATION)
+    # Z projects as: sx=0, sy=-cos(el)*ppm  →  normalised = (0, -1) upward in Qt
+    sy = -math.cos(el)
+    return (0.0, sy / abs(sy)) if abs(sy) > 1e-9 else (0.0, -1.0)
+
+
 def _proj_support_bar_dir() -> tuple[float, float]:
     """Normalized screen direction for 3D support bar: ground-plane axis with most screen-X extent.
 
@@ -470,6 +478,8 @@ class MemberItem(QGraphicsLineItem):
         self._qx_label_items: list = []
         self._qy_items: list = []
         self._qy_label_items: list = []
+        self._qz_items: list = []
+        self._qz_label_items: list = []
         self._point_load_items: list = []
         self._update_pen()
         self._draw_udl_arrows()
@@ -636,8 +646,11 @@ class MemberItem(QGraphicsLineItem):
             for it in self._qx_label_items: self._scene.removeItem(it)
             for it in self._qy_items:      self._scene.removeItem(it)
             for it in self._qy_label_items: self._scene.removeItem(it)
+            for it in self._qz_items:      self._scene.removeItem(it)
+            for it in self._qz_label_items: self._scene.removeItem(it)
             self._qx_items.clear();  self._qx_label_items.clear()
             self._qy_items.clear();  self._qy_label_items.clear()
+            self._qz_items.clear();  self._qz_label_items.clear()
 
         ml = self._scene.model_state.active_case.get_member_load(self.member.id)
         ms = self._scene.model_state
@@ -659,6 +672,15 @@ class MemberItem(QGraphicsLineItem):
                 ml.qy_start, ml.qy_end, gdir,
                 self._qy_items, self._qy_label_items,
                 color or QColor("#FF6F00"), "kN/m Y", perp_offset, lc_name,
+            )
+
+        # Draw qz arrows (3D only) — straight up/down on screen
+        if in_3d and (ml.qz_start != 0.0 or ml.qz_end != 0.0):
+            gdir = _proj_z_screen_dir()
+            self._draw_global_axis_arrows(
+                ml.qz_start, ml.qz_end, gdir,
+                self._qz_items, self._qz_label_items,
+                color or QColor("#1565C0"), "kN/m Z", perp_offset, lc_name,
             )
 
     def _draw_global_axis_arrows(
@@ -857,6 +879,10 @@ class MemberItem(QGraphicsLineItem):
         self._qy_items.clear()
         for it in self._qy_label_items: self._scene.removeItem(it)
         self._qy_label_items.clear()
+        for it in self._qz_items:       self._scene.removeItem(it)
+        self._qz_items.clear()
+        for it in self._qz_label_items: self._scene.removeItem(it)
+        self._qz_label_items.clear()
         for item in self._point_load_items:
             self._scene.removeItem(item)
         self._point_load_items.clear()
