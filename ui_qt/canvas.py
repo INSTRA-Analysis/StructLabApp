@@ -339,25 +339,66 @@ class StructCanvas(QGraphicsScene):
 
     def keyPressEvent(self, event) -> None:
         mods = event.modifiers()
-        ctrl = mods & Qt.KeyboardModifier.ControlModifier
-        shift = mods & Qt.KeyboardModifier.ShiftModifier
-        if event.key() == Qt.Key.Key_Delete:
+        ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        key   = event.key()
+        if key == Qt.Key.Key_Delete:
             self.save_snapshot()
             self._delete_selected()
-        elif event.key() == Qt.Key.Key_A and ctrl and shift:
+        elif key == Qt.Key.Key_A and ctrl and shift:
             self.clearSelection()
-        elif event.key() == Qt.Key.Key_A and ctrl:
+        elif key == Qt.Key.Key_A and ctrl:
             for item in self.items():
                 item.setSelected(True)
-        elif event.key() == Qt.Key.Key_I and ctrl:
+        elif key == Qt.Key.Key_I and ctrl:
             for item in self.items():
                 item.setSelected(not item.isSelected())
-        elif event.key() == Qt.Key.Key_Z and ctrl:
+        elif key == Qt.Key.Key_Z and ctrl:
             self.undo()
-        elif event.key() == Qt.Key.Key_Y and ctrl:
+        elif key == Qt.Key.Key_Y and ctrl:
             self.redo()
+        elif self._is_3d_mode():
+            self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
+
+    def _is_3d_mode(self) -> bool:
+        ms = self.model_state
+        return ms.mode_3d or any(n.z != 0.0 for n in ms.nodes)
+
+    def _handle_view_key(self, key: int, ctrl: bool) -> bool:
+        """Handle numpad-style view shortcuts (3D mode only).
+
+        Returns True if the key was consumed, False otherwise.
+        Numpad 1/3/7/5  → Front / Right / Top / Default-ISO
+        Ctrl + 1/3/7    → Back  / Left  / Bottom
+        2/4/6/8         → orbit  ±15° (down/left/right/up)
+        9               → flip view (az + 180°)
+        """
+        K = Qt.Key
+        az = _proj.ISO_AZIMUTH
+        el = _proj.ISO_ELEVATION
+        if key == K.Key_1:
+            self.set_view(180.0 if ctrl else 0.0, 2.0)
+        elif key == K.Key_3:
+            self.set_view(-90.0 if ctrl else 90.0, 2.0)
+        elif key == K.Key_7:
+            self.set_view(az, -87.0 if ctrl else 87.0)
+        elif key == K.Key_5:
+            self.set_view(-45.0, 30.0)           # default SW isometric
+        elif key == K.Key_4:
+            self.set_view(az - 15.0, el)          # orbit left
+        elif key == K.Key_6:
+            self.set_view(az + 15.0, el)          # orbit right
+        elif key == K.Key_8:
+            self.set_view(az, el + 15.0)          # orbit up
+        elif key == K.Key_2:
+            self.set_view(az, el - 15.0)          # orbit down
+        elif key == K.Key_9:
+            self.set_view(az + 180.0, el)         # flip to opposite side
+        else:
+            return False
+        return True
 
     # ── scene manipulation ────────────────────────────────────────────────────
 
