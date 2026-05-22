@@ -30,6 +30,21 @@ from ui_qt.panels import PropertiesPanel, ResultsPanel, BrandingFooter
 
 _AUTOSAVE_PATH = Path.home() / ".structlab" / "autosave.slab"
 
+
+def _plane_for_view(az: float, el: float) -> WorkingPlane:
+    """Return the natural working plane for a named view direction."""
+    if el > 60.0 or el < -60.0:
+        return WorkingPlane.XY          # Top / Bottom
+    if el > 20.0:
+        return WorkingPlane.FREE        # ISO corner views
+    # Low-elevation face views — pick XZ (Front/Back) or YZ (Left/Right)
+    az_norm = ((az % 360) + 360) % 360
+    if az_norm > 180:
+        az_norm -= 360                  # normalise to [-180, 180]
+    if abs(az_norm) < 45 or abs(az_norm) > 135:
+        return WorkingPlane.XZ          # Front (0°) or Back (±180°)
+    return WorkingPlane.YZ              # Right (90°) or Left (-90°)
+
 _DOCK_HDR = (
     "background:#00ACC1; color:#ffffff;"
     " font-size:11px; font-weight:bold; padding-left:6px;"
@@ -81,6 +96,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._view)
         self._scene.model_changed.connect(self._on_model_changed)
         self._scene.view_changed.connect(self._redraw_overlays)
+        self._scene.view_preset.connect(self._on_view_preset)
 
     # ── menu bar ─────────────────────────────────────────────────────────────
 
@@ -345,6 +361,13 @@ class MainWindow(QMainWindow):
         if plane is not None:
             self._set_working_plane(plane)
         self._on_combo_view_changed(self._combo_view.currentIndex())
+
+    def _on_view_preset(self, az: float, el: float) -> None:
+        """Called when ViewCube face or numpad face-key snaps to a named view.
+
+        Derives and sets the matching working plane automatically.
+        """
+        self._set_working_plane(_plane_for_view(az, el))
 
     # ── welcome screen ────────────────────────────────────────────────────────
 
