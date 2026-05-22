@@ -235,6 +235,8 @@ def build_model(state: ModelState,
                     ))
 
         # Global Z distributed load: lump as nodal Z-forces per sub-element.
+        # Sign convention: positive qz = downward (gravity direction), same as w.
+        # Applied as negative fz so that +qz produces -Z (downward) nodal forces.
         if ml.qz_start != 0.0 or ml.qz_end != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
@@ -243,7 +245,7 @@ def build_model(state: ModelState,
                 fz_sub = (qz_k + qz_k1) / 2.0 * sub_L
                 for nid in (chain[k], chain[k + 1]):
                     model.nodal_loads.append(NodalLoad(
-                        node_id=nid, fz=fz_sub / 2.0,
+                        node_id=nid, fz=-fz_sub / 2.0,
                     ))
 
         member_element_map.append(el_ids)

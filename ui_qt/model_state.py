@@ -45,9 +45,10 @@ class MemberLoad:
     """Loads applied along a member for one load case.
 
     Coordinate convention (matches canvas): X=right, Y=depth, Z=up.
-      w       — local transverse (perpendicular to member), ↓ positive relative to member
-      qx/qy/qz — global-axis distributed loads; positive = +axis direction
-                  qz positive = upward (opposing gravity); for gravity use negative qz or w
+      w   — local transverse (perpendicular to member), ↓ positive relative to member
+      qx  — global X distributed load; +X positive (rightward)
+      qy  — global Y distributed load; +Y positive (into scene, 3D only)
+      qz  — vertical distributed load; ↓ positive (gravity direction, same as w, 3D only)
     """
     w_start: float = 0.0      # N/m at node_i, ↓ positive (local ⊥ to member)
     w_end: float = 0.0        # N/m at node_j
@@ -55,7 +56,7 @@ class MemberLoad:
     qx_end: float = 0.0      # N/m at node_j
     qy_start: float = 0.0    # N/m at node_i, +Y positive (global Y, depth — 3D only)
     qy_end: float = 0.0      # N/m at node_j
-    qz_start: float = 0.0    # N/m at node_i, +Z positive (global Z, upward — 3D only)
+    qz_start: float = 0.0    # N/m at node_i, ↓ positive (downward / gravity — 3D only)
     qz_end: float = 0.0      # N/m at node_j
     point_loads: list = field(default_factory=list)  # list[PointLoadData]
 

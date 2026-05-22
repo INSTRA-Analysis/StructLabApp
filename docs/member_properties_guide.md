@@ -132,9 +132,9 @@ This is the most common load type for gravity-loaded beams.
 
 Distributed load in the global X direction. Positive = pointing in the +X direction. Typical use: horizontal wind pressure on a vertical or inclined member.
 
-### ⊙ qz start / qz end (kN/m) — Lateral (global Z) *(3D only)*
+### ↓ qz start / qz end (kN/m) — Vertical global (3D only)
 
-Distributed load in the global Z (vertical) direction. Positive = pointing in the +Z direction. Used in 3D models where global-axis loads are more convenient than local-axis loads.
+Distributed load in the global vertical direction. **Positive = downward** (same gravity convention as `w`). Use this instead of `w` when you need a true vertical load on an inclined member (e.g. snow on a rafter) rather than a load perpendicular to the member surface.
 
 ---
 
