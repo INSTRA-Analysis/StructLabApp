@@ -30,6 +30,7 @@ from ui_qt.projection import (
     isometric, inverse_isometric,
     inverse_isometric_xz, inverse_isometric_yz,
 )
+from ui_qt.view_cube import ViewCube
 
 # Distinct palette for "All Cases" overlay — one colour per load case
 _LC_COLORS = [
@@ -782,7 +783,9 @@ class StructView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._pan_last = None    # QPoint when middle-button is held (pan)
-        self._orbit_last = None  # QPoint when Ctrl+middle is held (3D orbit)
+        self._orbit_last = None  # QPoint when middle is held (3D orbit)
+        self._view_cube = ViewCube()
+        self.setMouseTracking(True)  # needed for hover updates
 
     # ── grid drawn here so it always fills the visible viewport ──────────────
 
@@ -930,7 +933,12 @@ class StructView(QGraphicsView):
                 painter.setPen(pl_major if y_val % 5 == 0 else pl_minor)
                 painter.drawLine(QLineF(*p1, *p2))
 
-        # ── Working plane label (top-right corner) ───────────────────────────────
+        # ── ViewCube (top-right corner) ──────────────────────────────────────────
+        scale = self.transform().m11()
+        vc_cx, vc_cy = self._view_cube.scene_center(rect, scale)
+        self._view_cube.paint(painter, vc_cx, vc_cy, scale)
+
+        # ── Working plane label (just below the ViewCube) ────────────────────────
         lbl_pen = QPen(QColor("#00cccc")); lbl_pen.setCosmetic(True)
         painter.setPen(lbl_pen)
         z_font = painter.font()
@@ -944,7 +952,8 @@ class StructView(QGraphicsView):
             WorkingPlane.FREE: "Free (XY ground)",
         }
         plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
-        painter.drawText(QPointF(rect.right() - 210, rect.top() + 18), plane_text)
+        lbl_y = rect.top() + (self._view_cube.MARGIN * 2 + self._view_cube.HALF * 2 + 16) / scale
+        painter.drawText(QPointF(rect.right() - 215 / scale, lbl_y), plane_text)
         z_font.setBold(False)
         painter.setFont(z_font)
 
@@ -988,9 +997,29 @@ class StructView(QGraphicsView):
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
+        # ── ViewCube click (3D mode only) ─────────────────────────────────────
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self.scene().model_state.mode_3d):
+            scale = self.transform().m11()
+            vr    = self.mapToScene(self.viewport().rect()).boundingRect()
+            vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
+            sp    = self.mapToScene(event.pos())
+            result = self._view_cube.hit_test(
+                sp, vc_cx, vc_cy, scale, _proj.ISO_AZIMUTH
+            )
+            if result is not None:
+                az, el = result
+                self.scene().set_view(az, el)
+                self.scene().view_changed.emit()
+                self._view_cube.hovered = None
+                self.viewport().update()
+                event.accept()
+                return
+
+        # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
-            ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            if ctrl and self.scene().model_state.mode_3d:
+            shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            if self.scene().model_state.mode_3d and not shift:
                 self._orbit_last = event.pos()
                 self.scene().clear_overlays()
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
@@ -1005,7 +1034,7 @@ class StructView(QGraphicsView):
         if self._orbit_last is not None:
             delta = event.pos() - self._orbit_last
             self._orbit_last = event.pos()
-            _proj.ISO_AZIMUTH    = _proj.ISO_AZIMUTH    + delta.x() * 0.3
+            _proj.ISO_AZIMUTH   = _proj.ISO_AZIMUTH + delta.x() * 0.3
             _proj.ISO_ELEVATION = max(5.0, min(85.0, _proj.ISO_ELEVATION - delta.y() * 0.3))
             self.scene().reproject()
             event.accept()
@@ -1021,6 +1050,16 @@ class StructView(QGraphicsView):
             )
             event.accept()
             return
+
+        # ── ViewCube hover highlight (3D mode, no drag active) ────────────────
+        if self.scene().model_state.mode_3d:
+            scale = self.transform().m11()
+            vr    = self.mapToScene(self.viewport().rect()).boundingRect()
+            vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
+            sp = self.mapToScene(event.pos())
+            if self._view_cube.update_hover(sp, vc_cx, vc_cy, scale):
+                self.viewport().update()
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
