@@ -69,8 +69,9 @@ class WorkingPlane(Enum):
 class StructCanvas(QGraphicsScene):
     """Interactive 2-D canvas for building structural models."""
 
-    model_changed = pyqtSignal()   # emitted after any structural change
-    view_changed  = pyqtSignal()   # emitted when 3D projection angles change (orbit end)
+    model_changed = pyqtSignal()              # emitted after any structural change
+    view_changed  = pyqtSignal()              # emitted when 3D projection angles change (orbit end)
+    view_preset   = pyqtSignal(float, float)  # emitted when user snaps to a named view (az, el)
     _hide_welcome: bool = False    # once user takes action, never show welcome
 
     def __init__(self, parent=None) -> None:
@@ -662,24 +663,26 @@ class StructCanvas(QGraphicsScene):
         K = Qt.Key
         az = _proj.ISO_AZIMUTH
         el = _proj.ISO_ELEVATION
+        # Face-snap keys: use set_view_preset so MainWindow syncs the working plane
         if key == K.Key_1:
-            self.set_view(180.0 if ctrl else 0.0, 2.0)
+            self.set_view_preset(180.0 if ctrl else 0.0, 2.0)
         elif key == K.Key_3:
-            self.set_view(-90.0 if ctrl else 90.0, 2.0)
+            self.set_view_preset(-90.0 if ctrl else 90.0, 2.0)
         elif key == K.Key_7:
-            self.set_view(az, -87.0 if ctrl else 87.0)
+            self.set_view_preset(az, -87.0 if ctrl else 87.0)
         elif key == K.Key_5:
-            self.set_view(-45.0, 30.0)           # default SW isometric
+            self.set_view_preset(-45.0, 30.0)      # default SW isometric
+        # Orbit-step keys: use set_view (no plane change)
         elif key == K.Key_4:
-            self.set_view(az - 15.0, el)          # orbit left
+            self.set_view(az - 15.0, el)            # orbit left
         elif key == K.Key_6:
-            self.set_view(az + 15.0, el)          # orbit right
+            self.set_view(az + 15.0, el)            # orbit right
         elif key == K.Key_8:
-            self.set_view(az, el + 15.0)          # orbit up
+            self.set_view(az, el + 15.0)            # orbit up
         elif key == K.Key_2:
-            self.set_view(az, el - 15.0)          # orbit down
+            self.set_view(az, el - 15.0)            # orbit down
         elif key == K.Key_9:
-            self.set_view(az + 180.0, el)         # flip to opposite side
+            self.set_view(az + 180.0, el)           # flip to opposite side
         else:
             return False
         return True
@@ -942,6 +945,11 @@ class StructCanvas(QGraphicsScene):
         _proj.ISO_AZIMUTH = azimuth
         _proj.ISO_ELEVATION = max(2.0, min(88.0, elevation))
         self.reproject()
+
+    def set_view_preset(self, azimuth: float, elevation: float) -> None:
+        """Snap to a named view and emit view_preset so MainWindow can sync the working plane."""
+        self.set_view(azimuth, elevation)
+        self.view_preset.emit(azimuth, _proj.ISO_ELEVATION)  # use clamped elevation
 
     def reset_view(self) -> None:
         """Reset orbit to the default isometric view (↙ SW)."""
@@ -1498,7 +1506,7 @@ class StructView(QGraphicsView):
             )
             if result is not None:
                 az, el = result
-                self.scene().set_view(az, el)
+                self.scene().set_view_preset(az, el)
                 self.scene().view_changed.emit()
                 self._view_cube.hovered = None
                 self.viewport().update()
@@ -1591,8 +1599,8 @@ class StructView(QGraphicsView):
             sup_menu = menu.addMenu("Set Support")
             _SUPPORT_LABELS = [
                 ("Fixed",    SupportType.FIXED),
-                ("Pinned",   SupportType.PINNED),
-                ("Roller X", SupportType.ROLLER_X),
+                ("Pinned",   SupportType.PIN),
+                ("Roller",   SupportType.ROLLER),
                 ("Roller Y", SupportType.ROLLER_Y),
                 ("None",     SupportType.FREE),
             ]
