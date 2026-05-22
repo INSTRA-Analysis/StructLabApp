@@ -280,19 +280,21 @@ class _MemberForm(QWidget):
         self._Iy = _spin(Iy_val * 1e6,  0, 1e6,  1, 2)   # I_y weak axis
         self._J  = _spin(member.J * 1e6, 0, 1e6,  0.01, 3)  # J torsion
         self._beta = _spin(member.beta_angle, -6.283, 6.283, 0.1, 3)  # rad
-        self._fy   = _spin(member.fy / 1e6, 0, 2000, 5, 0)   # MPa
+        self._fy   = _spin(member.fy / 1e6, 0, 2000, 5, 0)       # MPa
         self._Wpl  = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)   # cm³
-        sf.addRow("E (GPa):",       self._E)          # row 0
-        sf.addRow("A (m²):",        self._A)          # row 1
+        self._Wel  = _spin(member.W_el * 1e6, 0, 1e6, 0.1, 1)   # cm³
+        sf.addRow("E (GPa):",         self._E)        # row 0
+        sf.addRow("A (m²):",          self._A)        # row 1
         sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)        # row 2
         sf.addRow("I_y (×10⁻⁶ m⁴):", self._Iy)       # row 3
-        sf.addRow("J (×10⁻⁶ m⁴):",  self._J)         # row 4
-        sf.addRow("β angle (rad):", self._beta)       # row 5
+        sf.addRow("J (×10⁻⁶ m⁴):",   self._J)        # row 4
+        sf.addRow("β angle (rad):",   self._beta)     # row 5
         sf.setRowVisible(3, mode_3d)
         sf.setRowVisible(4, mode_3d)
         sf.setRowVisible(5, mode_3d)
-        sf.addRow("fy (MPa):",      self._fy)         # row 6
-        sf.addRow("W_pl (cm³):",    self._Wpl)        # row 7
+        sf.addRow("fy (MPa):",        self._fy)       # row 6
+        sf.addRow("W_pl (cm³):",      self._Wpl)      # row 7
+        sf.addRow("W_el (cm³):",      self._Wel)      # row 8
         pick_btn = QPushButton("Pick from library...")
         pick_btn.clicked.connect(self._pick_section)
         sf.addRow("", pick_btn)
@@ -405,12 +407,14 @@ class _MemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl = dlg.get_result()
+            E, A, I, W_pl, W_el = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
             if W_pl > 0:
                 self._Wpl.setValue(W_pl * 1e6)
+            if W_el > 0:
+                self._Wel.setValue(W_el * 1e6)
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -445,6 +449,7 @@ class _MemberForm(QWidget):
         m.n_sub   = self._nsub.value()
         m.fy      = self._fy.value() * 1e6
         m.W_pl    = self._Wpl.value() * 1e-6
+        m.W_el    = self._Wel.value() * 1e-6
         if self._load_case is not None:
             point_loads = []
             for row in range(self._pl_table.rowCount()):
@@ -722,7 +727,7 @@ class _MultiMemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl = dlg.get_result()
+            E, A, I, W_pl, W_el = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
@@ -887,14 +892,25 @@ class ResultsPanel(QWidget):
 
         self._disp_table  = self._make_table(["Node", "dx (mm)", "dy (mm)", "θ (mrad)"])
         self._react_table = self._make_table(["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"])
-        self._force_table = self._make_table(
-            ["Member", "N_i (kN)", "V_i (kN)", "M_i (kN·m)",
-             "N_j (kN)", "V_j (kN)", "M_j (kN·m)"]
-        )
+
+        # Member forces — inner tab widget with Summary and Detail sub-tabs
+        self._summary_table = self._make_table([
+            "Member", "N+ (kN)", "N- (kN)", "|V|max (kN)",
+            "M+ sag (kN·m)", "M- hog (kN·m)", "η (%)",
+        ])
+        self._detail_table = self._make_table([
+            "Member", "x/L", "N (kN)", "V (kN)", "M (kN·m)", "σ (MPa)",
+        ])
+        self._member_tabs = QTabWidget()
+        self._member_tabs.addTab(self._wrap(self._summary_table), "Summary")
+        self._member_tabs.addTab(self._wrap(self._detail_table),  "Detail")
+
+        # Alias so _restore_force_tab / envelope code can reference it by old name
+        self._force_table = self._summary_table
 
         self._tabs.addTab(self._wrap(self._disp_table),  "Displacements")
         self._tabs.addTab(self._wrap(self._react_table), "Reactions")
-        self._tabs.addTab(self._wrap(self._force_table), "Member forces")
+        self._tabs.addTab(self._member_tabs,             "Member forces")
 
         # Envelope header — shown when results are from a combination envelope.
         # insertWidget(0, ...) places it ABOVE the tabs at the top of the panel.
@@ -923,11 +939,13 @@ class ResultsPanel(QWidget):
         # Row → ID maps, rebuilt on every populate()
         self._disp_row_to_node:    list[int] = []
         self._react_row_to_node:   list[int] = []
-        self._force_row_to_member: list[int] = []
+        self._force_row_to_member: list[int] = []   # Summary table (one row per member)
+        self._detail_row_to_member: list[int] = []  # Detail table (5 rows per member)
         self._syncing = False   # guard: prevents table→canvas→table loops
 
         # Multi-row selection
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._summary_table, self._detail_table):
             tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             tbl.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
 
@@ -936,62 +954,137 @@ class ResultsPanel(QWidget):
             lambda: self._emit_node_sel(self._disp_table, self._disp_row_to_node))
         self._react_table.itemSelectionChanged.connect(
             lambda: self._emit_node_sel(self._react_table, self._react_row_to_node))
-        self._force_table.itemSelectionChanged.connect(self._emit_member_sel)
+        self._summary_table.itemSelectionChanged.connect(self._emit_member_sel)
+        self._detail_table.itemSelectionChanged.connect(self._emit_member_sel)
 
     # ── public ────────────────────────────────────────────────────────────────
 
     def populate(self, displacements, reactions, member_results, model_state,
-                 dpn: int = 3) -> None:
-        """Fill all three tables with solver results and rebuild row→ID maps.
+                 dpn: int = 3,
+                 member_el_map: list | None = None) -> None:
+        """Fill all three tabs with solver results and rebuild row→ID maps.
 
         dpn: degrees of freedom per node — 3 for 2D models, 6 for 3D models.
+        member_el_map: list[list[int]] mapping UI member index → sub-element IDs.
+                       When provided, Summary/Detail tabs show peak forces and stresses.
         """
-        self._restore_force_tab()   # revert envelope 4-col tab if active
-        # Suppress selection signals while rebuilding the tables
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        self._restore_force_tab()
+        for tbl in (self._disp_table, self._react_table,
+                    self._summary_table, self._detail_table):
             tbl.blockSignals(True)
 
         self._disp_row_to_node    = []
         self._react_row_to_node   = []
         self._force_row_to_member = []
+        self._detail_row_to_member = []
 
-        # θ_z is at DOF offset 2 in 2D [dx,dy,θ_z] and offset 5 in 3D [dx,dy,dz,θ_x,θ_y,θ_z]
+        # θ_z is at DOF offset 2 in 2D and offset 5 in 3D
         rot_offset = 5 if dpn == 6 else 2
 
-        # Displacements
+        # ── Displacements ──────────────────────────────────────────────────────
         self._disp_table.setRowCount(len(model_state.nodes))
         for row, nd in enumerate(model_state.nodes):
             base = nd.id * dpn
-            dx   = displacements[base]              * 1e3    # → mm
-            dy   = displacements[base + 1]          * 1e3
-            th   = displacements[base + rot_offset] * 1e3    # → mrad (θ_z)
+            dx = displacements[base]              * 1e3
+            dy = displacements[base + 1]          * 1e3
+            th = displacements[base + rot_offset] * 1e3
             self._set_row(self._disp_table, row,
                           [str(nd.id), f"{dx:.4f}", f"{dy:.4f}", f"{th:.4f}"])
             self._disp_row_to_node.append(nd.id)
 
-        # Reactions (only supported nodes)
+        # ── Reactions ──────────────────────────────────────────────────────────
         react_rows = [nd for nd in model_state.nodes if nd.support_type.name != "FREE"]
         self._react_table.setRowCount(len(react_rows))
         for row, nd in enumerate(react_rows):
             base = nd.id * dpn
-            fx = reactions[base]              / 1e3   # → kN
+            fx = reactions[base]              / 1e3
             fy = reactions[base + 1]          / 1e3
             m  = reactions[base + rot_offset] / 1e3
             self._set_row(self._react_table, row,
                           [str(nd.id), f"{fx:.3f}", f"{fy:.3f}", f"{m:.3f}"])
             self._react_row_to_node.append(nd.id)
 
-        # Member forces
-        self._force_table.setRowCount(len(member_results))
-        for row, res in enumerate(member_results):
-            self._set_row(self._force_table, row, [
-                str(res.element_id),
-                f"{res.N_i/1e3:.3f}", f"{res.V_i/1e3:.3f}", f"{res.M_i/1e3:.3f}",
-                f"{res.N_j/1e3:.3f}", f"{res.V_j/1e3:.3f}", f"{res.M_j/1e3:.3f}",
-            ])
-            self._force_row_to_member.append(res.element_id)
+        # ── Member forces — Summary and Detail ─────────────────────────────────
+        res_by_id = {r.element_id: r for r in member_results}
 
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        # Summary: one row per UI member with peak forces and utilization
+        self._summary_table.setRowCount(len(model_state.members))
+        for i, md in enumerate(model_state.members):
+            el_ids = (member_el_map[i]
+                      if member_el_map and i < len(member_el_map) else [])
+            sub_res = [res_by_id[eid] for eid in el_ids if eid in res_by_id]
+
+            if sub_res:
+                N_vals = [r.N_i for r in sub_res] + [r.N_j for r in sub_res]
+                V_vals = [r.V_i for r in sub_res] + [r.V_j for r in sub_res]
+                M_vals = [r.M_i for r in sub_res] + [r.M_j for r in sub_res]
+                N_pos = max(N_vals)
+                N_neg = min(N_vals)
+                V_max = max(abs(v) for v in V_vals)
+                M_pos = max(M_vals)
+                M_neg = min(M_vals)
+            else:
+                N_pos = N_neg = V_max = M_pos = M_neg = 0.0
+
+            n_pos_str = f"{N_pos/1e3:.2f}" if N_pos > 1e-6 else "—"
+            n_neg_str = f"{N_neg/1e3:.2f}" if N_neg < -1e-6 else "—"
+            m_pos_str = f"{M_pos/1e3:.2f}" if M_pos > 1e-6 else "—"
+            m_neg_str = f"{M_neg/1e3:.2f}" if M_neg < -1e-6 else "—"
+
+            eta_str = "—"
+            if md.A > 0 and md.fy > 0:
+                N_abs = max(abs(N_pos), abs(N_neg))
+                M_abs = max(abs(M_pos), abs(M_neg))
+                eta = N_abs / (md.A * md.fy)
+                if md.W_pl > 0:
+                    eta += M_abs / (md.W_pl * md.fy)
+                eta_str = f"{eta * 100:.1f}"
+
+            self._set_row(self._summary_table, i, [
+                str(md.id),
+                n_pos_str, n_neg_str,
+                f"{V_max/1e3:.2f}",
+                m_pos_str, m_neg_str,
+                eta_str,
+            ])
+            self._force_row_to_member.append(md.id)
+
+        # Detail: 5 checkpoints per UI member — N, V, M interpolated + fibre stress
+        _T_POINTS = (0.0, 0.25, 0.5, 0.75, 1.0)
+        self._detail_table.setRowCount(len(model_state.members) * len(_T_POINTS))
+        for i, md in enumerate(model_state.members):
+            el_ids = (member_el_map[i]
+                      if member_el_map and i < len(member_el_map) else [])
+            sub_res = [res_by_id[eid] for eid in el_ids if eid in res_by_id]
+            n_sub = len(sub_res)
+
+            for ci, t in enumerate(_T_POINTS):
+                row = i * len(_T_POINTS) + ci
+                if n_sub > 0:
+                    k = min(int(t * n_sub), n_sub - 1)
+                    s = t * n_sub - k   # local fraction within sub-element
+                    r = sub_res[k]
+                    N = (1 - s) * r.N_i + s * r.N_j
+                    V = (1 - s) * r.V_i + s * r.V_j
+                    M = (1 - s) * r.M_i + s * r.M_j
+                else:
+                    N = V = M = 0.0
+
+                if md.A > 0 and md.W_el > 0:
+                    sigma = N / md.A / 1e6 + M / md.W_el / 1e6
+                    sigma_str = f"{sigma:.1f}"
+                else:
+                    sigma_str = "—"
+
+                self._set_row(self._detail_table, row, [
+                    str(md.id), f"{t:.2f}",
+                    f"{N/1e3:.3f}", f"{V/1e3:.3f}", f"{M/1e3:.3f}",
+                    sigma_str,
+                ])
+                self._detail_row_to_member.append(md.id)
+
+        for tbl in (self._disp_table, self._react_table,
+                    self._summary_table, self._detail_table):
             tbl.blockSignals(False)
 
         self._env_label.hide()
@@ -1036,6 +1129,7 @@ class ResultsPanel(QWidget):
         self._react_row_to_node   = []
         self._force_row_to_member = []
         state = model_state
+        n_runs = len(solve_runs)
 
         rot_offset = 5 if dpn == 6 else 2
 
@@ -1103,13 +1197,12 @@ class ResultsPanel(QWidget):
         self._tabs.setCurrentIndex(2)   # jump straight to Member forces ▲
 
     def _restore_force_tab(self) -> None:
-        """Swap the Member forces tab back to the standard 6-column table."""
+        """Swap the Member forces tab back to the Summary+Detail inner tabs."""
         if self._env_force_table is None:
             return
-        # Check if the envelope table is currently installed
         if self._tabs.tabText(2) == "Member forces ▲":
             self._tabs.removeTab(2)
-            self._tabs.insertTab(2, self._wrap(self._force_table), "Member forces")
+            self._tabs.insertTab(2, self._member_tabs, "Member forces")
 
     def clear(self) -> None:
         self._restore_force_tab()
@@ -1152,7 +1245,8 @@ class ResultsPanel(QWidget):
         """Highlight rows matching member_ids (called by canvas selection change)."""
         self._syncing = True
         try:
-            self._highlight_rows(self._force_table, self._force_row_to_member, member_ids)
+            self._highlight_rows(self._summary_table, self._force_row_to_member,  member_ids)
+            self._highlight_rows(self._detail_table,  self._detail_row_to_member, member_ids)
         finally:
             self._syncing = False
 
@@ -1190,9 +1284,20 @@ class ResultsPanel(QWidget):
     def _emit_member_sel(self) -> None:
         if self._syncing:
             return
-        ids = list({self._force_row_to_member[idx.row()]
-                    for idx in self._force_table.selectedIndexes()
-                    if idx.column() == 0 and idx.row() < len(self._force_row_to_member)})
+        # Determine which table fired the signal based on active inner sub-tab
+        # (or the envelope table when it's installed)
+        if self._tabs.tabText(2) == "Member forces ▲" and self._env_force_table is not None:
+            tbl = self._env_force_table
+            row_to_id = self._force_row_to_member
+        elif self._member_tabs.currentIndex() == 1:
+            tbl = self._detail_table
+            row_to_id = self._detail_row_to_member
+        else:
+            tbl = self._summary_table
+            row_to_id = self._force_row_to_member
+        ids = list({row_to_id[idx.row()]
+                    for idx in tbl.selectedIndexes()
+                    if idx.column() == 0 and idx.row() < len(row_to_id)})
         self.members_selected.emit(ids)
 
     # ── helpers ───────────────────────────────────────────────────────────────
