@@ -1088,6 +1088,10 @@ class StructCanvas(QGraphicsScene):
             self._add_member_item(member)
         self._suppress_changed = False
         self.model_changed.emit()
+        # Redraw all load arrows now that every member exists so w_global_max
+        # is correct for the whole model (each item drew its own arrows during
+        # __init__ when only a partial set of members existed).
+        self.refresh_all_loads()
 
     def paste(self, clipboard: dict) -> tuple[list[int], list[int]]:
         """Paste clipboard nodes/members into the model with an auto-computed offset.
