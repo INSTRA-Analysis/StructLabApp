@@ -2,7 +2,8 @@
 
 Provides:
   - MATERIALS dict: name → (E in Pa, label)
-  - STEEL_PROFILES dict: series → list of (name, A in m², I in m⁴)
+  - STEEL_PROFILES dict: series → list of (name, A in m², I in m⁴, W_pl in m³)
+    W_pl is the plastic section modulus (strong axis) used for EC3 utilization checks.
   - concrete_section(b, h) → (A, I)
   - t_beam_section(bf, hf, bw, hw) → (A, I)
   - circular_section(d) → (A, I)
@@ -32,124 +33,132 @@ MATERIALS: dict[str, tuple[float, str]] = {
 }
 
 # ── Steel profiles ────────────────────────────────────────────────────────────
-# Each entry: (profile_name, A_m2, Iy_m4)
+# Each entry: (profile_name, A_m2, Iy_m4, W_pl_m3)
+# W_pl = plastic section modulus (strong axis) used for EC3 utilization checks.
 # Data sourced from standard Euronorm tables (rounded to 4 significant figures).
 
-def _ipe() -> list[tuple[str, float, float]]:
-    # IPE series (European I-beams) — strong axis Iy
+def _ipe() -> list[tuple[str, float, float, float]]:
+    # IPE series (European I-beams) — strong axis Iy, W_pl,y
+    # W_pl values from EN 10034 / ArcelorMittal tables (cm³ → m³)
     data = [
-        ("IPE 80",   764e-6,  80.1e-8),
-        ("IPE 100",  1032e-6, 171e-8),
-        ("IPE 120",  1321e-6, 318e-8),
-        ("IPE 140",  1643e-6, 541e-8),
-        ("IPE 160",  2009e-6, 869e-8),
-        ("IPE 180",  2395e-6, 1317e-8),
-        ("IPE 200",  2848e-6, 1943e-8),
-        ("IPE 220",  3337e-6, 2772e-8),
-        ("IPE 240",  3912e-6, 3892e-8),
-        ("IPE 270",  4595e-6, 5790e-8),
-        ("IPE 300",  5381e-6, 8356e-8),
-        ("IPE 330",  6261e-6, 11770e-8),
-        ("IPE 360",  7273e-6, 16270e-8),
-        ("IPE 400",  8446e-6, 23130e-8),
-        ("IPE 450",  9882e-6, 33740e-8),
-        ("IPE 500",  11550e-6, 48200e-8),
-        ("IPE 550",  13440e-6, 67120e-8),
-        ("IPE 600",  15600e-6, 92080e-8),
+        ("IPE 80",   764e-6,  80.1e-8,  23.2e-6),
+        ("IPE 100",  1032e-6, 171e-8,   39.4e-6),
+        ("IPE 120",  1321e-6, 318e-8,   60.7e-6),
+        ("IPE 140",  1643e-6, 541e-8,   88.3e-6),
+        ("IPE 160",  2009e-6, 869e-8,   123e-6),
+        ("IPE 180",  2395e-6, 1317e-8,  166e-6),
+        ("IPE 200",  2848e-6, 1943e-8,  221e-6),
+        ("IPE 220",  3337e-6, 2772e-8,  285e-6),
+        ("IPE 240",  3912e-6, 3892e-8,  367e-6),
+        ("IPE 270",  4595e-6, 5790e-8,  484e-6),
+        ("IPE 300",  5381e-6, 8356e-8,  628e-6),
+        ("IPE 330",  6261e-6, 11770e-8, 804e-6),
+        ("IPE 360",  7273e-6, 16270e-8, 1019e-6),
+        ("IPE 400",  8446e-6, 23130e-8, 1307e-6),
+        ("IPE 450",  9882e-6, 33740e-8, 1702e-6),
+        ("IPE 500",  11550e-6, 48200e-8, 2194e-6),
+        ("IPE 550",  13440e-6, 67120e-8, 2787e-6),
+        ("IPE 600",  15600e-6, 92080e-8, 3512e-6),
     ]
-    return [(n, A, I) for n, A, I in data]
+    return data
 
 
-def _hea() -> list[tuple[str, float, float]]:
+def _hea() -> list[tuple[str, float, float, float]]:
+    # W_pl,y from EN 10034 / ArcelorMittal tables (cm³ → m³)
     data = [
-        ("HEA 100",  2124e-6, 349.2e-8),
-        ("HEA 120",  2534e-6, 606.2e-8),
-        ("HEA 140",  3142e-6, 1033e-8),
-        ("HEA 160",  3877e-6, 1673e-8),
-        ("HEA 180",  4525e-6, 2510e-8),
-        ("HEA 200",  5383e-6, 3692e-8),
-        ("HEA 220",  6434e-6, 5410e-8),
-        ("HEA 240",  7684e-6, 7763e-8),
-        ("HEA 260",  8682e-6, 10450e-8),
-        ("HEA 280",  9726e-6, 13670e-8),
-        ("HEA 300",  11250e-6, 18260e-8),
-        ("HEA 320",  12400e-6, 22930e-8),
-        ("HEA 340",  13300e-6, 27690e-8),
-        ("HEA 360",  14250e-6, 33090e-8),
-        ("HEA 400",  15900e-6, 45070e-8),
-        ("HEA 450",  17800e-6, 63720e-8),
-        ("HEA 500",  19780e-6, 86970e-8),
-        ("HEA 550",  21190e-6, 111900e-8),
-        ("HEA 600",  22600e-6, 141200e-8),
+        ("HEA 100",  2124e-6, 349.2e-8,  83.9e-6),
+        ("HEA 120",  2534e-6, 606.2e-8,  120e-6),
+        ("HEA 140",  3142e-6, 1033e-8,   173e-6),
+        ("HEA 160",  3877e-6, 1673e-8,   245e-6),
+        ("HEA 180",  4525e-6, 2510e-8,   325e-6),
+        ("HEA 200",  5383e-6, 3692e-8,   429e-6),
+        ("HEA 220",  6434e-6, 5410e-8,   568e-6),
+        ("HEA 240",  7684e-6, 7763e-8,   745e-6),
+        ("HEA 260",  8682e-6, 10450e-8,  919e-6),
+        ("HEA 280",  9726e-6, 13670e-8,  1112e-6),
+        ("HEA 300",  11250e-6, 18260e-8, 1383e-6),
+        ("HEA 320",  12400e-6, 22930e-8, 1628e-6),
+        ("HEA 340",  13300e-6, 27690e-8, 1852e-6),
+        ("HEA 360",  14250e-6, 33090e-8, 2088e-6),
+        ("HEA 400",  15900e-6, 45070e-8, 2562e-6),
+        ("HEA 450",  17800e-6, 63720e-8, 3216e-6),
+        ("HEA 500",  19780e-6, 86970e-8, 3949e-6),
+        ("HEA 550",  21190e-6, 111900e-8, 4622e-6),
+        ("HEA 600",  22600e-6, 141200e-8, 5350e-6),
     ]
-    return [(n, A, I) for n, A, I in data]
+    return data
 
 
-def _heb() -> list[tuple[str, float, float]]:
+def _heb() -> list[tuple[str, float, float, float]]:
+    # W_pl,y from EN 10034 / ArcelorMittal tables (cm³ → m³)
     data = [
-        ("HEB 100",  2600e-6, 449.5e-8),
-        ("HEB 120",  3400e-6, 864.4e-8),
-        ("HEB 140",  4296e-6, 1509e-8),
-        ("HEB 160",  5425e-6, 2492e-8),
-        ("HEB 180",  6525e-6, 3831e-8),
-        ("HEB 200",  7808e-6, 5696e-8),
-        ("HEB 220",  9104e-6, 8091e-8),
-        ("HEB 240",  10600e-6, 11260e-8),
-        ("HEB 260",  11840e-6, 14920e-8),
-        ("HEB 280",  13140e-6, 19270e-8),
-        ("HEB 300",  14900e-6, 25170e-8),
-        ("HEB 320",  16130e-6, 30820e-8),
-        ("HEB 340",  17090e-6, 36660e-8),
-        ("HEB 360",  18060e-6, 43190e-8),
-        ("HEB 400",  19780e-6, 57680e-8),
-        ("HEB 450",  21800e-6, 79890e-8),
-        ("HEB 500",  23860e-6, 107200e-8),
-        ("HEB 550",  25400e-6, 136700e-8),
-        ("HEB 600",  27000e-6, 171000e-8),
+        ("HEB 100",  2600e-6, 449.5e-8,  104e-6),
+        ("HEB 120",  3400e-6, 864.4e-8,  165e-6),
+        ("HEB 140",  4296e-6, 1509e-8,   245e-6),
+        ("HEB 160",  5425e-6, 2492e-8,   354e-6),
+        ("HEB 180",  6525e-6, 3831e-8,   481e-6),
+        ("HEB 200",  7808e-6, 5696e-8,   642e-6),
+        ("HEB 220",  9104e-6, 8091e-8,   827e-6),
+        ("HEB 240",  10600e-6, 11260e-8, 1053e-6),
+        ("HEB 260",  11840e-6, 14920e-8, 1283e-6),
+        ("HEB 280",  13140e-6, 19270e-8, 1534e-6),
+        ("HEB 300",  14900e-6, 25170e-8, 1869e-6),
+        ("HEB 320",  16130e-6, 30820e-8, 2149e-6),
+        ("HEB 340",  17090e-6, 36660e-8, 2408e-6),
+        ("HEB 360",  18060e-6, 43190e-8, 2683e-6),
+        ("HEB 400",  19780e-6, 57680e-8, 3232e-6),
+        ("HEB 450",  21800e-6, 79890e-8, 3982e-6),
+        ("HEB 500",  23860e-6, 107200e-8, 4815e-6),
+        ("HEB 550",  25400e-6, 136700e-8, 5591e-6),
+        ("HEB 600",  27000e-6, 171000e-8, 6425e-6),
     ]
-    return [(n, A, I) for n, A, I in data]
+    return data
 
 
-def _chs() -> list[tuple[str, float, float]]:
-    """Circular Hollow Section — OD × thickness (mm)."""
+def _chs() -> list[tuple[str, float, float, float]]:
+    """Circular Hollow Section — OD × thickness (mm).
+    W_pl = (D³ - (D-2t)³) / 6  [m³]
+    """
     data = [
-        ("CHS 48.3×3",   420e-6,   12.2e-8),
-        ("CHS 60.3×4",   700e-6,   29.1e-8),
-        ("CHS 76.1×4",   904e-6,   60.1e-8),
-        ("CHS 88.9×4",  1060e-6,   95.7e-8),
-        ("CHS 101.6×5", 1510e-6,  181e-8),
-        ("CHS 114.3×5", 1710e-6,  261e-8),
-        ("CHS 139.7×5", 2110e-6,  481e-8),
-        ("CHS 168.3×6", 3050e-6,  999e-8),
-        ("CHS 193.7×6", 3520e-6,  1520e-8),
-        ("CHS 219.1×8", 5350e-6,  2840e-8),
-        ("CHS 244.5×8", 5990e-6,  3940e-8),
-        ("CHS 273.0×8", 6700e-6,  5500e-8),
-        ("CHS 323.9×10", 9990e-6, 11300e-8),
-        ("CHS 355.6×10", 11000e-6, 15200e-8),
-        ("CHS 406.4×10", 12600e-6, 22700e-8),
+        ("CHS 48.3×3",   420e-6,   12.2e-8,   6.17e-6),
+        ("CHS 60.3×4",   700e-6,   29.1e-8,   12.70e-6),
+        ("CHS 76.1×4",   904e-6,   60.1e-8,   20.82e-6),
+        ("CHS 88.9×4",  1060e-6,   95.7e-8,   28.81e-6),
+        ("CHS 101.6×5", 1510e-6,  181e-8,    46.69e-6),
+        ("CHS 114.3×5", 1710e-6,  261e-8,    59.77e-6),
+        ("CHS 139.7×5", 2110e-6,  481e-8,    90.90e-6),
+        ("CHS 168.3×6", 3050e-6,  999e-8,   157.82e-6),
+        ("CHS 193.7×6", 3520e-6,  1520e-8,  211.83e-6),
+        ("CHS 219.1×8", 5350e-6,  2840e-8,  355.78e-6),
+        ("CHS 244.5×8", 5990e-6,  3940e-8,  447.38e-6),
+        ("CHS 273.0×8", 6700e-6,  5500e-8,  561.97e-6),
+        ("CHS 323.9×10", 9990e-6, 11300e-8,  983.83e-6),
+        ("CHS 355.6×10", 11000e-6, 15200e-8, 1195.59e-6),
+        ("CHS 406.4×10", 12600e-6, 22700e-8, 1567.26e-6),
     ]
-    return [(n, A, I) for n, A, I in data]
+    return data
 
 
-def _rhs() -> list[tuple[str, float, float]]:
-    """Rectangular Hollow Section — b×h×t (mm)."""
+def _rhs() -> list[tuple[str, float, float, float]]:
+    """Rectangular Hollow Section — b×h×t (mm).
+    W_pl,y = (b_max × h_max² - (b_max-2t)(h_max-2t)²) / 4  [m³, strong axis]
+    """
     data = [
-        ("RHS 60×40×4",    720e-6,  23.6e-8),
-        ("RHS 80×60×4",   1080e-6,  64.7e-8),
-        ("RHS 100×60×5",  1480e-6,  107e-8),
-        ("RHS 120×80×5",  1880e-6,  231e-8),
-        ("RHS 150×100×6", 2820e-6,  613e-8),
-        ("RHS 200×100×8", 4480e-6,  1340e-8),
-        ("RHS 200×150×8", 5440e-6,  2480e-8),
-        ("RHS 250×150×8", 6240e-6,  4140e-8),
-        ("RHS 300×200×10",9600e-6,  10200e-8),
-        ("RHS 400×200×12",14000e-6, 24800e-8),
+        ("RHS 60×40×4",    720e-6,  23.6e-8,   14.37e-6),
+        ("RHS 80×60×4",   1080e-6,  64.7e-8,   28.61e-6),
+        ("RHS 100×60×5",  1480e-6,  107e-8,    48.75e-6),
+        ("RHS 120×80×5",  1880e-6,  231e-8,    76.25e-6),
+        ("RHS 150×100×6", 2820e-6,  613e-8,   143.53e-6),
+        ("RHS 200×100×8", 4480e-6,  1340e-8,  289.02e-6),
+        ("RHS 200×150×8", 5440e-6,  2480e-8,  365.82e-6),
+        ("RHS 250×150×8", 6240e-6,  4140e-8,  509.42e-6),
+        ("RHS 300×200×10",9600e-6,  10200e-8,  972.00e-6),
+        ("RHS 400×200×12",14000e-6, 24800e-8, 1779.46e-6),
     ]
-    return [(n, A, I) for n, A, I in data]
+    return data
 
 
-STEEL_PROFILES: dict[str, list[tuple[str, float, float]]] = {
+STEEL_PROFILES: dict[str, list[tuple[str, float, float, float]]] = {
     "IPE":  _ipe(),
     "HEA":  _hea(),
     "HEB":  _heb(),

@@ -751,6 +751,17 @@ class MainWindow(QMainWindow):
         self._force_colour_btn.toggled.connect(self._on_force_colour_toggle)
         tb.addWidget(self._force_colour_btn)
 
+        # Utilization colour toggle
+        self._util_colour_btn = QPushButton("Util %")
+        self._util_colour_btn.setCheckable(True)
+        self._util_colour_btn.setChecked(False)
+        self._util_colour_btn.setToolTip(
+            "Colour members by EC3 utilization ratio η = N/Npl + M/Mpl\n"
+            "Green < 50%  ·  Yellow = 50–100%  ·  Red > 100%"
+        )
+        self._util_colour_btn.toggled.connect(self._on_util_colour_toggle)
+        tb.addWidget(self._util_colour_btn)
+
         tb.addSeparator()
 
         # Diagram scale spinbox
@@ -1237,6 +1248,9 @@ class MainWindow(QMainWindow):
 
             if self._force_colour_btn.isChecked():
                 self._scene.update_member_colours(cache['member_results'])
+            elif self._util_colour_btn.isChecked():
+                self._scene.update_member_util_colours(
+                    cache['member_results'], state.members)
             else:
                 self._scene.clear_member_colours()
 
@@ -1439,16 +1453,30 @@ class MainWindow(QMainWindow):
         self._on_combo_view_changed(self._combo_view.currentIndex())
 
     def _on_force_colour_toggle(self, checked: bool) -> None:
-        if checked and self._solve_cache is not None:
-            self._scene.update_member_colours(self._solve_cache['member_results'])
+        if checked:
+            self._util_colour_btn.setChecked(False)
+            if self._solve_cache is not None:
+                self._scene.update_member_colours(self._solve_cache['member_results'])
         else:
             self._scene.clear_member_colours()
+
+    def _on_util_colour_toggle(self, checked: bool) -> None:
+        if checked:
+            self._force_colour_btn.setChecked(False)
+            if self._solve_cache is not None:
+                self._scene.update_member_util_colours(
+                    self._solve_cache['member_results'],
+                    self._scene.model_state.members,
+                )
+        else:
+            self._scene.clear_util_colours()
 
     def _set_overlay_controls_enabled(self, enabled: bool) -> None:
         """Enable or disable all overlay toolbar controls."""
         for btn in self._overlay_btns.values():
             btn.setEnabled(enabled)
         self._force_colour_btn.setEnabled(enabled)
+        self._util_colour_btn.setEnabled(enabled)
         self._diag_scale_spin.setEnabled(enabled)
         self._def_scale_spin.setEnabled(enabled)
 
@@ -1600,9 +1628,13 @@ class MainWindow(QMainWindow):
 
             self._set_overlay_controls_enabled(True)
 
-            # Apply force colours if toggle is on
+            # Apply member colour overlay if toggle is on
             if self._force_colour_btn.isChecked():
                 self._scene.update_member_colours(cache['member_results'])
+            elif self._util_colour_btn.isChecked():
+                self._scene.update_member_util_colours(
+                    cache['member_results'],
+                    self._scene.model_state.members)
             else:
                 self._scene.clear_member_colours()
 
