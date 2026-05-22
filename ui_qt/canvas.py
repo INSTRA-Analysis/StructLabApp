@@ -148,13 +148,23 @@ class StructCanvas(QGraphicsScene):
         from ui_qt.canvas_items import NodeItem, MemberItem
 
         selected = self.selectedItems()
-        sel_nodes = [it.node for it in selected if isinstance(it, NodeItem)]
+
+        # Explicit node selection
+        node_ids: set[int] = {it.node.id for it in selected if isinstance(it, NodeItem)}
+        # Auto-include endpoint nodes of any selected member so you don't have
+        # to select nodes separately when duplicating a member directly.
+        for it in selected:
+            if isinstance(it, MemberItem):
+                node_ids.add(it.member.node_i)
+                node_ids.add(it.member.node_j)
+
+        sel_nodes = [self.model_state.get_node(nid) for nid in node_ids]
+        sel_nodes = [n for n in sel_nodes if n is not None]
         if not sel_nodes:
             return
 
-        sel_node_ids = {n.id for n in sel_nodes}
+        sel_node_ids = node_ids
         # Include all members whose both endpoints are in the selection
-        # (whether or not the member item itself was explicitly selected)
         members_to_dup = [
             m for m in self.model_state.members
             if m.node_i in sel_node_ids and m.node_j in sel_node_ids
