@@ -92,6 +92,7 @@ class StructCanvas(QGraphicsScene):
 
         # ── G-grab state ──────────────────────────────────────────────────────
         self._grab_active: bool = False
+        self._grab_is_extrude: bool = False         # True when grab follows E-extrude
         self._grab_axis: str | None = None          # None, 'X', 'Y', or 'Z'
         self._grab_origin_pos: QPointF | None = None
         self._grab_node_origins: dict[int, tuple[float, float, float]] = {}
@@ -378,6 +379,8 @@ class StructCanvas(QGraphicsScene):
             self.redo()
         elif key == Qt.Key.Key_G and not ctrl and not shift:
             self._start_grab()
+        elif key == Qt.Key.Key_E and not ctrl and not shift:
+            self._start_extrude()
         elif self._is_3d_mode():
             self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
         else:
@@ -398,11 +401,59 @@ class StructCanvas(QGraphicsScene):
         view = views[0]
         scene_pos = view.mapToScene(view.mapFromGlobal(QCursor.pos()))
         self.save_snapshot()
-        self._grab_active    = True
-        self._grab_axis      = None
-        self._grab_origin_pos = scene_pos
+        self._grab_active      = True
+        self._grab_is_extrude  = False
+        self._grab_axis        = None
+        self._grab_origin_pos  = scene_pos
         self._grab_node_origins = {n.id: (n.x, n.y, n.z) for n in sel_nodes}
-        self._grab_typed     = ""
+        self._grab_typed       = ""
+        self.invalidate(self.sceneRect())
+
+    def _start_extrude(self) -> None:
+        """E-extrude: duplicate selected nodes with new members, then grab them."""
+        sel_nodes = [it.node for it in self.selectedItems()
+                     if isinstance(it, NodeItem)]
+        if not sel_nodes:
+            return
+        views = self.views()
+        if not views:
+            return
+        from PyQt6.QtGui import QCursor
+        view = views[0]
+        scene_pos = view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+
+        self.save_snapshot()
+        self._suppress_changed = True
+        new_node_ids: list[int] = []
+        try:
+            for node in sel_nodes:
+                new_nd = self.model_state.add_node(node.x, node.y, node.z)
+                self._add_node_item(new_nd)
+                new_node_ids.append(new_nd.id)
+                member = self.model_state.add_member(node.id, new_nd.id)
+                if member:
+                    member.element_type = self._next_member_type
+                    self._add_member_item(member)
+        finally:
+            self._suppress_changed = False
+
+        # Select only the new nodes so grab moves them
+        self.clearSelection()
+        for nid in new_node_ids:
+            item = self._node_items.get(nid)
+            if item:
+                item.setSelected(True)
+
+        self._grab_active      = True
+        self._grab_is_extrude  = True
+        self._grab_axis        = None
+        self._grab_origin_pos  = scene_pos
+        self._grab_node_origins = {}
+        for nid in new_node_ids:
+            nd = self.model_state.get_node(nid)
+            if nd:
+                self._grab_node_origins[nid] = (nd.x, nd.y, nd.z)
+        self._grab_typed = ""
         self.invalidate(self.sceneRect())
 
     def _apply_grab(self, current_pos: QPointF) -> None:
@@ -519,7 +570,8 @@ class StructCanvas(QGraphicsScene):
         """Commit the grab: snap to 0.25 m grid and emit model_changed."""
         if not self._grab_active:
             return
-        self._grab_active = False
+        self._grab_active     = False
+        self._grab_is_extrude = False
         ms = self.model_state
         for nid in self._grab_node_origins:
             node = ms.get_node(nid)
@@ -542,7 +594,8 @@ class StructCanvas(QGraphicsScene):
         """Cancel grab: restore original positions via undo."""
         if not self._grab_active:
             return
-        self._grab_active = False
+        self._grab_active     = False
+        self._grab_is_extrude = False
         self._grab_node_origins = {}
         self._grab_origin_pos   = None
         self._grab_axis         = None
@@ -1229,11 +1282,12 @@ class StructView(QGraphicsView):
             self._draw_grab_status(painter, rect)
 
     def _draw_grab_status(self, painter: QPainter, rect) -> None:
-        """Draw G-grab status bar at the bottom-left of the viewport."""
+        """Draw grab/extrude status bar at the bottom-left of the viewport."""
         scene = self.scene()
-        axis   = scene._grab_axis
-        typed  = scene._grab_typed
-        scale  = self.transform().m11()
+        axis       = scene._grab_axis
+        typed      = scene._grab_typed
+        is_extrude = scene._grab_is_extrude
+        scale      = self.transform().m11()
 
         _axis_color = {'X': "#FF4444", 'Y': "#44EE44", 'Z': "#4488FF", None: "#00CCCC"}
         pen = QPen(QColor(_axis_color.get(axis, "#00CCCC")))
@@ -1245,12 +1299,13 @@ class StructView(QGraphicsView):
         font.setBold(True)
         painter.setFont(font)
 
+        verb = "EXTRUDE" if is_extrude else "GRAB"
         if typed:
-            status = f"GRAB  {axis or ''}  {typed}_"
+            status = f"{verb}  {axis or ''}  {typed}_"
         elif axis:
-            status = f"GRAB  {axis}  (move mouse or type distance)"
+            status = f"{verb}  {axis}  (move mouse or type distance)"
         else:
-            status = "GRAB  (X/Y/Z to constrain · Enter/LMB confirm · Esc cancel)"
+            status = f"{verb}  (X/Y/Z to constrain · Enter/LMB confirm · Esc cancel)"
 
         lbl_x = rect.left()  + 12 / scale
         lbl_y = rect.bottom() - 14 / scale
