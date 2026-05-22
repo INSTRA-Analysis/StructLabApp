@@ -1,0 +1,26 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Built executable
+StructLab.exe
+
+# Generated PDF docs (rebuild with: md-to-pdf docs/StructLab_User_Guide.md)
+docs/*.pdf
+
+# Windows shortcuts and build folders
+*.lnk
+Builds/
+
+# Generated benchmark report outputs
+Benchmark report/benchmarking.txt
+Benchmark report/benchmarking_report.pdf
+Benchmark report/BeamBechmark.html
+Benchmark report/BeamBechmark.ipynb
