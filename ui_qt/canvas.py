@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QGraphicsLineItem, QMenu,
 )
 from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient
 
 from ui_qt.model_state import (
     ModelState, NodeData, MemberData,
@@ -98,6 +98,9 @@ class StructCanvas(QGraphicsScene):
         self._grab_origin_pos: QPointF | None = None
         self._grab_node_origins: dict[int, tuple[float, float, float]] = {}
         self._grab_typed: str = ""                  # accumulated numeric input
+
+        # ── util colour overlay flag ──────────────────────────────────────────
+        self._util_colour_active: bool = False
 
         # ── overlay state ─────────────────────────────────────────────────────
         self._overlay_items: dict[str, list] = {}
@@ -1000,6 +1003,35 @@ class StructCanvas(QGraphicsScene):
         for mitem in self._member_items.values():
             mitem._update_pen()
 
+    def update_member_util_colours(self, member_results: list,
+                                   members: list) -> None:
+        """Colour members by EC3 utilization ratio η (combined N + M)."""
+        mem_map = {m.id: m for m in members}
+        for r in member_results:
+            mdata = mem_map.get(r.element_id)
+            mitem = self._member_items.get(r.element_id)
+            if mitem is None or mdata is None:
+                continue
+            fy   = mdata.fy if mdata.fy > 1e3 else 275e6
+            A    = mdata.A
+            W_pl = mdata.W_pl
+            N_Rd = A * fy if A > 0 else 1e20   # γM0 = 1.0
+            M_Rd = W_pl * fy if W_pl > 0 else 0.0
+            N_Ed = max(abs(r.N_i), abs(r.N_j))
+            M_Ed = max(abs(r.M_i), abs(r.M_j))
+            eta_N = N_Ed / N_Rd if N_Rd > 1e-12 else 0.0
+            eta_M = M_Ed / M_Rd if M_Rd > 1e-12 else 0.0
+            eta   = eta_N + eta_M
+            mitem.set_util_colour(eta)
+        self._util_colour_active = True
+        self.update()
+
+    def clear_util_colours(self) -> None:
+        """Reset all member colours and hide the util legend."""
+        self.clear_member_colours()
+        self._util_colour_active = False
+        self.update()
+
     def set_overlay_visible(self, layer: str, visible: bool) -> None:
         """Toggle visibility of a named overlay layer."""
         self._overlay_visible[layer] = visible
@@ -1299,6 +1331,9 @@ class StructView(QGraphicsView):
         if self.scene()._grab_active:
             self._draw_grab_status(painter, rect)
 
+        if self.scene()._util_colour_active:
+            self._draw_util_legend(painter, rect)
+
     def _draw_grab_status(self, painter: QPainter, rect) -> None:
         """Draw grab/extrude status bar at the bottom-left of the viewport."""
         scene = self.scene()
@@ -1328,6 +1363,51 @@ class StructView(QGraphicsView):
         lbl_x = rect.left()  + 12 / scale
         lbl_y = rect.bottom() - 14 / scale
         painter.drawText(QPointF(lbl_x, lbl_y), status)
+
+    def _draw_util_legend(self, painter: QPainter, rect) -> None:
+        """Draw a utilization colour bar legend in the bottom-right corner."""
+        from PyQt6.QtCore import QRectF as _QRF
+        scale = self.transform().m11()
+
+        bar_w = 120 / scale
+        bar_h = 14 / scale
+        margin = 12 / scale
+        x0 = rect.right()  - margin - bar_w
+        y0 = rect.bottom() - margin - bar_h - 22 / scale
+
+        grad = QLinearGradient(x0, 0, x0 + bar_w, 0)
+        grad.setColorAt(0.00, QColor(0,   200, 80))
+        grad.setColorAt(0.50, QColor(230, 210,  0))
+        grad.setColorAt(1.00, QColor(230,  40,  0))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.fillRect(_QRF(x0, y0, bar_w, bar_h), QBrush(grad))
+
+        border_pen = QPen(QColor(180, 180, 180, 200))
+        border_pen.setCosmetic(True)
+        painter.setPen(border_pen)
+        painter.drawRect(_QRF(x0, y0, bar_w, bar_h))
+
+        font = painter.font()
+        font.setPointSize(7)
+        painter.setFont(font)
+        lbl_pen = QPen(QColor(220, 220, 220))
+        lbl_pen.setCosmetic(True)
+        painter.setPen(lbl_pen)
+        tick_y = y0 + bar_h + 9 / scale
+        for label, frac in [("0%", 0.0), ("50%", 0.5), ("100%", 1.0)]:
+            tx = x0 + frac * bar_w
+            painter.drawLine(QPointF(tx, y0 + bar_h),
+                             QPointF(tx, y0 + bar_h + 4 / scale))
+            painter.drawText(QPointF(tx - len(label) * 2.5 / scale, tick_y), label)
+
+        title_pen = QPen(QColor(200, 200, 200))
+        title_pen.setCosmetic(True)
+        painter.setPen(title_pen)
+        painter.drawText(QPointF(x0, y0 - 5 / scale), "Utilization η  (N/Npl + M/Mpl)")
+        painter.restore()
 
     def _draw_flat_grid(self, painter: QPainter, rect) -> None:
         """Standard rectangular 2D grid."""

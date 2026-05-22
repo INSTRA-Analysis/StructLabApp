@@ -507,6 +507,29 @@ class MemberItem(QGraphicsLineItem):
             r, g, b = 160, 160, 160
         self.setPen(QPen(QColor(r, g, b), 4))
 
+    def set_util_colour(self, eta: float) -> None:
+        """Colour member by utilization ratio η: green→yellow→red (0→1→>1)."""
+        eta = max(0.0, eta)
+        if eta <= 0.5:
+            # green (0,200,80) → yellow (230,210,0)
+            t = eta / 0.5
+            r = int(0   + 230 * t)
+            g = int(200 - 200 * t + 210 * t)   # 200 → 210
+            bv = int(80 - 80 * t)
+        elif eta <= 1.0:
+            # yellow (230,210,0) → orange-red (230,60,0)
+            t = (eta - 0.5) / 0.5
+            r = int(230)
+            g = int(210 - 150 * t)
+            bv = 0
+        else:
+            # red (220,40,0) — clamped above 1.0, brighter for over-stressed
+            sat = min((eta - 1.0) / 0.5, 1.0)
+            r = int(220 + 35 * sat)
+            g = int(40  - 40 * sat)
+            bv = 0
+        self.setPen(QPen(QColor(min(r, 255), max(g, 0), max(bv, 0)), 4))
+
     # ── distributed load arrows (UDL / UVL) ──────────────────────────────────
 
     def _draw_udl_arrows(self, clear: bool = True, color: QColor | None = None,

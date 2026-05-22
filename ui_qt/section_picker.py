@@ -173,12 +173,13 @@ class SectionPickerDialog(QDialog):
     def _on_series_changed(self, series: str) -> None:
         self._profile_combo.blockSignals(True)
         self._profile_combo.clear()
-        for name, A, I in STEEL_PROFILES[series]:
+        for name, A, I, W_pl in STEEL_PROFILES[series]:
             self._profile_combo.addItem(name)
         self._profile_combo.blockSignals(False)
         self._update_preview()
 
-    def _compute_AI(self) -> tuple[float, float] | None:
+    def _compute_section(self) -> tuple[float, float, float] | None:
+        """Return (A, I, W_pl) in SI units, or None on error."""
         tab = self._tabs.currentIndex()
         try:
             if tab == 0:  # Steel
@@ -186,21 +187,34 @@ class SectionPickerDialog(QDialog):
                 idx    = self._profile_combo.currentIndex()
                 if idx < 0:
                     return None
-                _, A, I = STEEL_PROFILES[series][idx]
-                return A, I
+                _, A, I, W_pl = STEEL_PROFILES[series][idx]
+                return A, I, W_pl
             elif tab == 1:  # Rect
-                return rectangular_section(self._rect_b.value(), self._rect_h.value())
+                b = self._rect_b.value()
+                h = self._rect_h.value()
+                A, I = rectangular_section(b, h)
+                W_pl = b * h**2 / 4   # plastic modulus for solid rectangle
+                return A, I, W_pl
             elif tab == 2:  # T-beam
-                return t_beam_section(
+                A, I = t_beam_section(
                     self._tb_bf.value(), self._tb_hf.value(),
                     self._tb_bw.value(), self._tb_hw.value(),
                 )
+                return A, I, 0.0   # W_pl not implemented for T-beam
             elif tab == 3:  # Circ
-                return circular_section(self._circ_d.value())
+                d = self._circ_d.value()
+                A, I = circular_section(d)
+                W_pl = d**3 / 6     # plastic modulus for solid circle
+                return A, I, W_pl
             elif tab == 4:  # Hollow RHS
-                return hollow_rect_section(
-                    self._rhs_b.value(), self._rhs_h.value(), self._rhs_t.value()
-                )
+                b = self._rhs_b.value()
+                h = self._rhs_h.value()
+                t = self._rhs_t.value()
+                A, I = hollow_rect_section(b, h, t)
+                h_max = max(b, h)
+                b_max = min(b, h)
+                W_pl = (b_max * h_max**2 - (b_max - 2*t) * (h_max - 2*t)**2) / 4
+                return A, I, W_pl
         except Exception:
             return None
         return None
@@ -208,26 +222,26 @@ class SectionPickerDialog(QDialog):
     def _update_preview(self, *_) -> None:
         if not hasattr(self, "_lbl_A"):
             return   # called during __init__ before preview labels exist
-        result = self._compute_AI()
+        result = self._compute_section()
         if result is None:
             self._lbl_A.setText("—")
             self._lbl_I.setText("—")
         else:
-            A, I = result
+            A, I, W_pl = result
             self._lbl_A.setText(f"{A * 1e4:.2f} cm²")
             self._lbl_I.setText(f"{I * 1e8:.2f} cm⁴")
 
     def _on_accept(self) -> None:
-        result = self._compute_AI()
+        result = self._compute_section()
         if result is None:
             return
-        A, I = result
+        A, I, W_pl = result
         E = self._E_spin.value() * 1e9
-        self._result = (E, A, I)
+        self._result = (E, A, I, W_pl)
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────
 
-    def get_result(self) -> tuple[float, float, float] | None:
-        """Return (E, A, I) in SI units, or None if cancelled."""
+    def get_result(self) -> tuple[float, float, float, float] | None:
+        """Return (E, A, I, W_pl) in SI units, or None if cancelled."""
         return self._result

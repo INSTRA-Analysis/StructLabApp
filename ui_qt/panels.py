@@ -280,6 +280,8 @@ class _MemberForm(QWidget):
         self._Iy = _spin(Iy_val * 1e6,  0, 1e6,  1, 2)   # I_y weak axis
         self._J  = _spin(member.J * 1e6, 0, 1e6,  0.01, 3)  # J torsion
         self._beta = _spin(member.beta_angle, -6.283, 6.283, 0.1, 3)  # rad
+        self._fy   = _spin(member.fy / 1e6, 0, 2000, 5, 0)   # MPa
+        self._Wpl  = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)   # cm³
         sf.addRow("E (GPa):",       self._E)          # row 0
         sf.addRow("A (m²):",        self._A)          # row 1
         sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)        # row 2
@@ -289,6 +291,8 @@ class _MemberForm(QWidget):
         sf.setRowVisible(3, mode_3d)
         sf.setRowVisible(4, mode_3d)
         sf.setRowVisible(5, mode_3d)
+        sf.addRow("fy (MPa):",      self._fy)         # row 6
+        sf.addRow("W_pl (cm³):",    self._Wpl)        # row 7
         pick_btn = QPushButton("Pick from library...")
         pick_btn.clicked.connect(self._pick_section)
         sf.addRow("", pick_btn)
@@ -393,10 +397,12 @@ class _MemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I = dlg.get_result()
+            E, A, I, W_pl = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
+            if W_pl > 0:
+                self._Wpl.setValue(W_pl * 1e6)
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -429,6 +435,8 @@ class _MemberForm(QWidget):
         m.beta_angle = self._beta.value()
         m.density = self._density.value()
         m.n_sub   = self._nsub.value()
+        m.fy      = self._fy.value() * 1e6
+        m.W_pl    = self._Wpl.value() * 1e-6
         if self._load_case is not None:
             point_loads = []
             for row in range(self._pl_table.rowCount()):
@@ -463,7 +471,8 @@ def _build_section_lookup() -> dict[tuple[float, float], str]:
         from ui_qt.section_library import STEEL_PROFILES
         lookup: dict[tuple[float, float], str] = {}
         for _series, profiles in STEEL_PROFILES.items():
-            for name, A, I in profiles:
+            for entry in profiles:
+                name, A, I = entry[0], entry[1], entry[2]
                 lookup[(round(A, 8), round(I, 12))] = name
         return lookup
     except Exception:
@@ -685,7 +694,7 @@ class _MultiMemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I = dlg.get_result()
+            E, A, I, W_pl = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
