@@ -35,12 +35,12 @@ _C: list[tuple[int, int, int]] = [
 # (corner_indices, outward_normal, label, target_az, target_el)
 # target_az = None  →  keep current azimuth (for Top/Bottom faces)
 _FACES: list[tuple] = [
-    ((4, 5, 6, 7), ( 0,  0, +1), "Top",   None,    87.0),
-    ((0, 1, 2, 3), ( 0,  0, -1), "Btm",   None,   -87.0),
-    ((1, 5, 6, 2), (+1,  0,  0), "Right",  90.0,    2.0),
-    ((0, 4, 7, 3), (-1,  0,  0), "Left",  -90.0,    2.0),
-    ((2, 6, 7, 3), ( 0, +1,  0), "Back",  180.0,    2.0),
-    ((0, 1, 5, 4), ( 0, -1,  0), "Front",   0.0,    2.0),
+    ((4, 5, 6, 7), ( 0,  0, +1), "Top",   None,    90.0),
+    ((0, 1, 2, 3), ( 0,  0, -1), "Btm",   None,   -90.0),
+    ((1, 5, 6, 2), (+1,  0,  0), "Right",  90.0,    0.0),
+    ((0, 4, 7, 3), (-1,  0,  0), "Left",  -90.0,    0.0),
+    ((2, 6, 7, 3), ( 0, +1,  0), "Back",  180.0,    0.0),
+    ((0, 1, 5, 4), ( 0, -1,  0), "Front",   0.0,    0.0),
 ]
 
 # 12 edges as corner-index pairs
