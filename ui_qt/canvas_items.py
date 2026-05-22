@@ -502,10 +502,12 @@ class MemberItem(QGraphicsLineItem):
         self._qz_items: list = []
         self._qz_label_items: list = []
         self._point_load_items: list = []
+        self._partial_items: list = []
         self._update_pen()
         self._draw_udl_arrows()
         self._draw_lateral_arrows()
         self._draw_point_loads()
+        self._draw_partial_load_arrows()
 
     def update_endpoints(self) -> None:
         """Redraw line and load arrows after a connected node has moved."""
@@ -518,6 +520,7 @@ class MemberItem(QGraphicsLineItem):
             self._draw_udl_arrows()
             self._draw_lateral_arrows()
             self._draw_point_loads()
+            self._draw_partial_load_arrows()
 
     def _update_pen(self) -> None:
         pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
@@ -893,6 +896,122 @@ class MemberItem(QGraphicsLineItem):
             self._scene.addItem(lbl)
             self._point_load_items.append(lbl)
 
+    # ── partial-span distributed load arrows ─────────────────────────────────
+
+    def _draw_partial_load_arrows(self, clear: bool = True) -> None:
+        """Draw arrows for each PartialDistLoad on this member."""
+        if clear:
+            for it in self._partial_items:
+                self._scene.removeItem(it)
+            self._partial_items.clear()
+
+        ml = self._scene.model_state.active_case.get_member_load(self.member.id)
+        if not ml.partial_loads:
+            return
+
+        ni = self._scene.model_state.get_node(self.member.node_i)
+        nj = self._scene.model_state.get_node(self.member.node_j)
+        if not ni or not nj:
+            return
+
+        ix, iy = _node_pos(ni, self._scene)
+        jx, jy = _node_pos(nj, self._scene)
+        dx = jx - ix;  dy = jy - iy
+        L_px = math.hypot(dx, dy)
+        if L_px < 1:
+            return
+
+        ux, uy = dx / L_px, dy / L_px
+        ms    = self._scene.model_state
+        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+
+        if in_3d:
+            px_n, py_n = 0.0, 1.0
+        else:
+            px_n, py_n = -uy, ux
+
+        # Model-wide max across full-span and partial loads so sizes are comparable
+        _lc2   = ms.active_case
+        _mlist = ms.members
+        w_global_max = max(
+            (max(
+                abs(_lc2.get_member_load(m.id).w_start),
+                abs(_lc2.get_member_load(m.id).w_end),
+                *(abs(p.w_start) for p in _lc2.get_member_load(m.id).partial_loads),
+                *(abs(p.w_end)   for p in _lc2.get_member_load(m.id).partial_loads),
+                0.0,
+            ) for m in _mlist),
+            default=1.0,
+        ) or 1.0
+
+        draw_color = QColor("#cc5500")   # orange-red: distinct from full-span red
+        ah = 4
+
+        for pdl in ml.partial_loads:
+            a = max(0.0, min(1.0, pdl.start_pos))
+            b = max(0.0, min(1.0, pdl.end_pos))
+            if b <= a + 1e-12:
+                continue
+            w_a, w_b = pdl.w_start, pdl.w_end
+            w_ref = w_a if abs(w_a) >= abs(w_b) else w_b
+            if w_ref == 0.0:
+                continue
+            sign = 1.0 if w_ref > 0 else -1.0
+
+            ax_s = ix + a * dx;  ay_s = iy + a * dy
+            bx_s = ix + b * dx;  by_s = iy + b * dy
+            zone_dx = bx_s - ax_s;  zone_dy = by_s - ay_s
+            zone_L  = math.hypot(zone_dx, zone_dy)
+            if zone_L < 1:
+                continue
+
+            n_arr = max(2, min(10, int(zone_L / 25)))
+            path  = QPainterPath()
+
+            for i in range(n_arr + 1):
+                t = i / n_arr
+                bx = ax_s + t * zone_dx
+                by = ay_s + t * zone_dy
+                w_local  = w_a + t * (w_b - w_a)
+                arr_len  = UDL_LEN * abs(w_local) / w_global_max
+                tx = bx - sign * px_n * arr_len
+                ty = by - sign * py_n * arr_len
+                path.moveTo(tx, ty)
+                path.lineTo(bx, by)
+                path.moveTo(bx - sign * px_n * ah + ux * ah,
+                            by - sign * py_n * ah + uy * ah)
+                path.lineTo(bx, by)
+                path.lineTo(bx - sign * px_n * ah - ux * ah,
+                            by - sign * py_n * ah - uy * ah)
+
+            tip_ax = ax_s - sign * px_n * UDL_LEN * abs(w_a) / w_global_max
+            tip_ay = ay_s - sign * py_n * UDL_LEN * abs(w_a) / w_global_max
+            tip_bx = bx_s - sign * px_n * UDL_LEN * abs(w_b) / w_global_max
+            tip_by = by_s - sign * py_n * UDL_LEN * abs(w_b) / w_global_max
+            path.moveTo(tip_ax, tip_ay)
+            path.lineTo(tip_bx, tip_by)
+
+            # Boundary ticks at start and end of loaded zone
+            tick = (UDL_LEN + 4) * max(abs(w_a), abs(w_b)) / w_global_max
+            for mx, my in ((ax_s, ay_s), (bx_s, by_s)):
+                path.moveTo(mx, my)
+                path.lineTo(mx - sign * px_n * tick, my - sign * py_n * tick)
+
+            item = QGraphicsPathItem(path)
+            item.setPen(QPen(draw_color, 1.2))
+            item.setZValue(0.55)
+            self._scene.addItem(item)
+            self._partial_items.append(item)
+
+            mid_x = (tip_ax + tip_bx) / 2
+            mid_y = (tip_ay + tip_by) / 2 - sign * py_n * 8
+            val_text = (_fmt(w_a / 1e3, "kN/m") if abs(w_a - w_b) < 1e-9
+                        else f"{w_a/1e3:.1f}→{w_b/1e3:.1f} kN/m")
+            lbl = _make_label(f"{val_text} [{a:.2f}–{b:.2f}]",
+                              mid_x, mid_y, z=1.8, color=draw_color)
+            self._scene.addItem(lbl)
+            self._partial_items.append(lbl)
+
     # ── refresh / cleanup ─────────────────────────────────────────────────────
 
     def refresh(self) -> None:
@@ -906,6 +1025,7 @@ class MemberItem(QGraphicsLineItem):
         self._draw_udl_arrows()
         self._draw_lateral_arrows()
         self._draw_point_loads()
+        self._draw_partial_load_arrows()
         # Refresh hinge ring on both endpoint nodes (type may have just changed)
         for nid in (self.member.node_i, self.member.node_j):
             nitem = self._scene._node_items.get(nid)
@@ -932,3 +1052,6 @@ class MemberItem(QGraphicsLineItem):
         for item in self._point_load_items:
             self._scene.removeItem(item)
         self._point_load_items.clear()
+        for item in self._partial_items:
+            self._scene.removeItem(item)
+        self._partial_items.clear()

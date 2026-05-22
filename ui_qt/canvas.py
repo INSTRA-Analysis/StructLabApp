@@ -1069,6 +1069,7 @@ class StructCanvas(QGraphicsScene):
                 item._draw_udl_arrows()
                 item._draw_lateral_arrows()
                 item._draw_point_loads()
+                item._draw_partial_load_arrows()
 
     def clear_model(self) -> None:
         """Clear all scene items, overlay items, and model state."""

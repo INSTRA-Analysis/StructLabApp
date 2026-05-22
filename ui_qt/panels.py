@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel
 
 from ui_qt.model_state import (
     NodeData, MemberData, SupportType, ElementType, PointLoadData,
-    LoadCase, NodeLoad, MemberLoad,
+    LoadCase, NodeLoad, MemberLoad, PartialDistLoad,
 )
 
 _ASSETS = Path(__file__).parent / "assets"
@@ -384,6 +384,30 @@ class _MemberForm(QWidget):
         pl_layout.addLayout(pl_btn_row)
         layout.addWidget(pl_box)
 
+        # ── partial distributed loads ─────────────────────────────────────────
+        pdl_box = QGroupBox("Partial distributed loads  [active case]")
+        pdl_layout = QVBoxLayout(pdl_box)
+        self._pdl_table = QTableWidget(0, 4)
+        self._pdl_table.setHorizontalHeaderLabels(
+            ["Start (0–1)", "End (0–1)", "w start (kN/m)", "w end (kN/m)"]
+        )
+        self._pdl_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._pdl_table.setFixedHeight(120)
+        for pdl in ml.partial_loads:
+            self._add_pdl_row(pdl.start_pos, pdl.end_pos,
+                              pdl.w_start / 1e3, pdl.w_end / 1e3)
+        pdl_layout.addWidget(self._pdl_table)
+
+        pdl_btn_row = QHBoxLayout()
+        btn_add_pdl = QPushButton("+ Partial load")
+        btn_del_pdl = QPushButton("Remove")
+        btn_add_pdl.clicked.connect(lambda: self._add_pdl_row(0.25, 0.75, 0.0, 0.0))
+        btn_del_pdl.clicked.connect(self._remove_pdl_row)
+        pdl_btn_row.addWidget(btn_add_pdl)
+        pdl_btn_row.addWidget(btn_del_pdl)
+        pdl_layout.addLayout(pdl_btn_row)
+        layout.addWidget(pdl_box)
+
         # ── mesh ──────────────────────────────────────────────────────────────
         mesh_box = QGroupBox("Analysis mesh")
         mf = QFormLayout(mesh_box)
@@ -435,6 +459,22 @@ class _MemberForm(QWidget):
         if not rows and self._pl_table.rowCount() > 0:
             self._pl_table.removeRow(self._pl_table.rowCount() - 1)
 
+    def _add_pdl_row(self, start: float, end: float,
+                     w_start_kn: float, w_end_kn: float) -> None:
+        row = self._pdl_table.rowCount()
+        self._pdl_table.insertRow(row)
+        self._pdl_table.setCellWidget(row, 0, _spin(start,    0.0, 1.0, 0.05, 2))
+        self._pdl_table.setCellWidget(row, 1, _spin(end,      0.0, 1.0, 0.05, 2))
+        self._pdl_table.setCellWidget(row, 2, _spin(w_start_kn, -1e6, 1e6, 1.0, 2))
+        self._pdl_table.setCellWidget(row, 3, _spin(w_end_kn,   -1e6, 1e6, 1.0, 2))
+
+    def _remove_pdl_row(self) -> None:
+        rows = sorted({idx.row() for idx in self._pdl_table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self._pdl_table.removeRow(r)
+        if not rows and self._pdl_table.rowCount() > 0:
+            self._pdl_table.removeRow(self._pdl_table.rowCount() - 1)
+
     def _apply(self) -> None:
         m = self._member
         type_names = ["BEAM","BAR","PIN_LEFT","PIN_RIGHT"]
@@ -462,6 +502,21 @@ class _MemberForm(QWidget):
                     position=pos_spin.value(),
                     magnitude=val_spin.value() * 1e3,
                 ))
+            partial_loads = []
+            for row in range(self._pdl_table.rowCount()):
+                s_spin  = self._pdl_table.cellWidget(row, 0)
+                e_spin  = self._pdl_table.cellWidget(row, 1)
+                ws_spin = self._pdl_table.cellWidget(row, 2)
+                we_spin = self._pdl_table.cellWidget(row, 3)
+                start = max(0.0, min(1.0, s_spin.value()))
+                end   = max(0.0, min(1.0, e_spin.value()))
+                if end > start + 1e-6:
+                    partial_loads.append(PartialDistLoad(
+                        start_pos=start,
+                        end_pos=end,
+                        w_start=ws_spin.value() * 1e3,
+                        w_end=we_spin.value()   * 1e3,
+                    ))
             self._load_case.set_member_load(m.id, MemberLoad(
                 w_start=self._w_start.value()   * 1e3,
                 w_end=self._w_end.value()       * 1e3,
@@ -472,6 +527,7 @@ class _MemberForm(QWidget):
                 qz_start=self._qz_start.value() * 1e3,
                 qz_end=self._qz_end.value()     * 1e3,
                 point_loads=point_loads,
+                partial_loads=partial_loads,
             ))
         self._on_apply()
 
