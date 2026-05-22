@@ -1230,6 +1230,7 @@ class MainWindow(QMainWindow):
                 cache['displacements'], cache['reactions'],
                 cache['member_results'], state, dpn,
                 member_el_map=cache['member_el_map'],
+                sub_results=cache['sub_results'],
             )
 
             self._solve_cache = cache
@@ -1609,6 +1610,7 @@ class MainWindow(QMainWindow):
                 cache['displacements'], cache['reactions'],
                 cache['member_results'], state, dpn,
                 member_el_map=cache['member_el_map'],
+                sub_results=cache['sub_results'],
             )
 
             # Cache solve data for re-draw when scale spinboxes change
