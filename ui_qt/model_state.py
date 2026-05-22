@@ -307,6 +307,7 @@ class MemberData:
     beta_angle: float = 0.0  # rad — section rotation about local x-axis (3D only)
     fy: float = 275e6   # Pa — yield strength (EN 1993-1-1, default S275)
     W_pl: float = 0.0   # m³ — plastic section modulus (strong axis), 0 = not set
+    W_el: float = 0.0   # m³ — elastic section modulus (strong axis), 0 = not set
 
 
 # ── Full model state ──────────────────────────────────────────────────────────
@@ -463,7 +464,7 @@ class ModelState:
                  "E": m.E, "A": m.A, "I": m.I,
                  "I_y": m.I_y, "J": m.J, "beta_angle": m.beta_angle,
                  "n_sub": m.n_sub, "density": m.density,
-                 "fy": m.fy, "W_pl": m.W_pl}
+                 "fy": m.fy, "W_pl": m.W_pl, "W_el": m.W_el}
                 for m in self.members
             ],
             "load_cases": [lc.to_dict() for lc in self.load_cases],
@@ -516,6 +517,7 @@ class ModelState:
                 density=md.get("density", 0.0),
                 fy=md.get("fy", 275e6),
                 W_pl=md.get("W_pl", 0.0),
+                W_el=md.get("W_el", 0.0),
             ))
         if "load_cases" in d:
             s.load_cases.clear()

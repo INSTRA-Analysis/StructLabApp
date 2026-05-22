@@ -37,14 +37,14 @@ def _dspin(val: float, lo: float, hi: float, step: float,
 
 
 class SectionPickerDialog(QDialog):
-    """Modal dialog to choose material + section; returns (E, A, I) on accept."""
+    """Modal dialog to choose material + section; returns (E, A, I, W_pl, W_el) on accept."""
 
     def __init__(self, current_E: float, current_A: float, current_I: float,
                  parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Section Library")
         self.setMinimumWidth(420)
-        self._result: tuple[float, float, float] | None = None
+        self._result: tuple[float, float, float, float, float] | None = None
 
         layout = QVBoxLayout(self)
 
@@ -79,10 +79,12 @@ class SectionPickerDialog(QDialog):
         # ── Preview ───────────────────────────────────────────────────────────
         prev_box = QGroupBox("Computed section properties")
         prev_form = QFormLayout(prev_box)
-        self._lbl_A = QLabel("—")
-        self._lbl_I = QLabel("—")
+        self._lbl_A   = QLabel("—")
+        self._lbl_I   = QLabel("—")
+        self._lbl_Wel = QLabel("—")
         prev_form.addRow("A (cm²):",       self._lbl_A)
         prev_form.addRow("I (cm⁴):",       self._lbl_I)
+        prev_form.addRow("W_el (cm³):",    self._lbl_Wel)
         layout.addWidget(prev_box)
 
         # ── Buttons ───────────────────────────────────────────────────────────
@@ -173,13 +175,13 @@ class SectionPickerDialog(QDialog):
     def _on_series_changed(self, series: str) -> None:
         self._profile_combo.blockSignals(True)
         self._profile_combo.clear()
-        for name, A, I, W_pl in STEEL_PROFILES[series]:
+        for name, A, I, W_pl, W_el in STEEL_PROFILES[series]:
             self._profile_combo.addItem(name)
         self._profile_combo.blockSignals(False)
         self._update_preview()
 
-    def _compute_section(self) -> tuple[float, float, float] | None:
-        """Return (A, I, W_pl) in SI units, or None on error."""
+    def _compute_section(self) -> tuple[float, float, float, float] | None:
+        """Return (A, I, W_pl, W_el) in SI units, or None on error."""
         tab = self._tabs.currentIndex()
         try:
             if tab == 0:  # Steel
@@ -187,25 +189,27 @@ class SectionPickerDialog(QDialog):
                 idx    = self._profile_combo.currentIndex()
                 if idx < 0:
                     return None
-                _, A, I, W_pl = STEEL_PROFILES[series][idx]
-                return A, I, W_pl
+                _, A, I, W_pl, W_el = STEEL_PROFILES[series][idx]
+                return A, I, W_pl, W_el
             elif tab == 1:  # Rect
                 b = self._rect_b.value()
                 h = self._rect_h.value()
                 A, I = rectangular_section(b, h)
-                W_pl = b * h**2 / 4   # plastic modulus for solid rectangle
-                return A, I, W_pl
+                W_pl = b * h**2 / 4         # plastic modulus, solid rectangle
+                W_el = b * h**2 / 6         # elastic modulus, solid rectangle
+                return A, I, W_pl, W_el
             elif tab == 2:  # T-beam
                 A, I = t_beam_section(
                     self._tb_bf.value(), self._tb_hf.value(),
                     self._tb_bw.value(), self._tb_hw.value(),
                 )
-                return A, I, 0.0   # W_pl not implemented for T-beam
+                return A, I, 0.0, 0.0       # W_pl/W_el not computed for T-beam
             elif tab == 3:  # Circ
                 d = self._circ_d.value()
                 A, I = circular_section(d)
-                W_pl = d**3 / 6     # plastic modulus for solid circle
-                return A, I, W_pl
+                W_pl = d**3 / 6                        # plastic modulus, solid circle
+                W_el = math.pi * d**3 / 32             # elastic modulus, solid circle
+                return A, I, W_pl, W_el
             elif tab == 4:  # Hollow RHS
                 b = self._rhs_b.value()
                 h = self._rhs_h.value()
@@ -214,7 +218,8 @@ class SectionPickerDialog(QDialog):
                 h_max = max(b, h)
                 b_max = min(b, h)
                 W_pl = (b_max * h_max**2 - (b_max - 2*t) * (h_max - 2*t)**2) / 4
-                return A, I, W_pl
+                W_el = 2 * I / h_max        # elastic modulus, hollow rectangle
+                return A, I, W_pl, W_el
         except Exception:
             return None
         return None
@@ -226,22 +231,24 @@ class SectionPickerDialog(QDialog):
         if result is None:
             self._lbl_A.setText("—")
             self._lbl_I.setText("—")
+            self._lbl_Wel.setText("—")
         else:
-            A, I, W_pl = result
+            A, I, W_pl, W_el = result
             self._lbl_A.setText(f"{A * 1e4:.2f} cm²")
             self._lbl_I.setText(f"{I * 1e8:.2f} cm⁴")
+            self._lbl_Wel.setText(f"{W_el * 1e6:.1f} cm³" if W_el > 0 else "—")
 
     def _on_accept(self) -> None:
         result = self._compute_section()
         if result is None:
             return
-        A, I, W_pl = result
+        A, I, W_pl, W_el = result
         E = self._E_spin.value() * 1e9
-        self._result = (E, A, I, W_pl)
+        self._result = (E, A, I, W_pl, W_el)
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────
 
-    def get_result(self) -> tuple[float, float, float, float] | None:
-        """Return (E, A, I, W_pl) in SI units, or None if cancelled."""
+    def get_result(self) -> tuple[float, float, float, float, float] | None:
+        """Return (E, A, I, W_pl, W_el) in SI units, or None if cancelled."""
         return self._result
