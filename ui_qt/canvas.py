@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QGraphicsLineItem, QMenu,
 )
 from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient, QPixmap
+from PyQt6.QtCore import QRectF as _QRectF
 
 from ui_qt.model_state import (
     ModelState, NodeData, MemberData,
@@ -1298,6 +1299,13 @@ class StructView(QGraphicsView):
         self._view_cube = ViewCube()
         self.setMouseTracking(True)  # needed for hover updates
 
+        # Branding watermark — load logo once and cache it
+        from pathlib import Path
+        _logo = Path(__file__).parent / "assets" / "instra_logo.png"
+        self._branding_pix: QPixmap | None = (
+            QPixmap(str(_logo)) if _logo.exists() else None
+        )
+
     # ── grid drawn here so it always fills the visible viewport ──────────────
 
     # Available sub-grid spacings in metres — the renderer picks the one
@@ -1338,6 +1346,65 @@ class StructView(QGraphicsView):
 
         if self.scene()._util_colour_active:
             self._draw_util_legend(painter, rect)
+
+        self._draw_branding(painter, rect)
+
+    def _draw_branding(self, painter: QPainter, rect) -> None:
+        """Logo + product name badge pinned to the bottom-right of the viewport."""
+        scale  = self.transform().m11()
+        margin = 10 / scale
+        pad_x  = 7  / scale
+        pad_y  = 5  / scale
+        logo_h = 26 / scale
+        line_h = 13 / scale
+        box_h  = logo_h + 2 * pad_y
+        box_w  = 148 / scale
+
+        x0 = rect.right()  - margin - box_w
+        y0 = rect.bottom() - margin - box_h
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Semi-transparent dark pill
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(18, 18, 22, 160)))
+        painter.drawRoundedRect(_QRectF(x0, y0, box_w, box_h), 4 / scale, 4 / scale)
+
+        # Logo image
+        text_x = x0 + pad_x
+        if self._branding_pix and not self._branding_pix.isNull():
+            asp    = self._branding_pix.width() / max(self._branding_pix.height(), 1)
+            logo_w = asp * logo_h
+            lx     = x0 + pad_x
+            ly     = y0 + pad_y
+            painter.drawPixmap(
+                _QRectF(lx, ly, logo_w, logo_h),
+                self._branding_pix,
+                _QRectF(self._branding_pix.rect()),
+            )
+            text_x = lx + logo_w + pad_x
+
+        # Product name
+        font = painter.font()
+        font.setPointSizeF(8.0)
+        font.setBold(True)
+        painter.setFont(font)
+        name_pen = QPen(QColor(215, 215, 215))
+        name_pen.setCosmetic(True)
+        painter.setPen(name_pen)
+        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 0.88), "StructLabPro")
+
+        # Version
+        font.setPointSizeF(7.0)
+        font.setBold(False)
+        painter.setFont(font)
+        ver_pen = QPen(QColor(130, 130, 130))
+        ver_pen.setCosmetic(True)
+        painter.setPen(ver_pen)
+        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.1")
+
+        painter.restore()
 
     def _draw_grab_status(self, painter: QPainter, rect) -> None:
         """Draw grab/extrude status bar at the bottom-left of the viewport."""
