@@ -222,6 +222,14 @@ def _member_scene_geometry(
     sin_s  = dy_s / L_px
     perp_x = -sin_s
     perp_y =  cos_s
+    # Normalise perp to a consistent half-plane so that reversed ni↔nj node
+    # ordering doesn't flip the BMD to the wrong side.  Convention: sagging
+    # (positive M) always draws toward the lower-right of the screen, i.e. the
+    # perp should satisfy perp_y > 0 (downward), or perp_x > 0 when the member
+    # is exactly vertical on screen (perp_y ≈ 0).
+    if perp_y < -1e-9 or (abs(perp_y) < 1e-9 and perp_x < 0):
+        perp_x = -perp_x
+        perp_y = -perp_y
     L_total = sum(el_by_id[e].length for e in el_ids if e in el_by_id)
     return ix_s, iy_s, jx_s, jy_s, L_px, cos_s, sin_s, perp_x, perp_y, L_total
 
