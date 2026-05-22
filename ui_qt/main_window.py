@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QDockWidget, QPushButton, QButtonGroup, QMessageBox,
     QFileDialog, QMenu, QMenuBar,
     QLabel, QDoubleSpinBox, QComboBox, QGraphicsView,
-    QScrollArea, QVBoxLayout,
+    QScrollArea, QVBoxLayout, QHBoxLayout,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QColor
@@ -49,6 +49,65 @@ _DOCK_HDR = (
     "background:#00ACC1; color:#ffffff;"
     " font-size:11px; font-weight:bold; padding-left:6px;"
 )
+
+_DOCK_BTN = (
+    "QPushButton { background: transparent; color: #ffffff; border: none;"
+    " font-size: 13px; padding: 0 2px; }"
+    "QPushButton:hover { background: rgba(255,255,255,50); border-radius: 2px; }"
+)
+
+
+class _DockTitleBar(QWidget):
+    """Cyan title bar for a QDockWidget.
+
+    Double-click or the ⧉ button floats/re-docks the panel.
+    The × button hides it (restore via View menu or keyboard shortcut).
+    """
+
+    def __init__(self, title: str, dock: QDockWidget) -> None:
+        super().__init__()
+        self._dock = dock
+        self.setFixedHeight(22)
+        self.setStyleSheet(_DOCK_HDR)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 0, 4, 0)
+        layout.setSpacing(2)
+
+        lbl = QLabel(title)
+        lbl.setStyleSheet("background: transparent;")
+        layout.addWidget(lbl)
+        layout.addStretch()
+
+        self._float_btn = QPushButton("⧉")
+        self._float_btn.setFixedSize(20, 18)
+        self._float_btn.setToolTip("Detach to floating window  (double-click title to toggle)")
+        self._float_btn.setStyleSheet(_DOCK_BTN)
+        self._float_btn.clicked.connect(self._toggle_float)
+        layout.addWidget(self._float_btn)
+
+        hide_btn = QPushButton("✕")
+        hide_btn.setFixedSize(20, 18)
+        hide_btn.setToolTip("Hide panel  (restore via View menu)")
+        hide_btn.setStyleSheet(_DOCK_BTN)
+        hide_btn.clicked.connect(dock.hide)
+        layout.addWidget(hide_btn)
+
+        dock.topLevelChanged.connect(self._on_float_changed)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self._toggle_float()
+
+    def _toggle_float(self) -> None:
+        self._dock.setFloating(not self._dock.isFloating())
+
+    def _on_float_changed(self, floating: bool) -> None:
+        if floating:
+            self._float_btn.setText("⊟")
+            self._float_btn.setToolTip("Re-dock panel")
+        else:
+            self._float_btn.setText("⧉")
+            self._float_btn.setToolTip("Detach to floating window  (double-click title to toggle)")
 
 
 class MainWindow(QMainWindow):
@@ -81,6 +140,7 @@ class MainWindow(QMainWindow):
         self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
         self._build_view_toolbar()
         self._build_docks()
+        self._build_view_menu()
         self._build_status_bar()
         self._wire_selection()
         self._setup_autosave()
@@ -318,6 +378,37 @@ class MainWindow(QMainWindow):
     def _on_about(self) -> None:
         from ui_qt.dialogs import show_about
         show_about(self)
+
+    # ── view menu (built after docks exist) ───────────────────────────────────
+
+    def _build_view_menu(self) -> None:
+        """Add a View menu that toggles the two dock panels.
+
+        Must be called after _build_docks() so self._left_dock / _right_dock exist.
+        """
+        mb = self.menuBar()
+        view_menu = mb.addMenu("View")
+
+        act_props = self._left_dock.toggleViewAction()
+        act_props.setText("Properties Panel")
+        act_props.setShortcut("Alt+1")
+        view_menu.addAction(act_props)
+
+        act_res = self._right_dock.toggleViewAction()
+        act_res.setText("Results Panel")
+        act_res.setShortcut("Alt+2")
+        view_menu.addAction(act_res)
+
+        view_menu.addSeparator()
+        view_menu.addAction("Reset Panel Layout", self._reset_dock_layout)
+
+    def _reset_dock_layout(self) -> None:
+        """Return both panels to their default docked positions."""
+        for dock in (self._left_dock, self._right_dock):
+            dock.setFloating(False)
+            dock.show()
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,  self._left_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
 
     # ── 3D mode toggle ────────────────────────────────────────────────────────
 
@@ -887,47 +978,45 @@ class MainWindow(QMainWindow):
         self._props_panel.set_model_state(self._scene.model_state)
         self._results_panel = ResultsPanel()
 
+        _feat = (
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+        )
+
         # ── Left dock: Properties ─────────────────────────────────────────────
         props_frame = QWidget()
         pf = QVBoxLayout(props_frame)
         pf.setContentsMargins(0, 0, 0, 0)
         pf.setSpacing(0)
-        props_hdr = QLabel("  Properties")
-        props_hdr.setFixedHeight(22)
-        props_hdr.setStyleSheet(_DOCK_HDR)
-        pf.addWidget(props_hdr)
         props_scroll = QScrollArea()
         props_scroll.setWidget(self._props_panel)
         props_scroll.setWidgetResizable(True)
-        props_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        props_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         pf.addWidget(props_scroll)
 
-        left_dock = QDockWidget(self)
-        left_dock.setWidget(props_frame)
-        left_dock.setMinimumWidth(230)
-        left_dock.setTitleBarWidget(QWidget())
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
+        self._left_dock = QDockWidget(self)
+        self._left_dock.setWidget(props_frame)
+        self._left_dock.setMinimumWidth(230)
+        self._left_dock.setFeatures(_feat)
+        self._left_dock.setWindowTitle("Properties")
+        self._left_dock.setTitleBarWidget(_DockTitleBar("  Properties", self._left_dock))
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._left_dock)
 
         # ── Right dock: Results ───────────────────────────────────────────────
         results_frame = QWidget()
         rf = QVBoxLayout(results_frame)
         rf.setContentsMargins(0, 0, 0, 0)
         rf.setSpacing(0)
-        results_hdr = QLabel("  Results")
-        results_hdr.setFixedHeight(22)
-        results_hdr.setStyleSheet(_DOCK_HDR)
-        rf.addWidget(results_hdr)
         rf.addWidget(self._results_panel)
         rf.addWidget(BrandingFooter())
 
-        right_dock = QDockWidget(self)
-        right_dock.setWidget(results_frame)
-        right_dock.setMinimumWidth(260)
-        right_dock.setTitleBarWidget(QWidget())
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
-        self._right_dock = right_dock
+        self._right_dock = QDockWidget(self)
+        self._right_dock.setWidget(results_frame)
+        self._right_dock.setMinimumWidth(260)
+        self._right_dock.setFeatures(_feat)
+        self._right_dock.setWindowTitle("Results")
+        self._right_dock.setTitleBarWidget(_DockTitleBar("  Results", self._right_dock))
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
 
     # ── status bar ────────────────────────────────────────────────────────────
 
