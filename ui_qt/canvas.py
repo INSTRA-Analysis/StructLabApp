@@ -954,9 +954,9 @@ class StructCanvas(QGraphicsScene):
         self.invalidate(self.sceneRect())
 
     def set_view(self, azimuth: float = -45.0, elevation: float = 30.0) -> None:
-        """Set the 3D view angle and reproject.  Elevation clamped to 2–88°."""
+        """Set the 3D view angle and reproject.  Elevation clamped to 0–90°."""
         _proj.ISO_AZIMUTH = azimuth
-        _proj.ISO_ELEVATION = max(2.0, min(88.0, elevation))
+        _proj.ISO_ELEVATION = max(0.0, min(90.0, elevation))
         self.reproject()
 
     def set_view_preset(self, azimuth: float, elevation: float) -> None:
