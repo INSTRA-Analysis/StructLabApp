@@ -295,7 +295,13 @@ class _MemberForm(QWidget):
 
         layout.addWidget(QLabel(f"<b>Member {member.id}</b> (nodes {member.node_i}→{member.node_j})"))
 
-        # ── element type ─────────────────────────────────────────────────────
+        tabs = QTabWidget()
+
+        # ══ Tab 1 — Section ══════════════════════════════════════════════════
+        _sec_tab = QWidget()
+        _sl = QVBoxLayout(_sec_tab)
+        _sl.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         type_box = QGroupBox("Element type")
         tf = QFormLayout(type_box)
         self._type_combo = QComboBox()
@@ -303,38 +309,30 @@ class _MemberForm(QWidget):
         type_names = ["BEAM","BAR","PIN_LEFT","PIN_RIGHT"]
         self._type_combo.setCurrentIndex(type_names.index(member.element_type.name))
         tf.addRow("Type:", self._type_combo)
-        layout.addWidget(type_box)
+        _sl.addWidget(type_box)
 
-        # ── section properties ────────────────────────────────────────────────
         sec_box = QGroupBox("Section properties")
         sf = QFormLayout(sec_box)
-        self._E = _spin(member.E / 1e9, 0, 1000, 1, 1)   # GPa
-        self._A = _spin(member.A,       0, 100,  0.001, 6)
-        self._I = _spin(member.I * 1e6, 0, 1e6,  1, 2)   # ×10⁻⁶ m⁴ display (I_z)
-        Iy_val  = member.I_y if member.I_y is not None else member.I
-        self._Iy = _spin(Iy_val * 1e6,  0, 1e6,  1, 2)   # I_y weak axis
-        self._J  = _spin(member.J * 1e6, 0, 1e6,  0.01, 3)  # J torsion
-        self._beta = _spin(member.beta_angle, -6.283, 6.283, 0.1, 3)  # rad
-        self._fy   = _spin(member.fy / 1e6, 0, 2000, 5, 0)       # MPa
-        self._Wpl  = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)   # cm³
-        self._Wel  = _spin(member.W_el * 1e6, 0, 1e6, 0.1, 1)   # cm³
-        sf.addRow("E (GPa):",         self._E)        # row 0
-        sf.addRow("A (m²):",          self._A)        # row 1
-        sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)        # row 2
-        sf.addRow("I_y (×10⁻⁶ m⁴):", self._Iy)       # row 3
-        sf.addRow("J (×10⁻⁶ m⁴):",   self._J)        # row 4
-        sf.addRow("β angle (rad):",   self._beta)     # row 5
+        self._E    = _spin(member.E / 1e9,        0, 1000,   1,    1)
+        self._A    = _spin(member.A,               0, 100,    0.001, 6)
+        self._I    = _spin(member.I * 1e6,         0, 1e6,    1,    2)
+        _Iy_val    = member.I_y if member.I_y is not None else member.I
+        self._Iy   = _spin(_Iy_val * 1e6,          0, 1e6,    1,    2)
+        self._J    = _spin(member.J * 1e6,         0, 1e6,    0.01, 3)
+        self._beta = _spin(member.beta_angle, -6.283, 6.283,  0.1,  3)
+        sf.addRow("E (GPa):",         self._E)
+        sf.addRow("A (m²):",          self._A)
+        sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)
+        sf.addRow("I_y (×10⁻⁶ m⁴):", self._Iy)
+        sf.addRow("J (×10⁻⁶ m⁴):",   self._J)
+        sf.addRow("β angle (rad):",   self._beta)
         sf.setRowVisible(3, mode_3d)
         sf.setRowVisible(4, mode_3d)
         sf.setRowVisible(5, mode_3d)
-        sf.addRow("fy (MPa):",        self._fy)       # row 6
-        sf.addRow("W_pl (cm³):",      self._Wpl)      # row 7
-        sf.addRow("W_el (cm³):",      self._Wel)      # row 8
-        pick_btn = QPushButton("Pick from library...")
-        pick_btn.clicked.connect(self._pick_section)
-        sf.addRow("", pick_btn)
+        _pick_btn = QPushButton("Pick from library...")
+        _pick_btn.clicked.connect(self._pick_section)
+        sf.addRow("", _pick_btn)
 
-        # ── material / density ───────────────────────────────────────────────
         self._mat_preset = QComboBox()
         self._mat_preset.addItems(["Steel (7850)", "Concrete (2500)", "Timber (500)", "Custom"])
         _PRESETS = [7850.0, 2500.0, 500.0]
@@ -347,11 +345,10 @@ class _MemberForm(QWidget):
         self._density = _spin(member.density, 0, 20000, 50, 0)
         self._density.setToolTip("0 = no self-weight contribution from this member")
         def _mark_custom() -> None:
-            self._mat_preset.setCurrentIndex(3)   # "Custom"
+            self._mat_preset.setCurrentIndex(3)
         self._density.valueChanged.connect(_mark_custom)
         sf.addRow("Density (kg/m³):", self._density)
 
-        # Set preset index to match current density without triggering valueChanged loop
         self._mat_preset.blockSignals(True)
         for _i, _d in enumerate(_PRESETS):
             if abs(member.density - _d) < 1.0:
@@ -360,10 +357,24 @@ class _MemberForm(QWidget):
         else:
             self._mat_preset.setCurrentIndex(3)
         self._mat_preset.blockSignals(False)
+        _sl.addWidget(sec_box)
 
-        layout.addWidget(sec_box)
+        mesh_box = QGroupBox("Analysis mesh")
+        mf = QFormLayout(mesh_box)
+        self._nsub = QSpinBox()
+        self._nsub.setRange(1, 100)
+        self._nsub.setValue(member.n_sub)
+        self._nsub.setToolTip("Number of sub-elements for analysis (more = better deformed shape)")
+        mf.addRow("Sub-elements:", self._nsub)
+        _sl.addWidget(mesh_box)
 
-        # ── distributed loads — all cases ────────────────────────────────────
+        tabs.addTab(_sec_tab, "Section")
+
+        # ══ Tab 2 — Loads ════════════════════════════════════════════════════
+        _ld_tab = QWidget()
+        _ll = QVBoxLayout(_ld_tab)
+        _ll.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         dl_box = QGroupBox("Distributed loads")
         dl_layout = QVBoxLayout(dl_box)
         self._dl_table = QTableWidget(0, 4)
@@ -379,7 +390,6 @@ class _MemberForm(QWidget):
         self._dl_table.setFixedHeight(120)
         self._dl_populate()
         dl_layout.addWidget(self._dl_table)
-
         dl_btn_row = QHBoxLayout()
         for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]:
             if _key == "qy" and not mode_3d:
@@ -393,11 +403,11 @@ class _MemberForm(QWidget):
         _rm.clicked.connect(self._dl_remove_row)
         dl_btn_row.addWidget(_rm)
         dl_layout.addLayout(dl_btn_row)
-        layout.addWidget(dl_box)
+        _ll.addWidget(dl_box)
 
-        # ── point loads on member ─────────────────────────────────────────────
         ml = self._load_case.get_member_load(member.id) if self._load_case else MemberLoad()
-        pl_box = QGroupBox("Point loads on member  [active case]")
+
+        pl_box = QGroupBox("Point loads  [active case]")
         pl_layout = QVBoxLayout(pl_box)
         self._pl_table = QTableWidget(0, 3)
         self._pl_table.setHorizontalHeaderLabels(["Type", "Pos (0–1)", "Value (kN or kN·m)"])
@@ -406,7 +416,6 @@ class _MemberForm(QWidget):
         for pl in ml.point_loads:
             self._add_pl_row(pl.load_type, pl.position, pl.magnitude / 1e3)
         pl_layout.addWidget(self._pl_table)
-
         pl_btn_row = QHBoxLayout()
         btn_add_f = QPushButton("+ Force")
         btn_add_m = QPushButton("+ Moment")
@@ -420,9 +429,8 @@ class _MemberForm(QWidget):
         pl_btn_row.addWidget(btn_add_m)
         pl_btn_row.addWidget(btn_del)
         pl_layout.addLayout(pl_btn_row)
-        layout.addWidget(pl_box)
+        _ll.addWidget(pl_box)
 
-        # ── partial distributed loads ─────────────────────────────────────────
         pdl_box = QGroupBox("Partial distributed loads  [active case]")
         pdl_layout = QVBoxLayout(pdl_box)
         self._pdl_table = QTableWidget(0, 4)
@@ -435,7 +443,6 @@ class _MemberForm(QWidget):
             self._add_pdl_row(pdl.start_pos, pdl.end_pos,
                               pdl.w_start / 1e3, pdl.w_end / 1e3)
         pdl_layout.addWidget(self._pdl_table)
-
         pdl_btn_row = QHBoxLayout()
         btn_add_pdl = QPushButton("+ Partial load")
         btn_del_pdl = QPushButton("Remove")
@@ -446,17 +453,28 @@ class _MemberForm(QWidget):
         pdl_btn_row.addWidget(btn_add_pdl)
         pdl_btn_row.addWidget(btn_del_pdl)
         pdl_layout.addLayout(pdl_btn_row)
-        layout.addWidget(pdl_box)
+        _ll.addWidget(pdl_box)
 
-        # ── mesh ──────────────────────────────────────────────────────────────
-        mesh_box = QGroupBox("Analysis mesh")
-        mf = QFormLayout(mesh_box)
-        self._nsub = QSpinBox()
-        self._nsub.setRange(1, 100)
-        self._nsub.setValue(member.n_sub)
-        self._nsub.setToolTip("Number of sub-elements for analysis (more = better deformed shape)")
-        mf.addRow("Sub-elements:", self._nsub)
-        layout.addWidget(mesh_box)
+        tabs.addTab(_ld_tab, "Loads")
+
+        # ══ Tab 3 — Design ═══════════════════════════════════════════════════
+        _ds_tab = QWidget()
+        _dl2 = QVBoxLayout(_ds_tab)
+        _dl2.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        design_box = QGroupBox("Design properties")
+        df = QFormLayout(design_box)
+        self._fy   = _spin(member.fy / 1e6,    0, 2000, 5,   0)
+        self._Wpl  = _spin(member.W_pl * 1e6,  0, 1e6,  0.1, 1)
+        self._Wel  = _spin(member.W_el * 1e6,  0, 1e6,  0.1, 1)
+        df.addRow("fy (MPa):",   self._fy)
+        df.addRow("W_pl (cm³):", self._Wpl)
+        df.addRow("W_el (cm³):", self._Wel)
+        _dl2.addWidget(design_box)
+
+        tabs.addTab(_ds_tab, "Design")
+
+        layout.addWidget(tabs)
 
         btn = QPushButton("Apply")
         btn.clicked.connect(self._apply)
