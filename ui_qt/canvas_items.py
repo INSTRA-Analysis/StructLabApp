@@ -577,8 +577,7 @@ class MemberItem(QGraphicsLineItem):
             self._udl_label_items.clear()
 
         ml = self._scene.model_state.active_case.get_member_load(self.member.id)
-        w_start = ml.w_start
-        w_end   = ml.w_end
+        w_start, w_end = ml.net("w")
         if w_start == 0.0 and w_end == 0.0:
             return
 
@@ -613,8 +612,8 @@ class MemberItem(QGraphicsLineItem):
         # different load intensities show proportionally different arrow lengths.
         _lc2 = self._scene.model_state.active_case
         w_global_max = max(
-            (max(abs(_lc2.get_member_load(m.id).w_start),
-                 abs(_lc2.get_member_load(m.id).w_end))
+            (max(abs(_lc2.get_member_load(m.id).net("w")[0]),
+                 abs(_lc2.get_member_load(m.id).net("w")[1]))
              for m in self._scene.model_state.members),
             default=w_max,
         ) or w_max
@@ -694,39 +693,42 @@ class MemberItem(QGraphicsLineItem):
         # members scale proportionally to each other (same logic as w_global_max).
         _lc2    = ms.active_case
         _mlist  = ms.members
-        def _gmax(attr_s: str, attr_e: str) -> float:
-            v = max((max(abs(getattr(_lc2.get_member_load(m.id), attr_s)),
-                         abs(getattr(_lc2.get_member_load(m.id), attr_e)))
+        def _gmax(direction: str) -> float:
+            v = max((max(abs(_lc2.get_member_load(m.id).net(direction)[0]),
+                         abs(_lc2.get_member_load(m.id).net(direction)[1]))
                      for m in _mlist), default=0.0)
             return v or 0.0
 
         # Draw qx arrows
-        if ml.qx_start != 0.0 or ml.qx_end != 0.0:
+        qxs, qxe = ml.net("qx")
+        if qxs != 0.0 or qxe != 0.0:
             gdir = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
             self._draw_global_axis_arrows(
-                ml.qx_start, ml.qx_end, gdir,
+                qxs, qxe, gdir,
                 self._qx_items, self._qx_label_items,
                 color or QColor("#E65100"), "kN/m X", perp_offset, lc_name,
-                global_max=_gmax("qx_start", "qx_end"),
+                global_max=_gmax("qx"),
             )
 
         # Draw qy arrows (3D only)
-        if in_3d and (ml.qy_start != 0.0 or ml.qy_end != 0.0):
+        qys, qye = ml.net("qy")
+        if in_3d and (qys != 0.0 or qye != 0.0):
             gdir = _proj_y_screen_dir()
             self._draw_global_axis_arrows(
-                ml.qy_start, ml.qy_end, gdir,
+                qys, qye, gdir,
                 self._qy_items, self._qy_label_items,
                 color or QColor("#FF6F00"), "kN/m Y", perp_offset, lc_name,
-                global_max=_gmax("qy_start", "qy_end"),
+                global_max=_gmax("qy"),
             )
 
         # Draw qz arrows (3D only) — positive = downward (gravity convention, same as w)
-        if in_3d and (ml.qz_start != 0.0 or ml.qz_end != 0.0):
+        qzs, qze = ml.net("qz")
+        if in_3d and (qzs != 0.0 or qze != 0.0):
             self._draw_global_axis_arrows(
-                ml.qz_start, ml.qz_end, (0.0, 1.0),  # screen-down = gravity direction
+                qzs, qze, (0.0, 1.0),  # screen-down = gravity direction
                 self._qz_items, self._qz_label_items,
                 color or QColor("#1565C0"), "kN/m Z", perp_offset, lc_name,
-                global_max=_gmax("qz_start", "qz_end"),
+                global_max=_gmax("qz"),
             )
 
     def _draw_global_axis_arrows(
@@ -935,8 +937,8 @@ class MemberItem(QGraphicsLineItem):
         _mlist = ms.members
         w_global_max = max(
             (max(
-                abs(_lc2.get_member_load(m.id).w_start),
-                abs(_lc2.get_member_load(m.id).w_end),
+                abs(_lc2.get_member_load(m.id).net("w")[0]),
+                abs(_lc2.get_member_load(m.id).net("w")[1]),
                 *(abs(p.w_start) for p in _lc2.get_member_load(m.id).partial_loads),
                 *(abs(p.w_end)   for p in _lc2.get_member_load(m.id).partial_loads),
                 0.0,

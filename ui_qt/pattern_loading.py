@@ -50,7 +50,7 @@ def detect_pattern_loading(state) -> PatternAssessment:
     q_loaded: set[int] = set()
     for lc in q_cases:
         for mid, ml in lc.member_loads.items():
-            if ml.w_start != 0.0 or ml.w_end != 0.0 or ml.point_loads:
+            if ml.dist_loads or ml.point_loads:
                 q_loaded.add(mid)
 
     if len(q_loaded) < 2:

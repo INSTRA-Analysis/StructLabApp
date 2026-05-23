@@ -22,7 +22,7 @@ from elements.bar_element import BarElement
 
 from ui_qt.model_state import (
     ModelState, SupportType, ElementType,
-    LoadCase, NodeLoad, MemberLoad, PointLoadData, PartialDistLoad, LoadCombination,
+    LoadCase, NodeLoad, MemberLoad, PointLoadData, PartialDistLoad, DistLoad, LoadCombination,
 )
 
 
@@ -164,9 +164,11 @@ def build_model(state: ModelState,
             model.elements.append(el)
             el_ids.append(next_el_id)
 
-            # Distributed load: UDL when uniform, UVL per sub-element when varying
-            w_i = ml.w_start + k / n_sub * (ml.w_end - ml.w_start)
-            w_j = ml.w_start + (k + 1) / n_sub * (ml.w_end - ml.w_start)
+            # Distributed load: sum all 'w' dist_loads; UDL when uniform, UVL when varying
+            w_i = sum(dl.w_start + k       / n_sub * (dl.w_end - dl.w_start)
+                      for dl in ml.dist_loads if dl.direction == "w")
+            w_j = sum(dl.w_start + (k + 1) / n_sub * (dl.w_end - dl.w_start)
+                      for dl in ml.dist_loads if dl.direction == "w")
             if w_i != 0.0 or w_j != 0.0:
                 if abs(w_i - w_j) < 1e-12:
                     model.element_loads.append(ElementLoad(
@@ -269,11 +271,12 @@ def build_model(state: ModelState,
 
         # Lateral (global X) distributed load: lump as nodal X-forces per sub-element.
         # Accuracy increases with n_sub (trapezoidal integration → exact in the limit).
-        if ml.qx_start != 0.0 or ml.qx_end != 0.0:
+        qxs, qxe = ml.net("qx")
+        if qxs != 0.0 or qxe != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
-                qx_k  = ml.qx_start + k       / n_sub * (ml.qx_end - ml.qx_start)
-                qx_k1 = ml.qx_start + (k + 1) / n_sub * (ml.qx_end - ml.qx_start)
+                qx_k  = qxs + k       / n_sub * (qxe - qxs)
+                qx_k1 = qxs + (k + 1) / n_sub * (qxe - qxs)
                 fx_sub = (qx_k + qx_k1) / 2.0 * sub_L
                 for nid in (chain[k], chain[k + 1]):
                     model.nodal_loads.append(NodalLoad(
@@ -281,11 +284,12 @@ def build_model(state: ModelState,
                     ))
 
         # Global Y distributed load: lump as nodal Y-forces per sub-element.
-        if ml.qy_start != 0.0 or ml.qy_end != 0.0:
+        qys, qye = ml.net("qy")
+        if qys != 0.0 or qye != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
-                qy_k  = ml.qy_start + k       / n_sub * (ml.qy_end - ml.qy_start)
-                qy_k1 = ml.qy_start + (k + 1) / n_sub * (ml.qy_end - ml.qy_start)
+                qy_k  = qys + k       / n_sub * (qye - qys)
+                qy_k1 = qys + (k + 1) / n_sub * (qye - qys)
                 fy_sub = (qy_k + qy_k1) / 2.0 * sub_L
                 for nid in (chain[k], chain[k + 1]):
                     model.nodal_loads.append(NodalLoad(
@@ -295,11 +299,12 @@ def build_model(state: ModelState,
         # Global Z distributed load: lump as nodal Z-forces per sub-element.
         # Sign convention: positive qz = downward (gravity direction), same as w.
         # Applied as negative fz so that +qz produces -Z (downward) nodal forces.
-        if ml.qz_start != 0.0 or ml.qz_end != 0.0:
+        qzs, qze = ml.net("qz")
+        if qzs != 0.0 or qze != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
-                qz_k  = ml.qz_start + k       / n_sub * (ml.qz_end - ml.qz_start)
-                qz_k1 = ml.qz_start + (k + 1) / n_sub * (ml.qz_end - ml.qz_start)
+                qz_k  = qzs + k       / n_sub * (qze - qzs)
+                qz_k1 = qzs + (k + 1) / n_sub * (qze - qzs)
                 fz_sub = (qz_k + qz_k1) / 2.0 * sub_L
                 for nid in (chain[k], chain[k + 1]):
                     model.nodal_loads.append(NodalLoad(
@@ -421,15 +426,12 @@ def _merge_load_case_into(
             PartialDistLoad(p.start_pos, p.end_pos, factor * p.w_start, factor * p.w_end)
             for p in ml.partial_loads
         ]
+        scaled_dl = [
+            DistLoad(dl.direction, factor * dl.w_start, factor * dl.w_end)
+            for dl in ml.dist_loads
+        ]
         target.member_loads[mid] = MemberLoad(
-            w_start       = ex.w_start   + factor * ml.w_start,
-            w_end         = ex.w_end     + factor * ml.w_end,
-            qx_start      = ex.qx_start  + factor * ml.qx_start,
-            qx_end        = ex.qx_end    + factor * ml.qx_end,
-            qy_start      = ex.qy_start  + factor * ml.qy_start,
-            qy_end        = ex.qy_end    + factor * ml.qy_end,
-            qz_start      = ex.qz_start  + factor * ml.qz_start,
-            qz_end        = ex.qz_end    + factor * ml.qz_end,
+            dist_loads    = ex.dist_loads    + scaled_dl,
             point_loads   = ex.point_loads   + scaled_pl,
             partial_loads = ex.partial_loads + scaled_pdl,
         )

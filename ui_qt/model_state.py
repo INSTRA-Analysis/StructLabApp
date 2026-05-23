@@ -40,6 +40,18 @@ class PartialDistLoad:
 
 
 @dataclass
+class DistLoad:
+    """Full-span distributed load on a member (one direction, linearly varying).
+
+    direction: 'w' = local ⊥ to member (↓ positive), 'qx'/'qy'/'qz' = global axes.
+    w_start/w_end: intensity in N/m at node_i/node_j.
+    """
+    direction: str          # "w", "qx", "qy", or "qz"
+    w_start:   float = 0.0  # N/m at node_i
+    w_end:     float = 0.0  # N/m at node_j
+
+
+@dataclass
 class NodeLoad:
     """Loads applied at a node for one load case (global axes)."""
     fx: float = 0.0       # N, positive → right
@@ -63,25 +75,46 @@ class MemberLoad:
       qx  — global X distributed load; +X positive (rightward)
       qy  — global Y distributed load; +Y positive (into scene, 3D only)
       qz  — vertical distributed load; ↓ positive (gravity direction, same as w, 3D only)
+
+    Use dist_loads for all full-span distributed loads. The legacy scalar fields
+    (w_start, w_end, qx_start …) are supported for backward compat — __post_init__
+    migrates any non-zero value into a DistLoad entry and zeros the scalar.
     """
-    w_start: float = 0.0      # N/m at node_i, ↓ positive (local ⊥ to member)
-    w_end: float = 0.0        # N/m at node_j
-    qx_start: float = 0.0    # N/m at node_i, +X positive (global X, rightward)
-    qx_end: float = 0.0      # N/m at node_j
-    qy_start: float = 0.0    # N/m at node_i, +Y positive (global Y, depth — 3D only)
-    qy_end: float = 0.0      # N/m at node_j
-    qz_start: float = 0.0    # N/m at node_i, ↓ positive (downward / gravity — 3D only)
-    qz_end: float = 0.0      # N/m at node_j
+    dist_loads:    list = field(default_factory=list)  # list[DistLoad]
     point_loads:   list = field(default_factory=list)  # list[PointLoadData]
     partial_loads: list = field(default_factory=list)  # list[PartialDistLoad]
+    # Legacy scalar fields — auto-migrated and zeroed by __post_init__
+    w_start:  float = 0.0
+    w_end:    float = 0.0
+    qx_start: float = 0.0
+    qx_end:   float = 0.0
+    qy_start: float = 0.0
+    qy_end:   float = 0.0
+    qz_start: float = 0.0
+    qz_end:   float = 0.0
+
+    def __post_init__(self) -> None:
+        for key, ws, we in [
+            ("w",  self.w_start,  self.w_end),
+            ("qx", self.qx_start, self.qx_end),
+            ("qy", self.qy_start, self.qy_end),
+            ("qz", self.qz_start, self.qz_end),
+        ]:
+            if ws != 0.0 or we != 0.0:
+                self.dist_loads.append(DistLoad(key, ws, we))
+        self.w_start = self.w_end = 0.0
+        self.qx_start = self.qx_end = 0.0
+        self.qy_start = self.qy_end = 0.0
+        self.qz_start = self.qz_end = 0.0
+
+    def net(self, direction: str) -> tuple[float, float]:
+        """Summed intensity for one direction across all dist_loads entries."""
+        ws = sum(dl.w_start for dl in self.dist_loads if dl.direction == direction)
+        we = sum(dl.w_end   for dl in self.dist_loads if dl.direction == direction)
+        return ws, we
 
     def is_zero(self) -> bool:
-        return (self.w_start == 0.0 and self.w_end == 0.0
-                and self.qx_start == 0.0 and self.qx_end == 0.0
-                and self.qy_start == 0.0 and self.qy_end == 0.0
-                and self.qz_start == 0.0 and self.qz_end == 0.0
-                and not self.point_loads
-                and not self.partial_loads)
+        return not self.dist_loads and not self.point_loads and not self.partial_loads
 
 
 # ── Load category (EN 1990) ───────────────────────────────────────────────────
@@ -147,14 +180,11 @@ class LoadCase:
             },
             "member_loads": {
                 str(mid): {
-                    "w_start": ml.w_start,
-                    "w_end": ml.w_end,
-                    "qx_start": ml.qx_start,
-                    "qx_end": ml.qx_end,
-                    "qy_start": ml.qy_start,
-                    "qy_end": ml.qy_end,
-                    "qz_start": ml.qz_start,
-                    "qz_end": ml.qz_end,
+                    "dist_loads": [
+                        {"direction": dl.direction,
+                         "w_start": dl.w_start, "w_end": dl.w_end}
+                        for dl in ml.dist_loads
+                    ],
                     "point_loads": [
                         {"load_type": pl.load_type, "position": pl.position,
                          "magnitude": pl.magnitude}
@@ -206,18 +236,32 @@ class LoadCase:
                 )
                 for p in ml_data.get("partial_loads", [])
             ]
-            lc.member_loads[int(mid_str)] = MemberLoad(
-                w_start=ml_data.get("w_start", 0.0),
-                w_end=ml_data.get("w_end", 0.0),
-                qx_start=ml_data.get("qx_start", 0.0),
-                qx_end=ml_data.get("qx_end", 0.0),
-                qy_start=ml_data.get("qy_start", 0.0),
-                qy_end=ml_data.get("qy_end", 0.0),
-                qz_start=ml_data.get("qz_start", 0.0),
-                qz_end=ml_data.get("qz_end", 0.0),
-                point_loads=point_loads,
-                partial_loads=partial_loads,
-            )
+            dl_raw = ml_data.get("dist_loads")
+            if dl_raw is not None:
+                # New format: explicit dist_loads list
+                dist_loads = [
+                    DistLoad(d["direction"], d.get("w_start", 0.0), d.get("w_end", 0.0))
+                    for d in dl_raw
+                ]
+                lc.member_loads[int(mid_str)] = MemberLoad(
+                    dist_loads=dist_loads,
+                    point_loads=point_loads,
+                    partial_loads=partial_loads,
+                )
+            else:
+                # Old format: scalar fields — __post_init__ migrates them
+                lc.member_loads[int(mid_str)] = MemberLoad(
+                    w_start=ml_data.get("w_start", 0.0),
+                    w_end=ml_data.get("w_end", 0.0),
+                    qx_start=ml_data.get("qx_start", 0.0),
+                    qx_end=ml_data.get("qx_end", 0.0),
+                    qy_start=ml_data.get("qy_start", 0.0),
+                    qy_end=ml_data.get("qy_end", 0.0),
+                    qz_start=ml_data.get("qz_start", 0.0),
+                    qz_end=ml_data.get("qz_end", 0.0),
+                    point_loads=point_loads,
+                    partial_loads=partial_loads,
+                )
         return lc
 
 
