@@ -1010,11 +1010,11 @@ def demo_3d_portal() -> ModelState:
     _mb(s, n5.id, n6.id, IPE_360, udl=15_000.0, case=lc_g)
     _mb(s, n7.id, n6.id, HEB_260)
 
-    # Roof purlins (along Y, connecting front to back)
+    # Roof purlins (along Y, connecting front to back) — continuous connection
     for ni, nj in [(n1, n5), (n2, n6)]:
         purlin = s.add_member(ni.id, nj.id)
         purlin.E, purlin.A, purlin.I = IPE_300
-        purlin.element_type = ElementType.PIN_LEFT
+        purlin.element_type = ElementType.BEAM
 
     _nload(s, n1.id, fx=4_000.0, case=lc_w)
     _nload(s, n2.id, fx=4_000.0, case=lc_w)
