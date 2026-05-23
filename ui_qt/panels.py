@@ -62,7 +62,6 @@ class PropertiesPanel(QWidget):
         self._layout.addWidget(self._placeholder)
         self._content: QWidget | None = None
         self.refresh_callback = None      # set by MainWindow
-        self.switch_case_callback = None  # set by MainWindow; called with lc_id
         self._model_state = None          # set by MainWindow via set_model_state()
 
     def set_model_state(self, state) -> None:
@@ -92,7 +91,6 @@ class PropertiesPanel(QWidget):
     def show_member(self, member: MemberData) -> None:
         self._replace(_MemberForm(
             member, self._model_state, self._on_apply, self._is_3d(),
-            switch_case_fn=self.switch_case_to,
         ))
 
     def show_nodes(self, nodes: list) -> None:
@@ -122,11 +120,6 @@ class PropertiesPanel(QWidget):
     def _on_apply(self) -> None:
         if self.refresh_callback:
             self.refresh_callback()
-
-    def switch_case_to(self, lc_id: int) -> None:
-        """Called by the member form when the user wants to edit a different case."""
-        if self.switch_case_callback:
-            self.switch_case_callback(lc_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,15 +282,13 @@ def _load_summary(ml: MemberLoad) -> str:
 
 class _MemberForm(QWidget):
     def __init__(self, member: MemberData, model_state,
-                 on_apply, mode_3d: bool = False,
-                 switch_case_fn=None) -> None:
+                 on_apply, mode_3d: bool = False) -> None:
         super().__init__()
-        self._member        = member
-        self._model_state   = model_state
-        self._load_case     = model_state.active_case if model_state else None
-        self._on_apply      = on_apply
-        self._mode_3d       = mode_3d
-        self._switch_case_fn = switch_case_fn
+        self._member      = member
+        self._model_state = model_state
+        self._load_case   = model_state.active_case if model_state else None
+        self._on_apply    = on_apply
+        self._mode_3d     = mode_3d
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 

@@ -975,7 +975,6 @@ class MainWindow(QMainWindow):
     def _build_docks(self) -> None:
         self._props_panel = PropertiesPanel()
         self._props_panel.refresh_callback = self._on_properties_applied
-        self._props_panel.switch_case_callback = self._on_switch_case_from_panel
         self._props_panel.set_model_state(self._scene.model_state)
         self._results_panel = ResultsPanel()
 
@@ -1042,7 +1041,11 @@ class MainWindow(QMainWindow):
         self._syncing_selection = True
         try:
             from ui_qt.canvas_items import NodeItem, MemberItem
-            selected = self._scene.selectedItems()
+            try:
+                selected = self._scene.selectedItems()
+            except RuntimeError:
+                return  # scene already destroyed during window close
+
             nodes   = [it.node   for it in selected if isinstance(it, NodeItem)]
             members = [it.member for it in selected if isinstance(it, MemberItem)]
 
@@ -1239,18 +1242,6 @@ class MainWindow(QMainWindow):
         self._refresh_lc_combo()
         self._scene.refresh_all_loads()
         self._sb.showMessage(f"Load case removed: {lc.name}")
-
-    def _on_switch_case_from_panel(self, lc_id: int) -> None:
-        """Switch the active load case from a click in the member Properties panel."""
-        state = self._scene.model_state
-        state.active_case_id = lc_id
-        self._scene._show_all_cases = False
-        self._refresh_lc_combo()
-        # Re-trigger selection so the Properties form rebuilds with the new case.
-        self._on_selection_changed()
-        self._scene.refresh_all_loads()
-        lc = state.active_case
-        self._sb.showMessage(f"Active load case: {lc.name}")
 
     def _on_sw_toggle(self, checked: bool) -> None:
         """Create/enable or disable the dedicated self-weight load case."""
