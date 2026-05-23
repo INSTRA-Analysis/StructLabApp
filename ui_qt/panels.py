@@ -1106,9 +1106,15 @@ class ResultsPanel(QWidget):
             "M- (kN·m)", "@ x/L",
         ])
 
-        self._tabs.addTab(self._wrap(self._disp_table),  "Displacements")
-        self._tabs.addTab(self._wrap(self._react_table), "Reactions")
-        self._tabs.addTab(self._wrap(self._force_table), "Member forces")
+        self._design_table = self._make_table([
+            "Member", "M_Ed (kN·m)", "M_pl (kN·m)", "M_el (kN·m)",
+            "η_pl (%)", "η_el (%)", "Status",
+        ])
+
+        self._tabs.addTab(self._wrap(self._disp_table),   "Displacements")
+        self._tabs.addTab(self._wrap(self._react_table),  "Reactions")
+        self._tabs.addTab(self._wrap(self._force_table),  "Member forces")
+        self._tabs.addTab(self._wrap(self._design_table), "Design")
 
         # Envelope header — shown when results are from a combination envelope.
         # insertWidget(0, ...) places it ABOVE the tabs at the top of the panel.
@@ -1138,10 +1144,12 @@ class ResultsPanel(QWidget):
         self._disp_row_to_node:    list[int] = []
         self._react_row_to_node:   list[int] = []
         self._force_row_to_member: list[int] = []
+        self._design_row_to_member: list[int] = []
         self._syncing = False   # guard: prevents table→canvas→table loops
 
         # Multi-row selection
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._force_table, self._design_table):
             tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             tbl.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
 
@@ -1151,6 +1159,7 @@ class ResultsPanel(QWidget):
         self._react_table.itemSelectionChanged.connect(
             lambda: self._emit_node_sel(self._react_table, self._react_row_to_node))
         self._force_table.itemSelectionChanged.connect(self._emit_member_sel)
+        self._design_table.itemSelectionChanged.connect(self._emit_design_member_sel)
 
     # ── public ────────────────────────────────────────────────────────────────
 
@@ -1162,12 +1171,14 @@ class ResultsPanel(QWidget):
         kwargs: sub_results, member_el_map — used for peak moment scanning.
         """
         self._restore_force_tab()
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._force_table, self._design_table):
             tbl.blockSignals(True)
 
         self._disp_row_to_node    = []
         self._react_row_to_node   = []
         self._force_row_to_member = []
+        self._design_row_to_member = []
 
         # θ_z is at DOF offset 2 in 2D and offset 5 in 3D
         rot_offset = 5 if dpn == 6 else 2
@@ -1207,6 +1218,7 @@ class ResultsPanel(QWidget):
         col_vals: dict[int, list[float]] = {1: [], 2: [], 3: [], 4: [], 5: [], 7: []}
         xL_plus:  list[float] = []  # x/L where M+ peak occurs per member
         xL_minus: list[float] = []  # x/L where M- peak occurs per member
+        design_data: list[tuple[int, float]] = []  # (mid, M_Ed N·m)
 
         for row, res in enumerate(member_results):
             mid  = res.element_id
@@ -1256,6 +1268,7 @@ class ResultsPanel(QWidget):
             col_vals[5].append(Mp_kNm)
             col_vals[7].append(Mm_kNm)
             xL_plus.append(xL_p);    xL_minus.append(xL_m)
+            design_data.append((mid, max(abs(M_plus), abs(M_minus))))
 
         # Footer Max / Min rows
         if n_members > 0:
@@ -1280,8 +1293,11 @@ class ResultsPanel(QWidget):
                 f"{min_v[7]:.3f}", f"{xL_min_minus:.2f}",
             ], bg="#001a2a", fg="#64b5f6")
 
-        for tbl in (self._disp_table, self._react_table, self._force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._force_table, self._design_table):
             tbl.blockSignals(False)
+
+        self._populate_design_table(design_data, model_state)
 
         self._env_label.hide()
         self._placeholder.hide()
@@ -1318,12 +1334,14 @@ class ResultsPanel(QWidget):
         self._tabs.removeTab(2)
         self._tabs.insertTab(2, self._wrap(self._env_force_table), "Member forces ▲")
 
-        for tbl in (self._disp_table, self._react_table, self._env_force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._env_force_table, self._design_table):
             tbl.blockSignals(True)
 
-        self._disp_row_to_node    = []
-        self._react_row_to_node   = []
-        self._force_row_to_member = []
+        self._disp_row_to_node     = []
+        self._react_row_to_node    = []
+        self._force_row_to_member  = []
+        self._design_row_to_member = []
         state = model_state
         n_runs = len(solve_runs)
 
@@ -1362,6 +1380,7 @@ class ResultsPanel(QWidget):
 
         # ── Member forces (simplified 4-column envelope) ───────────────────────
         self._env_force_table.setRowCount(len(state.members))
+        env_design_data: list[tuple[int, float]] = []
         for row, md in enumerate(state.members):
             all_res = [
                 r for run in solve_runs
@@ -1379,9 +1398,13 @@ class ResultsPanel(QWidget):
                 f"{N / 1e3:.3f}", f"{V / 1e3:.3f}", f"{M / 1e3:.3f}",
             ])
             self._force_row_to_member.append(md.id)
+            env_design_data.append((md.id, abs(M)))
 
-        for tbl in (self._disp_table, self._react_table, self._env_force_table):
+        for tbl in (self._disp_table, self._react_table,
+                    self._env_force_table, self._design_table):
             tbl.blockSignals(False)
+
+        self._populate_design_table(env_design_data, state)
 
         self._env_label.setText(
             f"▲  Envelope — {n_runs} combinations.  "
@@ -1441,9 +1464,68 @@ class ResultsPanel(QWidget):
         """Highlight rows matching member_ids (called by canvas selection change)."""
         self._syncing = True
         try:
-            self._highlight_rows(self._force_table, self._force_row_to_member, member_ids)
+            self._highlight_rows(self._force_table,  self._force_row_to_member,  member_ids)
+            self._highlight_rows(self._design_table, self._design_row_to_member, member_ids)
         finally:
             self._syncing = False
+
+    def _populate_design_table(
+        self, m_ed_data: list[tuple[int, float]], model_state
+    ) -> None:
+        """Fill the Design tab from (member_id, M_Ed_Nm) pairs."""
+        self._design_row_to_member = []
+        self._design_table.blockSignals(True)
+        self._design_table.setRowCount(len(m_ed_data))
+
+        for row, (mid, M_Ed) in enumerate(m_ed_data):
+            md   = model_state.get_member(mid)
+            fy   = md.fy   if md else 275e6
+            W_pl = md.W_pl if md else 0.0
+            W_el = md.W_el if md else 0.0
+
+            M_pl = fy * W_pl
+            M_el = fy * W_el
+
+            eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
+            eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
+
+            if eta_pl is not None:
+                status = "PASS ✓" if eta_pl <= 100.0 else "FAIL ✗"
+            else:
+                status = "N/A — set W_pl"
+
+            self._set_row(self._design_table, row, [
+                str(mid),
+                f"{M_Ed / 1e3:.3f}",
+                f"{M_pl / 1e3:.3f}" if M_pl > 0 else "—",
+                f"{M_el / 1e3:.3f}" if M_el > 0 else "—",
+                f"{eta_pl:.1f}" if eta_pl is not None else "—",
+                f"{eta_el:.1f}" if eta_el is not None else "—",
+                status,
+            ])
+            self._design_row_to_member.append(mid)
+
+            # Colour-code by utilisation
+            if eta_pl is not None:
+                if eta_pl <= 80.0:
+                    bg, fg = QColor("#1b3a1b"), QColor("#90ee90")   # green — low
+                elif eta_pl <= 100.0:
+                    bg, fg = QColor("#3a3000"), QColor("#ffe066")   # amber — near limit
+                else:
+                    bg, fg = QColor("#3a0000"), QColor("#ff6b6b")   # red — exceeded
+            else:
+                bg = QColor(30, 30, 30)
+                fg = QColor("#909090")
+
+            bg_brush = QBrush(bg)
+            fg_brush = QBrush(fg)
+            for col in range(self._design_table.columnCount()):
+                item = self._design_table.item(row, col)
+                if item:
+                    item.setBackground(bg_brush)
+                    item.setForeground(fg_brush)
+
+        self._design_table.blockSignals(False)
 
     def _highlight_rows(self, table: QTableWidget, row_to_id: list[int],
                         ids: list[int]) -> None:
@@ -1485,6 +1567,15 @@ class ResultsPanel(QWidget):
         ids = list({self._force_row_to_member[idx.row()]
                     for idx in tbl.selectedIndexes()
                     if idx.column() == 0 and idx.row() < len(self._force_row_to_member)})
+        self.members_selected.emit(ids)
+
+    def _emit_design_member_sel(self) -> None:
+        if self._syncing:
+            return
+        ids = list({self._design_row_to_member[idx.row()]
+                    for idx in self._design_table.selectedIndexes()
+                    if idx.column() == 0
+                    and idx.row() < len(self._design_row_to_member)})
         self.members_selected.emit(ids)
 
     # ── helpers ───────────────────────────────────────────────────────────────
