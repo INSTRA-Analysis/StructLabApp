@@ -101,8 +101,7 @@ def test_roundtrip_model_structure():
             for mid in olc.member_loads:
                 oml = olc.member_loads[mid]
                 rml = rlc.member_loads[mid]
-                assert rml.w_start == pytest.approx(oml.w_start)
-                assert rml.w_end == pytest.approx(oml.w_end)
+                assert rml.net("w") == pytest.approx(oml.net("w"))
 
         # Check combinations
         for oc, rc in zip(original.combinations, reloaded.combinations):
@@ -207,8 +206,9 @@ def test_roundtrip_with_lateral_qx():
 
         rlc = reloaded.load_cases[0]
         rml = rlc.member_loads[m.id]
-        assert rml.qx_start == pytest.approx(2_000.0)
-        assert rml.qx_end == pytest.approx(3_500.0)
+        qxs, qxe = rml.net("qx")
+        assert qxs == pytest.approx(2_000.0)
+        assert qxe == pytest.approx(3_500.0)
 
         # Solve both and compare
         lc_orig = s.load_cases[0]

@@ -353,14 +353,14 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
         for mid, ml in lc.member_loads.items():
             if ml.is_zero():
                 continue
-            has_w  = ml.w_start  or ml.w_end
-            has_qx = ml.qx_start or ml.qx_end
+            w_s,  w_e  = ml.net("w")
+            qx_s, qx_e = ml.net("qx")
             ml_rows.append([
                 str(mid),
-                f"{ml.w_start/1e3:.3f}"  if ml.w_start  else "—",
-                f"{ml.w_end/1e3:.3f}"    if ml.w_end    else "—",
-                f"{ml.qx_start/1e3:.3f}" if ml.qx_start else "—",
-                f"{ml.qx_end/1e3:.3f}"   if ml.qx_end   else "—",
+                f"{w_s/1e3:.3f}"   if w_s   else "—",
+                f"{w_e/1e3:.3f}"   if w_e   else "—",
+                f"{qx_s/1e3:.3f}"  if qx_s  else "—",
+                f"{qx_e/1e3:.3f}"  if qx_e  else "—",
                 f"{len(ml.point_loads)} pt" if ml.point_loads else "—",
             ])
         if ml_rows:

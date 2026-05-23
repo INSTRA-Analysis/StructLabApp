@@ -202,9 +202,11 @@ class TestLateralLoadSerialisation:
         state2 = ModelState.from_dict(d)
 
         ml = state2.active_case.get_member_load(m.id)
-        assert ml.qx_start == 2e3, f"qx_start={ml.qx_start}"
-        assert ml.qx_end   == 8e3, f"qx_end={ml.qx_end}"
-        assert ml.w_start  == 5e3, f"w_start (unchanged)={ml.w_start}"
+        qxs, qxe = ml.net("qx")
+        ws,  _we = ml.net("w")
+        assert qxs == 2e3, f"qx_start={qxs}"
+        assert qxe == 8e3, f"qx_end={qxe}"
+        assert ws  == 5e3, f"w_start (unchanged)={ws}"
 
     def test_old_slab_backward_compat(self):
         """Dict without qx_* keys deserialises to qx=0 (old .slab files)."""
@@ -219,9 +221,11 @@ class TestLateralLoadSerialisation:
         }
         lc = LoadCase.from_dict(d)
         ml = lc.get_member_load(0)
-        assert ml.qx_start == 0.0
-        assert ml.qx_end   == 0.0
-        assert ml.w_start  == 3000.0
+        qxs, qxe = ml.net("qx")
+        ws,  _we = ml.net("w")
+        assert qxs == 0.0
+        assert qxe == 0.0
+        assert ws  == 3000.0
 
     def test_is_zero_with_only_qx(self):
         """MemberLoad with only qx set is not considered zero."""
