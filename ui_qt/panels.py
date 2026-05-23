@@ -371,39 +371,35 @@ class _MemberForm(QWidget):
 
         layout.addWidget(sec_box)
 
-        # ── distributed load (read from active load case) ─────────────────────
-        ml = self._load_case.get_member_load(member.id) if self._load_case else MemberLoad()
-        load_box = QGroupBox("Distributed loads  [active case]")
-        lf = QFormLayout(load_box)
-        self._w_start  = _spin(ml.w_start  / 1e3, -1e6, 1e6, 1, 1)
-        self._w_end    = _spin(ml.w_end    / 1e3, -1e6, 1e6, 1, 1)
-        self._qx_start = _spin(ml.qx_start / 1e3, -1e6, 1e6, 1, 1)
-        self._qx_end   = _spin(ml.qx_end   / 1e3, -1e6, 1e6, 1, 1)
-        self._qy_start = _spin(ml.qy_start / 1e3, -1e6, 1e6, 1, 1)
-        self._qy_end   = _spin(ml.qy_end   / 1e3, -1e6, 1e6, 1, 1)
-        self._qz_start = _spin(ml.qz_start / 1e3, -1e6, 1e6, 1, 1)
-        self._qz_end   = _spin(ml.qz_end   / 1e3, -1e6, 1e6, 1, 1)
-        lf.addRow("w start (kN/m):", self._w_start)                            # row 0
-        lf.addRow("w end   (kN/m):", self._w_end)                              # row 1
-        lf.addRow("", QLabel("Local ⊥ to member  —  ↓ positive"))             # row 2
-        lf.addRow("qx start (kN/m):", self._qx_start)                         # row 3
-        lf.addRow("qx end   (kN/m):", self._qx_end)                           # row 4
-        lf.addRow("", QLabel("Global X (→ right)  —  + rightward"))           # row 5
-        lf.addRow("qy start (kN/m):", self._qy_start)                         # row 6
-        lf.addRow("qy end   (kN/m):", self._qy_end)                           # row 7
-        lf.addRow("", QLabel("Global Y (↗ depth)  —  + into scene  (3D)"))   # row 8
-        lf.addRow("qz start (kN/m):", self._qz_start)                         # row 9
-        lf.addRow("qz end   (kN/m):", self._qz_end)                           # row 10
-        lf.addRow("", QLabel("Global Z (↓ gravity)  —  + downward  (3D)"))          # row 11
-        lf.setRowVisible(6,  mode_3d)
-        lf.setRowVisible(7,  mode_3d)
-        lf.setRowVisible(8,  mode_3d)
-        lf.setRowVisible(9,  mode_3d)
-        lf.setRowVisible(10, mode_3d)
-        lf.setRowVisible(11, mode_3d)
-        layout.addWidget(load_box)
+        # ── distributed loads — all cases ────────────────────────────────────
+        dl_box = QGroupBox("Distributed loads")
+        dl_layout = QVBoxLayout(dl_box)
+        self._dl_table = QTableWidget(0, 4)
+        self._dl_table.setHorizontalHeaderLabels(
+            ["Case", "Direction", "w start (kN/m)", "w end (kN/m)"]
+        )
+        hh = self._dl_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._dl_table.verticalHeader().setVisible(False)
+        self._dl_table.setFixedHeight(130)
+        self._dl_populate()
+        dl_layout.addWidget(self._dl_table)
+
+        dl_btn_row = QHBoxLayout()
+        add_dl_btn = QPushButton("+ Add load")
+        add_dl_btn.clicked.connect(self._on_add_dl)
+        rem_dl_btn = QPushButton("Remove")
+        rem_dl_btn.clicked.connect(self._on_remove_dl)
+        dl_btn_row.addWidget(add_dl_btn)
+        dl_btn_row.addWidget(rem_dl_btn)
+        dl_layout.addLayout(dl_btn_row)
+        layout.addWidget(dl_box)
 
         # ── point loads on member ─────────────────────────────────────────────
+        ml = self._load_case.get_member_load(member.id) if self._load_case else MemberLoad()
         pl_box = QGroupBox("Point loads on member  [active case]")
         pl_layout = QVBoxLayout(pl_box)
         self._pl_table = QTableWidget(0, 3)
@@ -611,6 +607,100 @@ class _MemberForm(QWidget):
         if not rows and self._pl_table.rowCount() > 0:
             self._pl_table.removeRow(self._pl_table.rowCount() - 1)
 
+    # ── distributed loads table helpers ──────────────────────────────────────
+
+    _DL_DIRS = [
+        ("w",  "Local ↓  (w)",     "Full-span load local ⊥ to member  —  ↓ positive"),
+        ("qx", "qx  (→ Global X)", "Global X direction  —  + rightward"),
+        ("qy", "qy  (↗ Global Y)", "Global Y direction  —  + into scene  (3D only)"),
+        ("qz", "qz  (↓ Global Z)", "Global Z direction  —  + downward  (3D only)"),
+    ]
+
+    def _dl_dir_options(self) -> list[tuple[str, str, str]]:
+        return [d for d in self._DL_DIRS if d[0] not in ("qy", "qz") or self._mode_3d]
+
+    def _dl_populate(self) -> None:
+        self._dl_table.setRowCount(0)
+        if not self._model_state:
+            return
+        for lc in self._model_state.load_cases:
+            ml = lc.get_member_load(self._member.id)
+            for key, ws, we in [
+                ("w",  ml.w_start,  ml.w_end),
+                ("qx", ml.qx_start, ml.qx_end),
+                ("qy", ml.qy_start, ml.qy_end),
+                ("qz", ml.qz_start, ml.qz_end),
+            ]:
+                if key in ("qy", "qz") and not self._mode_3d:
+                    continue
+                if ws != 0.0 or we != 0.0:
+                    self._dl_add_row(lc.id, key, ws / 1e3, we / 1e3)
+
+    def _dl_add_row(self, lc_id: int, direction_key: str,
+                    ws_kn: float, we_kn: float) -> None:
+        row = self._dl_table.rowCount()
+        self._dl_table.insertRow(row)
+
+        case_combo = QComboBox()
+        active_id = self._model_state.active_case_id if self._model_state else -1
+        for lc in (self._model_state.load_cases if self._model_state else []):
+            cat   = getattr(lc, "category", "")
+            label = f"[{cat}] {lc.name}" if cat else lc.name
+            case_combo.addItem(label, userData=lc.id)
+            if lc.id == lc_id:
+                case_combo.setCurrentIndex(case_combo.count() - 1)
+        self._dl_table.setCellWidget(row, 0, case_combo)
+
+        dir_combo = QComboBox()
+        for dkey, dlabel, dtip in self._dl_dir_options():
+            dir_combo.addItem(dlabel, userData=dkey)
+        for i in range(dir_combo.count()):
+            if dir_combo.itemData(i) == direction_key:
+                dir_combo.setCurrentIndex(i)
+                break
+        self._dl_table.setCellWidget(row, 1, dir_combo)
+        self._dl_table.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
+        self._dl_table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+
+    def _on_add_dl(self) -> None:
+        if not self._model_state:
+            return
+        used: set[tuple[int, str]] = set()
+        for r in range(self._dl_table.rowCount()):
+            cc = self._dl_table.cellWidget(r, 0)
+            dc = self._dl_table.cellWidget(r, 1)
+            if cc and dc:
+                used.add((cc.currentData(), dc.currentData()))
+
+        menu = QMenu(self)
+        for lc in self._model_state.load_cases:
+            cat   = getattr(lc, "category", "")
+            lc_label = f"[{cat}] {lc.name}" if cat else lc.name
+            sub = menu.addMenu(lc_label)
+            any_added = False
+            for dkey, dlabel, dtip in self._dl_dir_options():
+                if (lc.id, dkey) not in used:
+                    act = sub.addAction(dlabel)
+                    act.setToolTip(dtip)
+                    act.setData((lc.id, dkey))
+                    any_added = True
+            if not any_added:
+                sub.setEnabled(False)
+
+        btn = self.sender()
+        pos = btn.mapToGlobal(btn.rect().bottomLeft())
+        chosen = menu.exec(pos)
+        if chosen and chosen.data():
+            lc_id, dkey = chosen.data()
+            self._dl_add_row(lc_id, dkey, 0.0, 0.0)
+
+    def _on_remove_dl(self) -> None:
+        rows = sorted({i.row() for i in self._dl_table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self._dl_table.removeRow(r)
+        if not rows and self._dl_table.rowCount() > 0:
+            self._dl_table.removeRow(self._dl_table.rowCount() - 1)
+
     def _add_pdl_row(self, start: float, end: float,
                      w_start_kn: float, w_end_kn: float) -> None:
         row = self._pdl_table.rowCount()
@@ -642,7 +732,8 @@ class _MemberForm(QWidget):
         m.fy      = self._fy.value() * 1e6
         m.W_pl    = self._Wpl.value() * 1e-6
         m.W_el    = self._Wel.value() * 1e-6
-        if self._load_case is not None:
+        if self._model_state is not None:
+            # ── point loads (active case) ─────────────────────────────────────
             point_loads = []
             for row in range(self._pl_table.rowCount()):
                 combo    = self._pl_table.cellWidget(row, 0)
@@ -654,6 +745,8 @@ class _MemberForm(QWidget):
                     position=pos_spin.value(),
                     magnitude=val_spin.value() * 1e3,
                 ))
+
+            # ── partial loads (active case) ───────────────────────────────────
             partial_loads = []
             for row in range(self._pdl_table.rowCount()):
                 s_spin  = self._pdl_table.cellWidget(row, 0)
@@ -664,23 +757,40 @@ class _MemberForm(QWidget):
                 end   = max(0.0, min(1.0, e_spin.value()))
                 if end > start + 1e-6:
                     partial_loads.append(PartialDistLoad(
-                        start_pos=start,
-                        end_pos=end,
+                        start_pos=start, end_pos=end,
                         w_start=ws_spin.value() * 1e3,
                         w_end=we_spin.value()   * 1e3,
                     ))
-            self._load_case.set_member_load(m.id, MemberLoad(
-                w_start=self._w_start.value()   * 1e3,
-                w_end=self._w_end.value()       * 1e3,
-                qx_start=self._qx_start.value() * 1e3,
-                qx_end=self._qx_end.value()     * 1e3,
-                qy_start=self._qy_start.value() * 1e3,
-                qy_end=self._qy_end.value()     * 1e3,
-                qz_start=self._qz_start.value() * 1e3,
-                qz_end=self._qz_end.value()     * 1e3,
-                point_loads=point_loads,
-                partial_loads=partial_loads,
-            ))
+
+            # ── distributed loads (all cases from table) ──────────────────────
+            dl_map: dict[int, dict[str, tuple[float, float]]] = {}
+            for row in range(self._dl_table.rowCount()):
+                cc = self._dl_table.cellWidget(row, 0)
+                dc = self._dl_table.cellWidget(row, 1)
+                ws = self._dl_table.cellWidget(row, 2)
+                we = self._dl_table.cellWidget(row, 3)
+                if cc and dc and ws and we:
+                    dl_map.setdefault(cc.currentData(), {})[dc.currentData()] = (
+                        ws.value() * 1e3, we.value() * 1e3,
+                    )
+
+            active_id = self._model_state.active_case_id
+            for lc in self._model_state.load_cases:
+                case_dl  = dl_map.get(lc.id, {})
+                ws_n, we_n = case_dl.get("w",  (0.0, 0.0))
+                qxs, qxe   = case_dl.get("qx", (0.0, 0.0))
+                qys, qye   = case_dl.get("qy", (0.0, 0.0))
+                qzs, qze   = case_dl.get("qz", (0.0, 0.0))
+                existing   = lc.get_member_load(m.id)
+                pl  = point_loads  if lc.id == active_id else existing.point_loads
+                pdl = partial_loads if lc.id == active_id else existing.partial_loads
+                lc.set_member_load(m.id, MemberLoad(
+                    w_start=ws_n,  w_end=we_n,
+                    qx_start=qxs, qx_end=qxe,
+                    qy_start=qys, qy_end=qye,
+                    qz_start=qzs, qz_end=qze,
+                    point_loads=pl, partial_loads=pdl,
+                ))
         self._on_apply()
 
 
