@@ -372,7 +372,7 @@ class _MemberForm(QWidget):
         layout.addWidget(sec_box)
 
         # ── distributed load (read from active load case) ─────────────────────
-        ml = load_case.get_member_load(member.id) if load_case else MemberLoad()
+        ml = self._load_case.get_member_load(member.id) if self._load_case else MemberLoad()
         load_box = QGroupBox("Distributed loads  [active case]")
         lf = QFormLayout(load_box)
         self._w_start  = _spin(ml.w_start  / 1e3, -1e6, 1e6, 1, 1)
