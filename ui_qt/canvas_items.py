@@ -11,7 +11,7 @@ import math
 from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsItem, QGraphicsPathItem,
-    QGraphicsSimpleTextItem,
+    QGraphicsSimpleTextItem, QStyle,
 )
 from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QTransform
@@ -190,7 +190,19 @@ class NodeItem(QGraphicsEllipseItem):
                     if m.node_i == self.node.id or m.node_j == self.node.id:
                         mitem.update_endpoints()
 
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            if value:
+                self.setBrush(QBrush(QColor("#ffcc00")))
+                self.setPen(QPen(QColor("#ffffff"), 2))
+            else:
+                self.setBrush(QBrush(QColor("#2255cc")))
+                self.setPen(QPen(QColor("#003399"), 1))
+
         return super().itemChange(change, value)
+
+    def paint(self, painter, option, widget=None) -> None:
+        option.state = option.state & ~QStyle.StateFlag.State_Selected
+        super().paint(painter, option, widget)
 
     # ── support symbol ────────────────────────────────────────────────────────
 
@@ -491,6 +503,8 @@ class MemberItem(QGraphicsLineItem):
         super().__init__(ix, iy, jx, jy)
         self.member = member
         self._scene = scene
+        self._base_pen: QPen | None = None
+        self._is_selected: bool = False
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setZValue(1)
         self._udl_items: list = []
@@ -522,11 +536,28 @@ class MemberItem(QGraphicsLineItem):
             self._draw_point_loads()
             self._draw_partial_load_arrows()
 
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self._is_selected = bool(value)
+            self._apply_pen()
+        return super().itemChange(change, value)
+
+    def paint(self, painter, option, widget=None) -> None:
+        option.state = option.state & ~QStyle.StateFlag.State_Selected
+        super().paint(painter, option, widget)
+
+    def _apply_pen(self) -> None:
+        if self._is_selected:
+            self.setPen(QPen(QColor("#ffcc00"), 5))
+        elif self._base_pen is not None:
+            self.setPen(self._base_pen)
+
     def _update_pen(self) -> None:
         pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
         pen_copy = QPen(pen)
         pen_copy.setWidth(3)
-        self.setPen(pen_copy)
+        self._base_pen = pen_copy
+        self._apply_pen()
 
     def set_force_colour(self, N: float, max_N: float) -> None:
         """Colour member by axial force: red=compression, blue=tension."""
@@ -541,7 +572,8 @@ class MemberItem(QGraphicsLineItem):
             r, g, b = int(180 - 170 * t), int(180 - 170 * t), int(220)
         else:
             r, g, b = 160, 160, 160
-        self.setPen(QPen(QColor(r, g, b), 4))
+        self._base_pen = QPen(QColor(r, g, b), 4)
+        self._apply_pen()
 
     def set_util_colour(self, eta: float) -> None:
         """Colour member by utilization ratio η: green→yellow→red (0→1→>1)."""
@@ -564,7 +596,8 @@ class MemberItem(QGraphicsLineItem):
             r = int(220 + 35 * sat)
             g = int(40  - 40 * sat)
             bv = 0
-        self.setPen(QPen(QColor(min(r, 255), max(g, 0), max(bv, 0)), 4))
+        self._base_pen = QPen(QColor(min(r, 255), max(g, 0), max(bv, 0)), 4)
+        self._apply_pen()
 
     # ── distributed load arrows (UDL / UVL) ──────────────────────────────────
 
