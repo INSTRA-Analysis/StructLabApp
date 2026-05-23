@@ -363,33 +363,33 @@ class _MemberForm(QWidget):
 
         layout.addWidget(sec_box)
 
-        # ── distributed loads — active case ──────────────────────────────────
-        dl_box = QGroupBox("Distributed loads  [active case]")
+        # ── distributed loads — all cases ────────────────────────────────────
+        dl_box = QGroupBox("Distributed loads")
         dl_layout = QVBoxLayout(dl_box)
-        self._dl_table = QTableWidget(0, 3)
+        self._dl_table = QTableWidget(0, 4)
         self._dl_table.setHorizontalHeaderLabels(
-            ["Direction", "w start (kN/m)", "w end (kN/m)"]
+            ["Case", "Direction", "w start (kN/m)", "w end (kN/m)"]
         )
         hh = self._dl_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._dl_table.verticalHeader().setVisible(False)
         self._dl_table.setFixedHeight(120)
         self._dl_populate()
         dl_layout.addWidget(self._dl_table)
 
         dl_btn_row = QHBoxLayout()
-        for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"),
-                            ("qy", "+ qy"),    ("qz", "+ qz")]:
-            if _key in ("qy", "qz") and not mode_3d:
+        for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]:
+            if _key == "qy" and not mode_3d:
                 continue
             _b = QPushButton(_lbl)
-            _b.setFixedHeight(22)
+            _b.setFixedHeight(26)
             _b.clicked.connect(lambda checked=False, k=_key: self._dl_add_entry(k))
             dl_btn_row.addWidget(_b)
         _rm = QPushButton("Remove")
-        _rm.setFixedHeight(22)
+        _rm.setFixedHeight(26)
         _rm.clicked.connect(self._dl_remove_row)
         dl_btn_row.addWidget(_rm)
         dl_layout.addLayout(dl_btn_row)
@@ -411,6 +411,8 @@ class _MemberForm(QWidget):
         btn_add_f = QPushButton("+ Force")
         btn_add_m = QPushButton("+ Moment")
         btn_del   = QPushButton("Remove")
+        for _pb in (btn_add_f, btn_add_m, btn_del):
+            _pb.setFixedHeight(26)
         btn_add_f.clicked.connect(lambda: self._add_pl_row("FORCE",  0.5, 0.0))
         btn_add_m.clicked.connect(lambda: self._add_pl_row("MOMENT", 0.5, 0.0))
         btn_del.clicked.connect(self._remove_pl_row)
@@ -437,6 +439,8 @@ class _MemberForm(QWidget):
         pdl_btn_row = QHBoxLayout()
         btn_add_pdl = QPushButton("+ Partial load")
         btn_del_pdl = QPushButton("Remove")
+        for _pb in (btn_add_pdl, btn_del_pdl):
+            _pb.setFixedHeight(26)
         btn_add_pdl.clicked.connect(lambda: self._add_pdl_row(0.25, 0.75, 0.0, 0.0))
         btn_del_pdl.clicked.connect(self._remove_pdl_row)
         pdl_btn_row.addWidget(btn_add_pdl)
@@ -502,24 +506,25 @@ class _MemberForm(QWidget):
         ("w",  "Local ↓  (w)",     "Full-span load local ⊥ to member  —  ↓ positive"),
         ("qx", "qx  (→ Global X)", "Global X direction  —  + rightward"),
         ("qy", "qy  (↗ Global Y)", "Global Y direction  —  + into scene  (3D only)"),
-        ("qz", "qz  (↓ Global Z)", "Global Z direction  —  + downward  (3D only)"),
     ]
 
-    def _dl_dir_options(self) -> list[tuple[str, str, str]]:
-        return [d for d in self._DL_DIRS if d[0] not in ("qy", "qz") or self._mode_3d]
-
     def _dl_populate(self) -> None:
-        """Populate table from existing dist_loads entries."""
+        """Populate table from all load cases' dist_loads for this member."""
         self._dl_table.setRowCount(0)
-        ml = self._load_case.get_member_load(self._member.id) if self._load_case else MemberLoad()
-        for dl in ml.dist_loads:
-            if dl.direction in ("qy", "qz") and not self._mode_3d:
-                continue
-            self._dl_add_row(dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
+        if not self._model_state:
+            return
+        for lc in self._model_state.load_cases:
+            for dl in lc.get_member_load(self._member.id).dist_loads:
+                if dl.direction == "qy" and not self._mode_3d:
+                    continue
+                if dl.direction == "qz":  # hidden from UI
+                    continue
+                self._dl_add_row(lc.id, lc.name, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
 
     def _dl_add_entry(self, direction: str) -> None:
-        """Add a new empty row for the given direction."""
-        self._dl_add_row(direction, 0.0, 0.0)
+        """Add a new empty row for the given direction in the active case."""
+        if self._load_case:
+            self._dl_add_row(self._load_case.id, self._load_case.name, direction, 0.0, 0.0)
 
     def _dl_remove_row(self) -> None:
         rows = sorted({idx.row() for idx in self._dl_table.selectedIndexes()}, reverse=True)
@@ -528,20 +533,26 @@ class _MemberForm(QWidget):
         if not rows and self._dl_table.rowCount() > 0:
             self._dl_table.removeRow(self._dl_table.rowCount() - 1)
 
-    def _dl_add_row(self, direction_key: str, ws_kn: float, we_kn: float) -> None:
+    def _dl_add_row(self, case_id: int, case_name: str,
+                    direction_key: str, ws_kn: float, we_kn: float) -> None:
         row = self._dl_table.rowCount()
         self._dl_table.insertRow(row)
-        # Read-only direction label
+        # Case column (read-only, stores case_id in UserRole)
+        ci = QTableWidgetItem(case_name)
+        ci.setFlags(ci.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        ci.setData(Qt.ItemDataRole.UserRole, case_id)
+        self._dl_table.setItem(row, 0, ci)
+        # Direction column (read-only, stores direction key in UserRole)
         for dkey, dlabel, dtip in self._DL_DIRS:
             if dkey == direction_key:
-                item = QTableWidgetItem(dlabel)
-                item.setToolTip(dtip)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setData(Qt.ItemDataRole.UserRole, dkey)
-                self._dl_table.setItem(row, 0, item)
+                di = QTableWidgetItem(dlabel)
+                di.setToolTip(dtip)
+                di.setFlags(di.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                di.setData(Qt.ItemDataRole.UserRole, dkey)
+                self._dl_table.setItem(row, 1, di)
                 break
-        self._dl_table.setCellWidget(row, 1, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
-        self._dl_table.setCellWidget(row, 2, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+        self._dl_table.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
+        self._dl_table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
 
     def _add_pdl_row(self, start: float, end: float,
                      w_start_kn: float, w_end_kn: float) -> None:
@@ -604,25 +615,37 @@ class _MemberForm(QWidget):
                         w_end=we_spin.value()   * 1e3,
                     ))
 
-            # ── distributed loads (active case from table) ────────────────────
-            dist_loads: list[DistLoad] = []
+            # ── distributed loads (all cases from table) ──────────────────────
+            case_dls: dict[int, list[DistLoad]] = {}
             for row in range(self._dl_table.rowCount()):
-                item = self._dl_table.item(row, 0)
-                ws   = self._dl_table.cellWidget(row, 1)
-                we   = self._dl_table.cellWidget(row, 2)
-                if item and ws and we:
-                    dist_loads.append(DistLoad(
-                        direction=item.data(Qt.ItemDataRole.UserRole),
+                ci   = self._dl_table.item(row, 0)
+                di   = self._dl_table.item(row, 1)
+                ws   = self._dl_table.cellWidget(row, 2)
+                we   = self._dl_table.cellWidget(row, 3)
+                if ci and di and ws and we:
+                    cid = ci.data(Qt.ItemDataRole.UserRole)
+                    case_dls.setdefault(cid, []).append(DistLoad(
+                        direction=di.data(Qt.ItemDataRole.UserRole),
                         w_start=ws.value() * 1e3,
                         w_end=we.value()   * 1e3,
                     ))
 
-            if self._load_case is not None:
-                self._load_case.set_member_load(m.id, MemberLoad(
-                    dist_loads=dist_loads,
-                    point_loads=point_loads,
-                    partial_loads=partial_loads,
-                ))
+            active_id = self._load_case.id if self._load_case else -1
+            for lc in self._model_state.load_cases:
+                old_ml = lc.get_member_load(m.id)
+                dls = case_dls.get(lc.id, [])
+                if lc.id == active_id:
+                    lc.set_member_load(m.id, MemberLoad(
+                        dist_loads=dls,
+                        point_loads=point_loads,
+                        partial_loads=partial_loads,
+                    ))
+                else:
+                    lc.set_member_load(m.id, MemberLoad(
+                        dist_loads=dls,
+                        point_loads=old_ml.point_loads,
+                        partial_loads=old_ml.partial_loads,
+                    ))
         self._on_apply()
 
 
