@@ -385,11 +385,11 @@ class _MemberForm(QWidget):
             if _key == "qy" and not mode_3d:
                 continue
             _b = QPushButton(_lbl)
-            _b.setFixedHeight(26)
+            _b.setFixedHeight(28)
             _b.clicked.connect(lambda checked=False, k=_key: self._dl_add_entry(k))
             dl_btn_row.addWidget(_b)
         _rm = QPushButton("Remove")
-        _rm.setFixedHeight(26)
+        _rm.setFixedHeight(28)
         _rm.clicked.connect(self._dl_remove_row)
         dl_btn_row.addWidget(_rm)
         dl_layout.addLayout(dl_btn_row)
@@ -412,7 +412,7 @@ class _MemberForm(QWidget):
         btn_add_m = QPushButton("+ Moment")
         btn_del   = QPushButton("Remove")
         for _pb in (btn_add_f, btn_add_m, btn_del):
-            _pb.setFixedHeight(26)
+            _pb.setFixedHeight(28)
         btn_add_f.clicked.connect(lambda: self._add_pl_row("FORCE",  0.5, 0.0))
         btn_add_m.clicked.connect(lambda: self._add_pl_row("MOMENT", 0.5, 0.0))
         btn_del.clicked.connect(self._remove_pl_row)
@@ -440,7 +440,7 @@ class _MemberForm(QWidget):
         btn_add_pdl = QPushButton("+ Partial load")
         btn_del_pdl = QPushButton("Remove")
         for _pb in (btn_add_pdl, btn_del_pdl):
-            _pb.setFixedHeight(26)
+            _pb.setFixedHeight(28)
         btn_add_pdl.clicked.connect(lambda: self._add_pdl_row(0.25, 0.75, 0.0, 0.0))
         btn_del_pdl.clicked.connect(self._remove_pdl_row)
         pdl_btn_row.addWidget(btn_add_pdl)
@@ -519,12 +519,15 @@ class _MemberForm(QWidget):
                     continue
                 if dl.direction == "qz":  # hidden from UI
                     continue
-                self._dl_add_row(lc.id, lc.name, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
+                self._dl_add_row(lc.id, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
 
     def _dl_add_entry(self, direction: str) -> None:
-        """Add a new empty row for the given direction in the active case."""
-        if self._load_case:
-            self._dl_add_row(self._load_case.id, self._load_case.name, direction, 0.0, 0.0)
+        """Add a new empty row for the given direction, defaulting to the active case."""
+        active_id = self._load_case.id if self._load_case else (
+            self._model_state.load_cases[0].id
+            if self._model_state and self._model_state.load_cases else 0
+        )
+        self._dl_add_row(active_id, direction, 0.0, 0.0)
 
     def _dl_remove_row(self) -> None:
         rows = sorted({idx.row() for idx in self._dl_table.selectedIndexes()}, reverse=True)
@@ -533,15 +536,20 @@ class _MemberForm(QWidget):
         if not rows and self._dl_table.rowCount() > 0:
             self._dl_table.removeRow(self._dl_table.rowCount() - 1)
 
-    def _dl_add_row(self, case_id: int, case_name: str,
+    def _dl_add_row(self, case_id: int,
                     direction_key: str, ws_kn: float, we_kn: float) -> None:
         row = self._dl_table.rowCount()
         self._dl_table.insertRow(row)
-        # Case column (read-only, stores case_id in UserRole)
-        ci = QTableWidgetItem(case_name)
-        ci.setFlags(ci.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        ci.setData(Qt.ItemDataRole.UserRole, case_id)
-        self._dl_table.setItem(row, 0, ci)
+        # Case column: dropdown of all load cases — user can reassign here
+        case_combo = QComboBox()
+        if self._model_state:
+            for lc in self._model_state.load_cases:
+                case_combo.addItem(lc.name, lc.id)
+        for i in range(case_combo.count()):
+            if case_combo.itemData(i) == case_id:
+                case_combo.setCurrentIndex(i)
+                break
+        self._dl_table.setCellWidget(row, 0, case_combo)
         # Direction column (read-only, stores direction key in UserRole)
         for dkey, dlabel, dtip in self._DL_DIRS:
             if dkey == direction_key:
@@ -618,12 +626,12 @@ class _MemberForm(QWidget):
             # ── distributed loads (all cases from table) ──────────────────────
             case_dls: dict[int, list[DistLoad]] = {}
             for row in range(self._dl_table.rowCount()):
-                ci   = self._dl_table.item(row, 0)
+                case_combo = self._dl_table.cellWidget(row, 0)
                 di   = self._dl_table.item(row, 1)
                 ws   = self._dl_table.cellWidget(row, 2)
                 we   = self._dl_table.cellWidget(row, 3)
-                if ci and di and ws and we:
-                    cid = ci.data(Qt.ItemDataRole.UserRole)
+                if case_combo and di and ws and we:
+                    cid = case_combo.currentData()
                     case_dls.setdefault(cid, []).append(DistLoad(
                         direction=di.data(Qt.ItemDataRole.UserRole),
                         w_start=ws.value() * 1e3,
