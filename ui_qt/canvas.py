@@ -1529,6 +1529,18 @@ class StructView(QGraphicsView):
         if major_v: painter.drawLines(major_v)
         if major_h: painter.drawLines(major_h)
 
+        # ── World-origin axes (drawn on top of the grid) ──────────────────────
+        def _axis_pen(r: int, g: int, b: int) -> QPen:
+            p = QPen(QColor(r, g, b, 200))
+            p.setCosmetic(True)
+            p.setWidthF(2.0)
+            return p
+
+        painter.setPen(_axis_pen(190, 55, 55))   # X axis — red, horizontal at y=0
+        painter.drawLine(QLineF(rect.left(), 0, rect.right(), 0))
+        painter.setPen(_axis_pen(55, 165, 55))   # Y axis — green, vertical at x=0
+        painter.drawLine(QLineF(0, rect.top(), 0, rect.bottom()))
+
     def _draw_iso_grid(self, painter: QPainter, rect) -> None:
         """Isometric grid: XY ground plane + active working plane overlay."""
         minor_pen = QPen(QColor(55, 55, 62)); minor_pen.setCosmetic(True)
@@ -1616,19 +1628,36 @@ class StructView(QGraphicsView):
         z_font.setBold(False)
         painter.setFont(z_font)
 
-        # Axis labels
-        origin_pen = QPen(QColor(100, 100, 112)); origin_pen.setCosmetic(True)
-        painter.setPen(origin_pen)
+        # ── World-origin axis indicators (X=red, Y=green, Z=blue) ──────────────
+        def _axis3_pen(r: int, g: int, b: int) -> QPen:
+            p = QPen(QColor(r, g, b, 220))
+            p.setCosmetic(True)
+            p.setWidthF(2.0)
+            return p
+
         font = painter.font()
-        font.setPointSize(7)
+        font.setPointSize(8)
+        font.setBold(True)
         painter.setFont(font)
         ox, oy = isometric(0, 0, 0)
-        xa, ya = isometric(2, 0, 0); painter.drawLine(QLineF(ox, oy, xa, ya))
-        painter.drawText(QPointF(xa + 4, ya + 4), "X")
-        ya_pos = isometric(0, 2, 0); painter.drawLine(QLineF(ox, oy, ya_pos[0], ya_pos[1]))
-        painter.drawText(QPointF(ya_pos[0] - 16, ya_pos[1] + 4), "Y")
-        za = oy - 2 * PX_PER_M; painter.drawLine(QLineF(ox, oy, ox, za))
-        painter.drawText(QPointF(ox + 4, za - 4), "Z")
+
+        xa, ya = isometric(2, 0, 0)
+        painter.setPen(_axis3_pen(210, 60, 60))
+        painter.drawLine(QLineF(ox, oy, xa, ya))
+        painter.drawText(QPointF(xa + 4 / scale, ya + 4 / scale), "X")
+
+        ya_pos = isometric(0, 2, 0)
+        painter.setPen(_axis3_pen(60, 190, 60))
+        painter.drawLine(QLineF(ox, oy, ya_pos[0], ya_pos[1]))
+        painter.drawText(QPointF(ya_pos[0] - 14 / scale, ya_pos[1] + 4 / scale), "Y")
+
+        za_y = oy - 2 * PX_PER_M
+        painter.setPen(_axis3_pen(70, 110, 230))
+        painter.drawLine(QLineF(ox, oy, ox, za_y))
+        painter.drawText(QPointF(ox + 4 / scale, za_y - 4 / scale), "Z")
+
+        font.setBold(False)
+        painter.setFont(font)
 
     # ── zoom ──────────────────────────────────────────────────────────────────
 
