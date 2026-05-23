@@ -383,18 +383,9 @@ class _MemberForm(QWidget):
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self._dl_table.verticalHeader().setVisible(False)
-        self._dl_table.setFixedHeight(130)
+        self._dl_table.setFixedHeight(26 + (4 if mode_3d else 2) * 28)
         self._dl_populate()
         dl_layout.addWidget(self._dl_table)
-
-        dl_btn_row = QHBoxLayout()
-        add_dl_btn = QPushButton("+ Add load")
-        add_dl_btn.clicked.connect(self._on_add_dl)
-        rem_dl_btn = QPushButton("Remove")
-        rem_dl_btn.clicked.connect(self._on_remove_dl)
-        dl_btn_row.addWidget(add_dl_btn)
-        dl_btn_row.addWidget(rem_dl_btn)
-        dl_layout.addLayout(dl_btn_row)
         layout.addWidget(dl_box)
 
         # ── point loads on member ─────────────────────────────────────────────
@@ -511,6 +502,7 @@ class _MemberForm(QWidget):
         return [d for d in self._DL_DIRS if d[0] not in ("qy", "qz") or self._mode_3d]
 
     def _dl_populate(self) -> None:
+        """Always show all available direction rows, even when zero."""
         self._dl_table.setRowCount(0)
         ml = self._load_case.get_member_load(self._member.id) if self._load_case else MemberLoad()
         for key, ws, we in [
@@ -521,46 +513,22 @@ class _MemberForm(QWidget):
         ]:
             if key in ("qy", "qz") and not self._mode_3d:
                 continue
-            if ws != 0.0 or we != 0.0:
-                self._dl_add_row(key, ws / 1e3, we / 1e3)
+            self._dl_add_row(key, ws / 1e3, we / 1e3)
 
     def _dl_add_row(self, direction_key: str, ws_kn: float, we_kn: float) -> None:
         row = self._dl_table.rowCount()
         self._dl_table.insertRow(row)
-        dir_combo = QComboBox()
-        for dkey, dlabel, dtip in self._dl_dir_options():
-            dir_combo.addItem(dlabel, userData=dkey)
-        for i in range(dir_combo.count()):
-            if dir_combo.itemData(i) == direction_key:
-                dir_combo.setCurrentIndex(i)
+        # Read-only direction label
+        for dkey, dlabel, dtip in self._DL_DIRS:
+            if dkey == direction_key:
+                item = QTableWidgetItem(dlabel)
+                item.setToolTip(dtip)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setData(Qt.ItemDataRole.UserRole, dkey)
+                self._dl_table.setItem(row, 0, item)
                 break
-        self._dl_table.setCellWidget(row, 0, dir_combo)
         self._dl_table.setCellWidget(row, 1, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
         self._dl_table.setCellWidget(row, 2, _spin(we_kn, -1e6, 1e6, 1.0, 2))
-
-    def _on_add_dl(self) -> None:
-        used = {
-            self._dl_table.cellWidget(r, 0).currentData()
-            for r in range(self._dl_table.rowCount())
-            if self._dl_table.cellWidget(r, 0)
-        }
-        menu = QMenu(self)
-        for dkey, dlabel, dtip in self._dl_dir_options():
-            if dkey not in used:
-                act = menu.addAction(dlabel)
-                act.setToolTip(dtip)
-                act.setData(dkey)
-        btn = self.sender()
-        chosen = menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
-        if chosen and chosen.data():
-            self._dl_add_row(chosen.data(), 0.0, 0.0)
-
-    def _on_remove_dl(self) -> None:
-        rows = sorted({i.row() for i in self._dl_table.selectedIndexes()}, reverse=True)
-        for r in rows:
-            self._dl_table.removeRow(r)
-        if not rows and self._dl_table.rowCount() > 0:
-            self._dl_table.removeRow(self._dl_table.rowCount() - 1)
 
     def _add_pdl_row(self, start: float, end: float,
                      w_start_kn: float, w_end_kn: float) -> None:
@@ -626,11 +594,13 @@ class _MemberForm(QWidget):
             # ── distributed loads (active case from table) ────────────────────
             dl: dict[str, tuple[float, float]] = {}
             for row in range(self._dl_table.rowCount()):
-                dc = self._dl_table.cellWidget(row, 0)
-                ws = self._dl_table.cellWidget(row, 1)
-                we = self._dl_table.cellWidget(row, 2)
-                if dc and ws and we:
-                    dl[dc.currentData()] = (ws.value() * 1e3, we.value() * 1e3)
+                item = self._dl_table.item(row, 0)
+                ws   = self._dl_table.cellWidget(row, 1)
+                we   = self._dl_table.cellWidget(row, 2)
+                if item and ws and we:
+                    dl[item.data(Qt.ItemDataRole.UserRole)] = (
+                        ws.value() * 1e3, we.value() * 1e3,
+                    )
 
             if self._load_case is not None:
                 ws_n, we_n = dl.get("w",  (0.0, 0.0))
