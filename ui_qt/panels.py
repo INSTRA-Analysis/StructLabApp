@@ -371,18 +371,17 @@ class _MemberForm(QWidget):
 
         layout.addWidget(sec_box)
 
-        # ── distributed loads — all cases ────────────────────────────────────
-        dl_box = QGroupBox("Distributed loads")
+        # ── distributed loads — active case ──────────────────────────────────
+        dl_box = QGroupBox("Distributed loads  [active case]")
         dl_layout = QVBoxLayout(dl_box)
-        self._dl_table = QTableWidget(0, 4)
+        self._dl_table = QTableWidget(0, 3)
         self._dl_table.setHorizontalHeaderLabels(
-            ["Case", "Direction", "w start (kN/m)", "w end (kN/m)"]
+            ["Direction", "w start (kN/m)", "w end (kN/m)"]
         )
         hh = self._dl_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._dl_table.verticalHeader().setVisible(False)
         self._dl_table.setFixedHeight(130)
         self._dl_populate()
@@ -461,114 +460,6 @@ class _MemberForm(QWidget):
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
 
-        # ── loads across all cases ────────────────────────────────────────────
-        reg_box = QGroupBox("Loads across all cases")
-        reg_layout = QVBoxLayout(reg_box)
-
-        self._cases_table = QTableWidget(0, 2)
-        self._cases_table.setHorizontalHeaderLabels(["Case", "Summary"])
-        hh = self._cases_table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._cases_table.verticalHeader().setVisible(False)
-        self._cases_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self._cases_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        self._cases_table.setFixedHeight(110)
-        self._cases_table.setToolTip(
-            "Click a row to make that case active and edit its loads above"
-        )
-        self._cases_table.cellClicked.connect(self._on_case_row_clicked)
-        self._populate_case_list()
-        reg_layout.addWidget(self._cases_table)
-
-        reg_btn_row = QHBoxLayout()
-        assign_btn = QPushButton("+ Assign to case")
-        assign_btn.setToolTip("Switch to a load case that has no load on this member yet")
-        assign_btn.clicked.connect(self._on_assign_to_case)
-        remove_btn = QPushButton("Remove")
-        remove_btn.setToolTip("Clear the selected case's load on this member")
-        remove_btn.clicked.connect(self._on_remove_case_load)
-        reg_btn_row.addWidget(assign_btn)
-        reg_btn_row.addWidget(remove_btn)
-        reg_layout.addLayout(reg_btn_row)
-
-        layout.addWidget(reg_box)
-
-    def _populate_case_list(self) -> None:
-        self._cases_table.setRowCount(0)
-        if not self._model_state:
-            return
-        active_id = self._model_state.active_case_id
-        for lc in self._model_state.load_cases:
-            ml = lc.get_member_load(self._member.id)
-            if ml.is_zero():
-                continue
-            row = self._cases_table.rowCount()
-            self._cases_table.insertRow(row)
-
-            cat   = getattr(lc, "category", "")
-            label = f"[{cat}] {lc.name}" if cat else lc.name
-            name_item = QTableWidgetItem(label)
-            name_item.setData(Qt.ItemDataRole.UserRole, lc.id)
-            if lc.id == active_id:
-                f = name_item.font(); f.setBold(True); name_item.setFont(f)
-                name_item.setForeground(QColor("#00d4e8"))
-            self._cases_table.setItem(row, 0, name_item)
-            self._cases_table.setItem(row, 1, QTableWidgetItem(_load_summary(ml)))
-
-    def _on_case_row_clicked(self, row: int, _col: int) -> None:
-        item = self._cases_table.item(row, 0)
-        if item and self._switch_case_fn:
-            self._switch_case_fn(item.data(Qt.ItemDataRole.UserRole))
-
-    def _on_remove_case_load(self) -> None:
-        if not self._model_state:
-            return
-        rows = {idx.row() for idx in self._cases_table.selectedIndexes()}
-        if not rows:
-            return
-        for row in sorted(rows, reverse=True):
-            item = self._cases_table.item(row, 0)
-            if item:
-                lc_id = item.data(Qt.ItemDataRole.UserRole)
-                lc = next(
-                    (c for c in self._model_state.load_cases if c.id == lc_id),
-                    None,
-                )
-                if lc:
-                    lc.set_member_load(self._member.id, MemberLoad())
-        self._populate_case_list()
-        self._on_apply()
-
-    def _on_assign_to_case(self) -> None:
-        if not self._model_state or not self._switch_case_fn:
-            return
-        assigned_ids = {
-            self._cases_table.item(r, 0).data(Qt.ItemDataRole.UserRole)
-            for r in range(self._cases_table.rowCount())
-            if self._cases_table.item(r, 0)
-        }
-        available = [
-            lc for lc in self._model_state.load_cases
-            if lc.id not in assigned_ids
-        ]
-        if not available:
-            return
-        menu = QMenu(self)
-        for lc in available:
-            cat   = getattr(lc, "category", "")
-            label = f"[{cat}] {lc.name}" if cat else lc.name
-            act = menu.addAction(label)
-            act.setData(lc.id)
-        btn = self.sender()
-        pos = btn.mapToGlobal(btn.rect().bottomLeft())
-        chosen = menu.exec(pos)
-        if chosen:
-            self._switch_case_fn(chosen.data())
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -621,36 +512,21 @@ class _MemberForm(QWidget):
 
     def _dl_populate(self) -> None:
         self._dl_table.setRowCount(0)
-        if not self._model_state:
-            return
-        for lc in self._model_state.load_cases:
-            ml = lc.get_member_load(self._member.id)
-            for key, ws, we in [
-                ("w",  ml.w_start,  ml.w_end),
-                ("qx", ml.qx_start, ml.qx_end),
-                ("qy", ml.qy_start, ml.qy_end),
-                ("qz", ml.qz_start, ml.qz_end),
-            ]:
-                if key in ("qy", "qz") and not self._mode_3d:
-                    continue
-                if ws != 0.0 or we != 0.0:
-                    self._dl_add_row(lc.id, key, ws / 1e3, we / 1e3)
+        ml = self._load_case.get_member_load(self._member.id) if self._load_case else MemberLoad()
+        for key, ws, we in [
+            ("w",  ml.w_start,  ml.w_end),
+            ("qx", ml.qx_start, ml.qx_end),
+            ("qy", ml.qy_start, ml.qy_end),
+            ("qz", ml.qz_start, ml.qz_end),
+        ]:
+            if key in ("qy", "qz") and not self._mode_3d:
+                continue
+            if ws != 0.0 or we != 0.0:
+                self._dl_add_row(key, ws / 1e3, we / 1e3)
 
-    def _dl_add_row(self, lc_id: int, direction_key: str,
-                    ws_kn: float, we_kn: float) -> None:
+    def _dl_add_row(self, direction_key: str, ws_kn: float, we_kn: float) -> None:
         row = self._dl_table.rowCount()
         self._dl_table.insertRow(row)
-
-        case_combo = QComboBox()
-        active_id = self._model_state.active_case_id if self._model_state else -1
-        for lc in (self._model_state.load_cases if self._model_state else []):
-            cat   = getattr(lc, "category", "")
-            label = f"[{cat}] {lc.name}" if cat else lc.name
-            case_combo.addItem(label, userData=lc.id)
-            if lc.id == lc_id:
-                case_combo.setCurrentIndex(case_combo.count() - 1)
-        self._dl_table.setCellWidget(row, 0, case_combo)
-
         dir_combo = QComboBox()
         for dkey, dlabel, dtip in self._dl_dir_options():
             dir_combo.addItem(dlabel, userData=dkey)
@@ -658,41 +534,26 @@ class _MemberForm(QWidget):
             if dir_combo.itemData(i) == direction_key:
                 dir_combo.setCurrentIndex(i)
                 break
-        self._dl_table.setCellWidget(row, 1, dir_combo)
-        self._dl_table.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
-        self._dl_table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+        self._dl_table.setCellWidget(row, 0, dir_combo)
+        self._dl_table.setCellWidget(row, 1, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
+        self._dl_table.setCellWidget(row, 2, _spin(we_kn, -1e6, 1e6, 1.0, 2))
 
     def _on_add_dl(self) -> None:
-        if not self._model_state:
-            return
-        used: set[tuple[int, str]] = set()
-        for r in range(self._dl_table.rowCount()):
-            cc = self._dl_table.cellWidget(r, 0)
-            dc = self._dl_table.cellWidget(r, 1)
-            if cc and dc:
-                used.add((cc.currentData(), dc.currentData()))
-
+        used = {
+            self._dl_table.cellWidget(r, 0).currentData()
+            for r in range(self._dl_table.rowCount())
+            if self._dl_table.cellWidget(r, 0)
+        }
         menu = QMenu(self)
-        for lc in self._model_state.load_cases:
-            cat   = getattr(lc, "category", "")
-            lc_label = f"[{cat}] {lc.name}" if cat else lc.name
-            sub = menu.addMenu(lc_label)
-            any_added = False
-            for dkey, dlabel, dtip in self._dl_dir_options():
-                if (lc.id, dkey) not in used:
-                    act = sub.addAction(dlabel)
-                    act.setToolTip(dtip)
-                    act.setData((lc.id, dkey))
-                    any_added = True
-            if not any_added:
-                sub.setEnabled(False)
-
+        for dkey, dlabel, dtip in self._dl_dir_options():
+            if dkey not in used:
+                act = menu.addAction(dlabel)
+                act.setToolTip(dtip)
+                act.setData(dkey)
         btn = self.sender()
-        pos = btn.mapToGlobal(btn.rect().bottomLeft())
-        chosen = menu.exec(pos)
+        chosen = menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
         if chosen and chosen.data():
-            lc_id, dkey = chosen.data()
-            self._dl_add_row(lc_id, dkey, 0.0, 0.0)
+            self._dl_add_row(chosen.data(), 0.0, 0.0)
 
     def _on_remove_dl(self) -> None:
         rows = sorted({i.row() for i in self._dl_table.selectedIndexes()}, reverse=True)
@@ -732,7 +593,7 @@ class _MemberForm(QWidget):
         m.fy      = self._fy.value() * 1e6
         m.W_pl    = self._Wpl.value() * 1e-6
         m.W_el    = self._Wel.value() * 1e-6
-        if self._model_state is not None:
+        if self._load_case is not None:
             # ── point loads (active case) ─────────────────────────────────────
             point_loads = []
             for row in range(self._pl_table.rowCount()):
@@ -762,34 +623,27 @@ class _MemberForm(QWidget):
                         w_end=we_spin.value()   * 1e3,
                     ))
 
-            # ── distributed loads (all cases from table) ──────────────────────
-            dl_map: dict[int, dict[str, tuple[float, float]]] = {}
+            # ── distributed loads (active case from table) ────────────────────
+            dl: dict[str, tuple[float, float]] = {}
             for row in range(self._dl_table.rowCount()):
-                cc = self._dl_table.cellWidget(row, 0)
-                dc = self._dl_table.cellWidget(row, 1)
-                ws = self._dl_table.cellWidget(row, 2)
-                we = self._dl_table.cellWidget(row, 3)
-                if cc and dc and ws and we:
-                    dl_map.setdefault(cc.currentData(), {})[dc.currentData()] = (
-                        ws.value() * 1e3, we.value() * 1e3,
-                    )
+                dc = self._dl_table.cellWidget(row, 0)
+                ws = self._dl_table.cellWidget(row, 1)
+                we = self._dl_table.cellWidget(row, 2)
+                if dc and ws and we:
+                    dl[dc.currentData()] = (ws.value() * 1e3, we.value() * 1e3)
 
-            active_id = self._model_state.active_case_id
-            for lc in self._model_state.load_cases:
-                case_dl  = dl_map.get(lc.id, {})
-                ws_n, we_n = case_dl.get("w",  (0.0, 0.0))
-                qxs, qxe   = case_dl.get("qx", (0.0, 0.0))
-                qys, qye   = case_dl.get("qy", (0.0, 0.0))
-                qzs, qze   = case_dl.get("qz", (0.0, 0.0))
-                existing   = lc.get_member_load(m.id)
-                pl  = point_loads  if lc.id == active_id else existing.point_loads
-                pdl = partial_loads if lc.id == active_id else existing.partial_loads
-                lc.set_member_load(m.id, MemberLoad(
+            if self._load_case is not None:
+                ws_n, we_n = dl.get("w",  (0.0, 0.0))
+                qxs, qxe   = dl.get("qx", (0.0, 0.0))
+                qys, qye   = dl.get("qy", (0.0, 0.0))
+                qzs, qze   = dl.get("qz", (0.0, 0.0))
+                self._load_case.set_member_load(m.id, MemberLoad(
                     w_start=ws_n,  w_end=we_n,
                     qx_start=qxs, qx_end=qxe,
                     qy_start=qys, qy_end=qye,
                     qz_start=qzs, qz_end=qze,
-                    point_loads=pl, partial_loads=pdl,
+                    point_loads=point_loads,
+                    partial_loads=partial_loads,
                 ))
         self._on_apply()
 
