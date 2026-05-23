@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QGroupBox, QScrollArea, QSizePolicy, QFrame, QSplitter,
+    QGroupBox, QScrollArea, QSizePolicy, QFrame, QSplitter, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel
 
@@ -61,8 +61,9 @@ class PropertiesPanel(QWidget):
         self._placeholder.setWordWrap(True)
         self._layout.addWidget(self._placeholder)
         self._content: QWidget | None = None
-        self.refresh_callback = None   # set by MainWindow
-        self._model_state = None       # set by MainWindow via set_model_state()
+        self.refresh_callback = None      # set by MainWindow
+        self.switch_case_callback = None  # set by MainWindow; called with lc_id
+        self._model_state = None          # set by MainWindow via set_model_state()
 
     def set_model_state(self, state) -> None:
         """Keep a reference so forms can read/write the active load case."""
@@ -89,7 +90,10 @@ class PropertiesPanel(QWidget):
         self._replace(_NodeForm(node, self._active_case(), self._on_apply, self._is_3d()))
 
     def show_member(self, member: MemberData) -> None:
-        self._replace(_MemberForm(member, self._active_case(), self._on_apply, self._is_3d()))
+        self._replace(_MemberForm(
+            member, self._model_state, self._on_apply, self._is_3d(),
+            switch_case_fn=self.switch_case_to,
+        ))
 
     def show_nodes(self, nodes: list) -> None:
         self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply, self._is_3d()))
@@ -118,6 +122,11 @@ class PropertiesPanel(QWidget):
     def _on_apply(self) -> None:
         if self.refresh_callback:
             self.refresh_callback()
+
+    def switch_case_to(self, lc_id: int) -> None:
+        """Called by the member form when the user wants to edit a different case."""
+        if self.switch_case_callback:
+            self.switch_case_callback(lc_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,17 +253,51 @@ class _NodeForm(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Load summary helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_summary(ml: MemberLoad) -> str:
+    """Return a compact one-line description of the non-zero loads in *ml*."""
+    parts: list[str] = []
+    if ml.w_start != 0 or ml.w_end != 0:
+        ws, we = ml.w_start / 1e3, ml.w_end / 1e3
+        if abs(ws - we) < 1e-10:
+            parts.append(f"w={ws:.3g} kN/m")
+        else:
+            parts.append(f"w={ws:.3g}→{we:.3g} kN/m")
+    for attr, label in [("qx", "qx"), ("qy", "qy"), ("qz", "qz")]:
+        qs = getattr(ml, f"{attr}_start", 0.0)
+        qe = getattr(ml, f"{attr}_end",   0.0)
+        if qs != 0 or qe != 0:
+            qs_k, qe_k = qs / 1e3, qe / 1e3
+            if abs(qs_k - qe_k) < 1e-10:
+                parts.append(f"{label}={qs_k:.3g} kN/m")
+            else:
+                parts.append(f"{label}={qs_k:.3g}→{qe_k:.3g} kN/m")
+    if ml.point_loads:
+        n = len(ml.point_loads)
+        parts.append(f"{n} point load{'s' if n > 1 else ''}")
+    if ml.partial_loads:
+        n = len(ml.partial_loads)
+        parts.append(f"{n} partial load{'s' if n > 1 else ''}")
+    return "  ·  ".join(parts) if parts else "—"
+
+
 # _MemberForm
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _MemberForm(QWidget):
-    def __init__(self, member: MemberData, load_case: LoadCase | None,
-                 on_apply, mode_3d: bool = False) -> None:
+    def __init__(self, member: MemberData, model_state,
+                 on_apply, mode_3d: bool = False,
+                 switch_case_fn=None) -> None:
         super().__init__()
-        self._member    = member
-        self._load_case = load_case
-        self._on_apply  = on_apply
-        self._mode_3d   = mode_3d
+        self._member        = member
+        self._model_state   = model_state
+        self._load_case     = model_state.active_case if model_state else None
+        self._on_apply      = on_apply
+        self._mode_3d       = mode_3d
+        self._switch_case_fn = switch_case_fn
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -421,6 +464,115 @@ class _MemberForm(QWidget):
         btn = QPushButton("Apply")
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
+
+        # ── loads across all cases ────────────────────────────────────────────
+        reg_box = QGroupBox("Loads across all cases")
+        reg_layout = QVBoxLayout(reg_box)
+
+        self._cases_table = QTableWidget(0, 2)
+        self._cases_table.setHorizontalHeaderLabels(["Case", "Summary"])
+        hh = self._cases_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._cases_table.verticalHeader().setVisible(False)
+        self._cases_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._cases_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self._cases_table.setFixedHeight(110)
+        self._cases_table.setToolTip(
+            "Click a row to make that case active and edit its loads above"
+        )
+        self._cases_table.cellClicked.connect(self._on_case_row_clicked)
+        self._populate_case_list()
+        reg_layout.addWidget(self._cases_table)
+
+        reg_btn_row = QHBoxLayout()
+        assign_btn = QPushButton("+ Assign to case")
+        assign_btn.setToolTip("Switch to a load case that has no load on this member yet")
+        assign_btn.clicked.connect(self._on_assign_to_case)
+        remove_btn = QPushButton("Remove")
+        remove_btn.setToolTip("Clear the selected case's load on this member")
+        remove_btn.clicked.connect(self._on_remove_case_load)
+        reg_btn_row.addWidget(assign_btn)
+        reg_btn_row.addWidget(remove_btn)
+        reg_layout.addLayout(reg_btn_row)
+
+        layout.addWidget(reg_box)
+
+    def _populate_case_list(self) -> None:
+        self._cases_table.setRowCount(0)
+        if not self._model_state:
+            return
+        active_id = self._model_state.active_case_id
+        for lc in self._model_state.load_cases:
+            ml = lc.get_member_load(self._member.id)
+            if ml.is_zero():
+                continue
+            row = self._cases_table.rowCount()
+            self._cases_table.insertRow(row)
+
+            cat   = getattr(lc, "category", "")
+            label = f"[{cat}] {lc.name}" if cat else lc.name
+            name_item = QTableWidgetItem(label)
+            name_item.setData(Qt.ItemDataRole.UserRole, lc.id)
+            if lc.id == active_id:
+                f = name_item.font(); f.setBold(True); name_item.setFont(f)
+                name_item.setForeground(QColor("#00d4e8"))
+            self._cases_table.setItem(row, 0, name_item)
+            self._cases_table.setItem(row, 1, QTableWidgetItem(_load_summary(ml)))
+
+    def _on_case_row_clicked(self, row: int, _col: int) -> None:
+        item = self._cases_table.item(row, 0)
+        if item and self._switch_case_fn:
+            self._switch_case_fn(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_remove_case_load(self) -> None:
+        if not self._model_state:
+            return
+        rows = {idx.row() for idx in self._cases_table.selectedIndexes()}
+        if not rows:
+            return
+        for row in sorted(rows, reverse=True):
+            item = self._cases_table.item(row, 0)
+            if item:
+                lc_id = item.data(Qt.ItemDataRole.UserRole)
+                lc = next(
+                    (c for c in self._model_state.load_cases if c.id == lc_id),
+                    None,
+                )
+                if lc:
+                    lc.set_member_load(self._member.id, MemberLoad())
+        self._populate_case_list()
+        self._on_apply()
+
+    def _on_assign_to_case(self) -> None:
+        if not self._model_state or not self._switch_case_fn:
+            return
+        assigned_ids = {
+            self._cases_table.item(r, 0).data(Qt.ItemDataRole.UserRole)
+            for r in range(self._cases_table.rowCount())
+            if self._cases_table.item(r, 0)
+        }
+        available = [
+            lc for lc in self._model_state.load_cases
+            if lc.id not in assigned_ids
+        ]
+        if not available:
+            return
+        menu = QMenu(self)
+        for lc in available:
+            cat   = getattr(lc, "category", "")
+            label = f"[{cat}] {lc.name}" if cat else lc.name
+            act = menu.addAction(label)
+            act.setData(lc.id)
+        btn = self.sender()
+        pos = btn.mapToGlobal(btn.rect().bottomLeft())
+        chosen = menu.exec(pos)
+        if chosen:
+            self._switch_case_fn(chosen.data())
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
