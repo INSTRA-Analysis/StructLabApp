@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("StructLab V1.1 — 2D Structural Analysis")
+        self.setWindowTitle("StructLab V1.1 — Structural Analysis")
         self.resize(1280, 800)
         # Hide toolbar drag handles (toolbars remain movable for auto-wrap, not drag)
         self.setStyleSheet("QToolBar::handle { width: 0px; height: 0px; }")
@@ -473,41 +473,27 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return  # closed without choosing → blank canvas
 
-        choice  = dlg.choice
-        is_3d   = dlg.is_3d
+        choice = dlg.choice
+        from ui_qt import presets as P
         if choice == "beam":
-            from ui_qt import presets as P
-            if is_3d:
-                state = P.demo_3d_portal()
-                state.mode_3d = True
-                self._apply_model_state(state, "3D Portal Frame")
-            else:
-                self._apply_model_state(P.demo_beam_steel(), "Steel Beam")
+            state = P.demo_beam_steel()
+            state.mode_3d = True
+            self._apply_model_state(state, "Steel Beam")
         elif choice == "frame":
-            from ui_qt import presets as P
-            if is_3d:
-                state = P.demo_3d_portal()
-                state.mode_3d = True
-                self._apply_model_state(state, "3D Portal Frame")
-            else:
-                self._apply_model_state(P.demo_frame_steel(), "Steel Portal Frame")
+            state = P.demo_3d_portal()
+            state.mode_3d = True
+            self._apply_model_state(state, "3D Portal Frame")
         elif choice == "truss":
-            from ui_qt import presets as P
-            if is_3d:
-                state = P.demo_space_truss()
-                state.mode_3d = True
-                self._apply_model_state(state, "Space Truss")
-            else:
-                self._apply_model_state(P.demo_truss_pratt(), "Pratt Truss")
+            state = P.demo_space_truss()
+            state.mode_3d = True
+            self._apply_model_state(state, "Space Truss")
         elif choice == "blank":
-            if is_3d:
-                from ui_qt.model_state import ModelState
-                state = ModelState()
-                state.mode_3d = True
-                self._apply_model_state(state, "Blank 3D")
-            # 2D blank → leave canvas empty
+            from ui_qt.model_state import ModelState
+            state = ModelState()
+            state.mode_3d = True
+            self._apply_model_state(state, "Blank")
         elif choice.startswith("file:"):
-            self._open_file(choice[5:], force_3d=is_3d)
+            self._open_file(choice[5:])
         elif choice == "open":
             self._on_open()
         self._sync_3d_action()

@@ -401,7 +401,7 @@ class ModelState:
     combinations: list[LoadCombination] = field(default_factory=list)
     active_case_id: int = field(default=0)
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
-    mode_3d: bool = field(default=False)
+    mode_3d: bool = field(default=True)
     _next_node_id: int = field(default=0, repr=False)
     _next_member_id: int = field(default=0, repr=False)
     _next_case_id: int = field(default=1, repr=False)

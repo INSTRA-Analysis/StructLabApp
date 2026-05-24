@@ -7,36 +7,9 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QPushButton, QTabWidget,
+    QLabel, QListWidget, QListWidgetItem, QPushButton,
     QVBoxLayout, QWidget,
 )
-
-_TAB_STYLE = """
-QTabWidget::pane {
-    border: 1px solid #2a2a34;
-    background: #1a1a22;
-    border-radius: 0 4px 4px 4px;
-}
-QTabBar::tab {
-    background: #16161e;
-    color: #666;
-    border: 1px solid #2a2a34;
-    border-bottom: none;
-    padding: 7px 28px;
-    margin-right: 2px;
-    font-size: 12px;
-    font-weight: bold;
-}
-QTabBar::tab:selected {
-    background: #1a1a22;
-    color: #00ACC1;
-    border-color: #2a2a34;
-}
-QTabBar::tab:hover:!selected {
-    color: #aaa;
-    background: #1e1e28;
-}
-"""
 
 
 class _StructCard(QFrame):
@@ -93,32 +66,12 @@ class _StructCard(QFrame):
         super().mousePressEvent(event)
 
 
-def _make_cards_page(cards: list[tuple[str, str, str, str]],
-                     callback) -> QWidget:
-    """Build a tab page containing a row of _StructCard widgets."""
-    page = QWidget()
-    layout = QVBoxLayout(page)
-    layout.setContentsMargins(16, 16, 16, 16)
-    layout.setSpacing(0)
-
-    row = QHBoxLayout()
-    row.setSpacing(10)
-    for choice, name, sym, desc in cards:
-        card = _StructCard(name, sym, desc)
-        card.clicked.connect(lambda c=choice: callback(c))
-        row.addWidget(card)
-    row.addStretch()
-    layout.addLayout(row)
-    layout.addStretch()
-    return page
-
-
 class WelcomeDialog(QDialog):
     """Startup dialog: choose structure type, recent file, or blank canvas.
 
     After exec(), read:
       ``self.choice`` — "beam" | "frame" | "truss" | "blank" | "open" | "file:<path>"
-      ``self.is_3d``  — True if user selected the 3D tab
+      ``self.is_3d``  — always True (3D-only app)
     """
 
     def __init__(self, parent=None, recent_files: list[str] | None = None) -> None:
@@ -127,7 +80,7 @@ class WelcomeDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(600)
         self.choice: str = "blank"
-        self.is_3d: bool = False
+        self.is_3d: bool = True
         self._build_ui(recent_files or [])
 
     def _build_ui(self, recent_files: list[str]) -> None:
@@ -150,17 +103,12 @@ class WelcomeDialog(QDialog):
 
         root.addWidget(self._hline())
 
-        # ── Structure type label ───────────────────────────────────────────────
+        # ── Structure type cards ───────────────────────────────────────────────
         section_lbl = QLabel("Start a new model")
         section_lbl.setStyleSheet("font-weight:bold; font-size:12px; color:#bbb;")
         root.addWidget(section_lbl)
 
-        # ── Tab widget ─────────────────────────────────────────────────────────
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet(_TAB_STYLE)
-        self._tabs.setFixedHeight(172)
-
-        CARDS_2D = [
+        CARDS = [
             ("beam",  "Beam",   "━━━━",
              "Continuous beams,\nGerber beams,\nUDL + point loads"),
             ("frame", "Frame",  "╬ ╬",
@@ -170,25 +118,19 @@ class WelcomeDialog(QDialog):
             ("blank", "Blank",  "  +  ",
              "Empty canvas —\nstart from\nscratch"),
         ]
-        CARDS_3D = [
-            ("frame", "Frame",  "╬ ╬",
-             "3D portal frames,\nspace frames &\nmulti-storey"),
-            ("truss", "Truss",  "△△△",
-             "3D space trusses\nand lattice\nstructures"),
-            ("blank", "Blank",  "  +  ",
-             "Empty 3D canvas —\nstart from\nscratch"),
-        ]
 
-        self._tabs.addTab(
-            _make_cards_page(CARDS_2D, self._choose_2d),
-            "  2D  ",
-        )
-        self._tabs.addTab(
-            _make_cards_page(CARDS_3D, self._choose_3d),
-            "  3D  ",
-        )
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(10)
+        for choice, name, sym, desc in CARDS:
+            card = _StructCard(name, sym, desc)
+            card.clicked.connect(lambda c=choice: self._choose(c))
+            cards_row.addWidget(card)
+        cards_row.addStretch()
 
-        root.addWidget(self._tabs)
+        cards_widget = QWidget()
+        cards_widget.setFixedHeight(130)
+        cards_widget.setLayout(cards_row)
+        root.addWidget(cards_widget)
 
         # ── Recent files ───────────────────────────────────────────────────────
         if recent_files:
@@ -236,13 +178,7 @@ class WelcomeDialog(QDialog):
         line.setStyleSheet("color:#2a2a34;")
         return line
 
-    def _choose_2d(self, choice: str) -> None:
-        self.is_3d = False
-        self.choice = choice
-        self.accept()
-
-    def _choose_3d(self, choice: str) -> None:
-        self.is_3d = True
+    def _choose(self, choice: str) -> None:
         self.choice = choice
         self.accept()
 
