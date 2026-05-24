@@ -58,6 +58,10 @@ def main() -> None:
     app.setStyleSheet(STYLESHEET)
     window = MainWindow()
     window.show()
+    if len(sys.argv) > 1:
+        path = sys.argv[1]
+        if Path(path).suffix.lower() == ".slab" and Path(path).exists():
+            window._open_file(path)
     sys.exit(app.exec())
 
 
