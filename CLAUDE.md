@@ -195,11 +195,20 @@ StructLabApp/
 
 ---
 
+## Git Milestones
+| Hash | Description |
+|------|-------------|
+| `538742a` | Pre-3D-only — last clean state with 2D/3D welcome tabs, before UI switch. Safe rollback point. |
+| `298d1ca` | 3D-only UI — welcome tabs removed, mode_3d defaults True, _show_welcome simplified. |
+
+To roll back: `git reset --hard <hash>`
+
+---
+
 ## Current Task
 All phases complete. **92/92 tests passing.** App launchable via `python ui_qt/main.py`.
 
-Active discussion: designing a Blender-inspired 3D modeling interface as Phase 10.
-Key features under consideration: full middle-mouse orbit, G/R/S transform shortcuts, E-extrude from node, numpad preset views (already partially done), workplane visual grid.
+Active: switched to 3D-only UI (welcome dialog now single flat card row, no 2D/3D tab split).
 
 ## Next Steps
 1. **Phase 10: Blender-style 3D modeling interface** — improved orbit/pan/zoom, G-grab with axis constraint, E-extrude, numpad-style view recall, 3D grid/workplane visual
