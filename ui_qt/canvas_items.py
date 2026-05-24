@@ -151,7 +151,7 @@ class NodeItem(QGraphicsEllipseItem):
         self.setZValue(2)
         self.setBrush(QBrush(QColor("#2255cc")))
         self.setPen(QPen(QColor("#003399"), 1))
-        self._support_item: QGraphicsPathItem | None = None
+        self._support_items: list = []
         self._hinge_item: QGraphicsEllipseItem | None = None
         self._load_items: list = []
         self._load_label_items: list[QGraphicsSimpleTextItem] = []
@@ -207,80 +207,156 @@ class NodeItem(QGraphicsEllipseItem):
     # ── support symbol ────────────────────────────────────────────────────────
 
     def _draw_support_symbol(self) -> None:
-        if self._support_item:
-            self._scene.removeItem(self._support_item)
-            self._support_item = None
+        for it in self._support_items:
+            self._scene.removeItem(it)
+        self._support_items.clear()
 
         stype = self.node.support_type
         if stype == SupportType.FREE:
             return
 
-        path = QPainterPath()
         s = 14
-
         ms = self._scene.model_state
         in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+
+        _COL = {
+            SupportType.FIXED:    ("#c0392b", "#7b241c"),
+            SupportType.PIN:      ("#2980b9", "#1a5276"),
+            SupportType.ROLLER:   ("#f39c12", "#9a7d0a"),
+            SupportType.ROLLER_Y: ("#f39c12", "#9a7d0a"),
+            SupportType.SPRING:   ("#27ae60", "#1e8449"),
+        }
+        col, col_dk = _COL.get(stype, ("#cccccc", "#888888"))
+
+        node_pos = self.pos()
+
+        def _path_item(path: QPainterPath, fill: str, pen: str = "#ffffff",
+                       pw: float = 1.5, z: float = 1.0) -> None:
+            it = QGraphicsPathItem(path)
+            it.setBrush(QBrush(QColor(fill)))
+            it.setPen(QPen(QColor(pen), pw))
+            it.setPos(node_pos)
+            it.setZValue(z)
+            self._scene.addItem(it)
+            self._support_items.append(it)
+
+        def _oval_item(cx: float, cy: float, rw: float, rh: float,
+                       angle_deg: float, fill: str, z: float = 0.8) -> None:
+            it = QGraphicsEllipseItem(-rw, -rh, 2 * rw, 2 * rh)
+            it.setBrush(QBrush(QColor(fill)))
+            it.setPen(QPen(Qt.PenStyle.NoPen))
+            it.setPos(node_pos + QPointF(cx, cy))
+            it.setRotation(angle_deg)
+            it.setZValue(z)
+            self._scene.addItem(it)
+            self._support_items.append(it)
+
         if in_3d:
             bx, by = _proj_support_bar_dir()
-            # Perpendicular to bar that points screen-downward (into ground)
             perp_x, perp_y = -by, bx
             if perp_y < 0:
                 perp_x, perp_y = -perp_x, -perp_y
+            el = math.radians(_proj_mod.ISO_ELEVATION)
 
         if stype == SupportType.FIXED:
             if in_3d:
-                # Bar along projected ground axis at NODE_R below node
                 ox, oy = perp_x * NODE_R, perp_y * NODE_R
-                path.moveTo(ox - s * bx, oy - s * by)
-                path.lineTo(ox + s * bx, oy + s * by)
-                # Hatching perpendicular to bar, pointing into ground
+                pd = 7  # plate depth in screen-px
+                # Filled anchor plate (parallelogram)
+                plate = QPainterPath()
+                plate.moveTo(ox - s * bx,             oy - s * by)
+                plate.lineTo(ox + s * bx,             oy + s * by)
+                plate.lineTo(ox + s * bx + perp_x*pd, oy + s * by + perp_y*pd)
+                plate.lineTo(ox - s * bx + perp_x*pd, oy - s * by + perp_y*pd)
+                plate.closeSubpath()
+                _path_item(plate, col, col_dk, pw=1.0, z=0.9)
+                # Hatching on the plate
+                hatch = QPainterPath()
                 for i in range(5):
                     t = -1.0 + i * (2.0 / 4)
                     x0 = ox + t * s * bx
                     y0 = oy + t * s * by
-                    path.moveTo(x0, y0)
-                    path.lineTo(x0 + perp_x * 8, y0 + perp_y * 8)
+                    hatch.moveTo(x0, y0)
+                    hatch.lineTo(x0 + perp_x * pd, y0 + perp_y * pd)
+                _path_item(hatch, col_dk, "#ffffff", pw=1.2, z=1.0)
             else:
-                path.moveTo(-s, NODE_R)
-                path.lineTo(s, NODE_R)
+                plate = QPainterPath()
+                plate.moveTo(-s, NODE_R)
+                plate.lineTo( s, NODE_R)
+                plate.lineTo( s - 4, NODE_R + 8)
+                plate.lineTo(-s - 4, NODE_R + 8)
+                plate.closeSubpath()
+                _path_item(plate, col, col_dk, pw=0, z=0.9)
+                hatch = QPainterPath()
                 for i in range(5):
                     x = -s + i * (2 * s / 4)
-                    path.moveTo(x, NODE_R)
-                    path.lineTo(x - 6, NODE_R + 8)
+                    hatch.moveTo(x, NODE_R)
+                    hatch.lineTo(x - 6, NODE_R + 8)
+                _path_item(hatch, col, "#ffffff", pw=1.5, z=1.0)
 
         elif stype in (SupportType.PIN, SupportType.ROLLER, SupportType.ROLLER_Y):
             if stype == SupportType.ROLLER_Y:
-                # Horizontal roller: triangle pointing left, wheels on the left side
-                path.moveTo(-NODE_R, 0)
-                path.lineTo(-(s + NODE_R), -s)
-                path.lineTo(-(s + NODE_R),  s)
-                path.closeSubpath()
-                path.addEllipse(-(s + NODE_R + 11), -s,     8, 8)
-                path.addEllipse(-(s + NODE_R + 11), -s + 12, 8, 8)
+                tri = QPainterPath()
+                tri.moveTo(-NODE_R, 0)
+                tri.lineTo(-(s + NODE_R), -s)
+                tri.lineTo(-(s + NODE_R),  s)
+                tri.closeSubpath()
+                _path_item(tri, col, "#ffffff", pw=1.5)
+                wheels = QPainterPath()
+                wheels.addEllipse(-(s + NODE_R + 11), -s,      8, 8)
+                wheels.addEllipse(-(s + NODE_R + 11), -s + 12, 8, 8)
+                _path_item(wheels, col_dk, "#ffffff", pw=1.0)
             elif in_3d:
-                # Triangle: tip at bottom of node, base along projected ground axis
-                tip_x, tip_y = perp_x * NODE_R, perp_y * NODE_R
+                tip_x  = perp_x * NODE_R
+                tip_y  = perp_y * NODE_R
                 base_ox = perp_x * (NODE_R + s)
                 base_oy = perp_y * (NODE_R + s)
-                path.moveTo(tip_x, tip_y)
-                path.lineTo(base_ox - s * bx, base_oy - s * by)
-                path.lineTo(base_ox + s * bx, base_oy + s * by)
-                path.closeSubpath()
+                lx, ly = base_ox - s * bx, base_oy - s * by  # left corner
+                rx, ry = base_ox + s * bx, base_oy + s * by  # right corner
+
+                # Back face — shifted "up" in screen (= +Z in world = behind in depth)
+                z_shift = s * 0.32 * math.cos(el)
+                back = QPainterPath()
+                back.moveTo(tip_x,       tip_y - z_shift)
+                back.lineTo(lx,          ly    - z_shift)
+                back.lineTo(rx,          ry    - z_shift)
+                back.closeSubpath()
+                _path_item(back, col_dk, col_dk, pw=0, z=0.85)
+
+                # Base oval (circular base of the cone, in isometric foreshortening)
+                bar_angle = math.degrees(math.atan2(by, bx))
+                _oval_item(base_ox, base_oy, s * 0.95, s * 0.32, bar_angle, col_dk, z=0.8)
+
+                # Front face (main color)
+                front = QPainterPath()
+                front.moveTo(tip_x, tip_y)
+                front.lineTo(lx, ly)
+                front.lineTo(rx, ry)
+                front.closeSubpath()
+                _path_item(front, col, "#ffffff", pw=1.5, z=1.0)
+
                 if stype == SupportType.ROLLER:
-                    # Wheels below the triangle base, spaced along the bar direction
-                    wx, wy = base_ox + perp_x * 3, base_oy + perp_y * 3
-                    path.addEllipse(wx - s * bx - 4, wy - s * by - 4, 8, 8)
-                    path.addEllipse(wx + (s - 12) * bx - 4, wy + (s - 12) * by - 4, 8, 8)
+                    wx = base_ox + perp_x * 4
+                    wy = base_oy + perp_y * 4
+                    wheels = QPainterPath()
+                    wheels.addEllipse(wx - s * bx - 4,       wy - s * by - 4,       8, 8)
+                    wheels.addEllipse(wx + (s - 12) * bx - 4, wy + (s - 12) * by - 4, 8, 8)
+                    _path_item(wheels, col_dk, "#ffffff", pw=1.0, z=1.1)
             else:
-                path.moveTo(0, NODE_R)
-                path.lineTo(-s, s + NODE_R)
-                path.lineTo(s, s + NODE_R)
-                path.closeSubpath()
+                tri = QPainterPath()
+                tri.moveTo(0, NODE_R)
+                tri.lineTo(-s, s + NODE_R)
+                tri.lineTo( s, s + NODE_R)
+                tri.closeSubpath()
+                _path_item(tri, col, "#ffffff", pw=1.5)
                 if stype == SupportType.ROLLER:
-                    path.addEllipse(-s, s + NODE_R + 3, 8, 8)
-                    path.addEllipse(-s + 12, s + NODE_R + 3, 8, 8)
+                    wheels = QPainterPath()
+                    wheels.addEllipse(-s,      s + NODE_R + 3, 8, 8)
+                    wheels.addEllipse(-s + 12, s + NODE_R + 3, 8, 8)
+                    _path_item(wheels, col_dk, "#ffffff", pw=1.0)
 
         elif stype == SupportType.SPRING:
+            path = QPainterPath()
             y = NODE_R
             path.moveTo(0, y)
             for i in range(6):
@@ -288,14 +364,8 @@ class NodeItem(QGraphicsEllipseItem):
                 path.lineTo(x, y + (i + 1) * 4)
             path.lineTo(0, y + 28)
             path.moveTo(-s, y + 30)
-            path.lineTo(s, y + 30)
-
-        item = QGraphicsPathItem(path)
-        item.setPen(QPen(QColor("#ffffff"), 1))
-        item.setPos(self.pos())
-        item.setZValue(1)
-        self._scene.addItem(item)
-        self._support_item = item
+            path.lineTo( s, y + 30)
+            _path_item(path, col, col, pw=1.5)
 
     # ── hinge indicator ───────────────────────────────────────────────────────
 
@@ -470,9 +540,9 @@ class NodeItem(QGraphicsEllipseItem):
                     item.refresh()
 
     def remove_extra_items(self) -> None:
-        if self._support_item:
-            self._scene.removeItem(self._support_item)
-            self._support_item = None
+        for it in self._support_items:
+            self._scene.removeItem(it)
+        self._support_items.clear()
         if self._hinge_item:
             self._scene.removeItem(self._hinge_item)
             self._hinge_item = None
@@ -484,9 +554,9 @@ class NodeItem(QGraphicsEllipseItem):
         self._load_label_items.clear()
 
     def remove_support_symbol(self) -> None:
-        if self._support_item:
-            self._scene.removeItem(self._support_item)
-            self._support_item = None
+        for it in self._support_items:
+            self._scene.removeItem(it)
+        self._support_items.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
