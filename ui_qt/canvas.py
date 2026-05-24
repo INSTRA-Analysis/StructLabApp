@@ -290,34 +290,28 @@ class StructCanvas(QGraphicsScene):
         if self._mode == CanvasMode.ADD_NODE:
             snapped = self._snap(pos)
             ms = self.model_state
-            is_3d = ms.mode_3d or any(n.z != 0.0 for n in ms.nodes)
-            if is_3d:
-                plane  = self._working_plane
-                offset = self._plane_offset
-                az = _proj.ISO_AZIMUTH
-                el = _proj.ISO_ELEVATION
-                ppm = PX_PER_M
-                sx, sy = snapped.x(), snapped.y()
-                if plane == WorkingPlane.XZ:
-                    x, z = inverse_isometric_xz(sx, sy, offset, ppm, az, el)
-                    mx = round(x      / 0.25) * 0.25
-                    my = round(offset / 0.25) * 0.25
-                    mz = round(z      / 0.25) * 0.25
-                elif plane == WorkingPlane.YZ:
-                    y, z = inverse_isometric_yz(sx, sy, offset, ppm, az, el)
-                    mx = round(offset / 0.25) * 0.25
-                    my = round(y      / 0.25) * 0.25
-                    mz = round(z      / 0.25) * 0.25
-                else:  # XY or FREE
-                    z_val = offset if plane == WorkingPlane.XY else 0.0
-                    x, y = inverse_isometric(sx, sy, z_val, ppm, az, el)
-                    mx = round(x     / 0.25) * 0.25
-                    my = round(y     / 0.25) * 0.25
-                    mz = z_val
-            else:
-                mx = px_to_m(snapped.x())
-                my = px_to_m(-snapped.y())
-                mz = 0.0
+            plane  = self._working_plane
+            offset = self._plane_offset
+            az = _proj.ISO_AZIMUTH
+            el = _proj.ISO_ELEVATION
+            ppm = PX_PER_M
+            sx, sy = snapped.x(), snapped.y()
+            if plane == WorkingPlane.XZ:
+                x, z = inverse_isometric_xz(sx, sy, offset, ppm, az, el)
+                mx = round(x      / 0.25) * 0.25
+                my = round(offset / 0.25) * 0.25
+                mz = round(z      / 0.25) * 0.25
+            elif plane == WorkingPlane.YZ:
+                y, z = inverse_isometric_yz(sx, sy, offset, ppm, az, el)
+                mx = round(offset / 0.25) * 0.25
+                my = round(y      / 0.25) * 0.25
+                mz = round(z      / 0.25) * 0.25
+            else:  # XY or FREE
+                z_val = offset if plane == WorkingPlane.XY else 0.0
+                x, y = inverse_isometric(sx, sy, z_val, ppm, az, el)
+                mx = round(x     / 0.25) * 0.25
+                my = round(y     / 0.25) * 0.25
+                mz = z_val
             if not self.model_state.node_at(mx, my, mz, tol=0.05):
                 self.save_snapshot()
                 node = self.model_state.add_node(mx, my, mz)
@@ -662,8 +656,7 @@ class StructCanvas(QGraphicsScene):
             self._grab_typed += '.'
 
     def _is_3d_mode(self) -> bool:
-        ms = self.model_state
-        return ms.mode_3d or any(n.z != 0.0 for n in ms.nodes)
+        return True
 
     def _handle_view_key(self, key: int, ctrl: bool) -> bool:
         """Handle numpad-style view shortcuts (3D mode only).
@@ -1334,13 +1327,7 @@ class StructView(QGraphicsView):
                              "Press N to add a node  |  Ctrl+O to open  |  Presets menu to start")
             return
 
-        ms = self.scene().model_state
-        mode_3d = ms.mode_3d or any(n.z != 0.0 for n in ms.nodes)
-
-        if mode_3d:
-            self._draw_iso_grid(painter, rect)
-        else:
-            self._draw_flat_grid(painter, rect)
+        self._draw_iso_grid(painter, rect)
 
         if self.scene()._grab_active:
             self._draw_grab_status(painter, rect)
@@ -1751,8 +1738,7 @@ class StructView(QGraphicsView):
 
     def mousePressEvent(self, event) -> None:
         # ── ViewCube click (3D mode only) ─────────────────────────────────────
-        if (event.button() == Qt.MouseButton.LeftButton
-                and self.scene().model_state.mode_3d):
+        if event.button() == Qt.MouseButton.LeftButton:
             scale = self.transform().m11()
             vr    = self.mapToScene(self.viewport().rect()).boundingRect()
             vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
@@ -1772,7 +1758,7 @@ class StructView(QGraphicsView):
         # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
             shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            if self.scene().model_state.mode_3d and shift:
+            if shift:
                 self._orbit_last = event.pos()
                 self._orbit_center = self._selected_centroid()
                 self.scene().clear_overlays()
@@ -1819,14 +1805,13 @@ class StructView(QGraphicsView):
             event.accept()
             return
 
-        # ── ViewCube hover highlight (3D mode, no drag active) ────────────────
-        if self.scene().model_state.mode_3d:
-            scale = self.transform().m11()
-            vr    = self.mapToScene(self.viewport().rect()).boundingRect()
-            vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
-            sp = self.mapToScene(event.pos())
-            if self._view_cube.update_hover(sp, vc_cx, vc_cy, scale):
-                self.viewport().update()
+        # ── ViewCube hover highlight ──────────────────────────────────────────
+        scale = self.transform().m11()
+        vr    = self.mapToScene(self.viewport().rect()).boundingRect()
+        vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
+        sp = self.mapToScene(event.pos())
+        if self._view_cube.update_hover(sp, vc_cx, vc_cy, scale):
+            self.viewport().update()
 
         super().mouseMoveEvent(event)
 
@@ -1849,7 +1834,6 @@ class StructView(QGraphicsView):
         sel   = scene.selectedItems()
         nodes   = [it.node   for it in sel if isinstance(it, NodeItem)]
         members = [it.member for it in sel if isinstance(it, MemberItem)]
-        is_3d   = scene.model_state.mode_3d
 
         menu = QMenu(self)
 
@@ -1873,10 +1857,9 @@ class StructView(QGraphicsView):
                 ("Pinned",   SupportType.PIN),
                 ("Roller",   SupportType.ROLLER),
                 ("Roller Y", SupportType.ROLLER_Y),
+                ("Roller Z", SupportType.ROLLER_Z),
                 ("None",     SupportType.FREE),
             ]
-            if is_3d:
-                _SUPPORT_LABELS.insert(4, ("Roller Z", SupportType.ROLLER_Z))
             for label, stype in _SUPPORT_LABELS:
                 a = sup_menu.addAction(label)
                 a.triggered.connect(
@@ -1896,7 +1879,7 @@ class StructView(QGraphicsView):
         if nodes or members:
             act_mir = menu.addAction("Mirror…")
             act_mir.triggered.connect(
-                lambda _checked=False: self._on_mirror(is_3d)
+                lambda _checked=False: self._on_mirror(True)
             )
 
         # ── Paste ─────────────────────────────────────────────────────────────

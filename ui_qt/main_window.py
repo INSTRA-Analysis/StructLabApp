@@ -228,7 +228,6 @@ class MainWindow(QMainWindow):
     # ── Edit menu ─────────────────────────────────────────────────────────────
 
     def _build_edit_menu(self, mb) -> None:
-        from PyQt6.QtGui import QAction, QKeySequence
         edit_menu = mb.addMenu("Edit")
         edit_menu.addAction("Undo",      "Ctrl+Z", self._scene.undo)
         edit_menu.addAction("Redo",      "Ctrl+Y", self._scene.redo)
@@ -239,14 +238,6 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction("Solve",        "F5", self._on_solve)
         edit_menu.addAction("Zoom to Fit",  "F",  self._view.zoom_to_fit)
-        edit_menu.addSeparator()
-        self._act_3d_mode = QAction("3D Mode", self)
-        self._act_3d_mode.setCheckable(True)
-        self._act_3d_mode.setChecked(False)
-        self._act_3d_mode.triggered.connect(self._toggle_3d_mode)
-        self._act_3d_mode.setShortcut(QKeySequence("Ctrl+3"))
-        self._act_3d_mode.setToolTip("Toggle 3D modeling mode (Ctrl+3)")
-        edit_menu.addAction(self._act_3d_mode)
 
     # ── Selection menu ────────────────────────────────────────────────────────
 
@@ -412,35 +403,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,  self._left_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
 
-    # ── 3D mode toggle ────────────────────────────────────────────────────────
-
-    def _toggle_3d_mode(self) -> None:
-        state = self._scene.model_state
-        state.mode_3d = self._act_3d_mode.isChecked()
-        self._update_z_controls_visibility(state.mode_3d)
-        self._on_selection_changed()
-        self._scene.update()   # redraw grid
-
     def _on_toggle_local_axes(self, checked: bool) -> None:
         from ui_qt.canvas_items import set_show_local_axes
         set_show_local_axes(checked)
         self._scene.update()
-
-    def _sync_3d_action(self) -> None:
-        """Keep the Edit → 3D Mode checkmark in sync with the loaded state."""
-        if hasattr(self, "_act_3d_mode"):
-            state = self._scene.model_state
-            self._act_3d_mode.setChecked(state.mode_3d)
-            self._update_z_controls_visibility(state.mode_3d)
-            self._scene.update()   # redraw grid
-
-    def _update_z_controls_visibility(self, visible: bool) -> None:
-        if hasattr(self, "_view_tb"):
-            self._view_tb.setVisible(visible)
-        if not visible:
-            self._scene.set_plane_offset(0.0)
-            if hasattr(self, "_plane_spin"):
-                self._plane_spin.setValue(0.0)
 
     def _set_working_plane(self, plane: WorkingPlane) -> None:
         """Switch the canvas working plane and sync toolbar button + label states."""
@@ -481,27 +447,18 @@ class MainWindow(QMainWindow):
         choice = dlg.choice
         from ui_qt import presets as P
         if choice == "beam":
-            state = P.demo_beam_steel()
-            state.mode_3d = True
-            self._apply_model_state(state, "Steel Beam")
+            self._apply_model_state(P.demo_beam_steel(), "Steel Beam")
         elif choice == "frame":
-            state = P.demo_3d_portal()
-            state.mode_3d = True
-            self._apply_model_state(state, "3D Portal Frame")
+            self._apply_model_state(P.demo_3d_portal(), "3D Portal Frame")
         elif choice == "truss":
-            state = P.demo_space_truss()
-            state.mode_3d = True
-            self._apply_model_state(state, "Space Truss")
+            self._apply_model_state(P.demo_space_truss(), "Space Truss")
         elif choice == "blank":
             from ui_qt.model_state import ModelState
-            state = ModelState()
-            state.mode_3d = True
-            self._apply_model_state(state, "Blank")
+            self._apply_model_state(ModelState(), "Blank")
         elif choice.startswith("file:"):
             self._open_file(choice[5:])
         elif choice == "open":
             self._on_open()
-        self._sync_3d_action()
 
     def _rebuild_recent_menu(self) -> None:
         from ui_qt import recent_files as RF
@@ -517,14 +474,12 @@ class MainWindow(QMainWindow):
                 lambda _=None, p=path: self._open_file(p),
             ).setToolTip(path)
 
-    def _open_file(self, path: str, force_3d: bool = False) -> None:
+    def _open_file(self, path: str) -> None:
         """Open a .slab file by path without showing a file dialog."""
         from ui_qt.io import load_model
         from ui_qt import recent_files as RF
         try:
             state = load_model(path)
-            if force_3d:
-                state.mode_3d = True
             self._scene.load_state(state)
             self._scene._hide_welcome = True
             self._props_panel.set_model_state(self._scene.model_state)
@@ -542,7 +497,6 @@ class MainWindow(QMainWindow):
             self._update_status_stats()
             self._sb.showMessage(f"Opened: {path}")
             RF.push(path)
-            self._sync_3d_action()
         except Exception as exc:
             QMessageBox.critical(self, "Open error", str(exc))
 
@@ -566,7 +520,6 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._sb.showMessage(f"Loaded: {label}" if label else "Preset loaded")
         self._update_status_stats()
-        self._sync_3d_action()
 
     def _on_frame_wizard(self) -> None:
         from PyQt6.QtWidgets import (
@@ -699,9 +652,6 @@ class MainWindow(QMainWindow):
             tb.addWidget(btn)
 
         self._mode_buttons[CanvasMode.SELECT].setChecked(True)
-
-        tb.addSeparator()
-        tb.addAction(self._act_3d_mode)
 
         # ── member type selector ───────────────────────────────────────────────
         tb.addWidget(QLabel(" Type:"))
@@ -1879,10 +1829,6 @@ class MainWindow(QMainWindow):
         self._solve_cache = None
         self._update_title()
         self._update_status_stats()
-        # Keep panel in sync: load_state() (called by undo/redo) replaces
-        # scene.model_state with a new object, then clears the old one
-        # (resetting mode_3d=False on it). Without this line the panel's
-        # stale reference would make _is_3d() return False after any undo.
         self._props_panel.set_model_state(self._scene.model_state)
 
     def _update_status_stats(self) -> None:
@@ -2237,10 +2183,7 @@ class MainWindow(QMainWindow):
             self._sb.showMessage("Select nodes or members to duplicate  (Ctrl+D)")
             return
 
-        is_3d = self._scene.model_state.mode_3d or any(
-            n.z != 0.0 for n in self._scene.model_state.nodes
-        )
-        dlg = DuplicateDialog(self, is_3d=is_3d)
+        dlg = DuplicateDialog(self, is_3d=True)
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 

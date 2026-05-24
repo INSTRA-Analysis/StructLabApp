@@ -80,7 +80,6 @@ class WelcomeDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(600)
         self.choice: str = "blank"
-        self.is_3d: bool = True
         self._build_ui(recent_files or [])
 
     def _build_ui(self, recent_files: list[str]) -> None:
