@@ -458,9 +458,6 @@ class _MemberForm(QWidget):
         self._Wpl = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)
         self._Wel = _spin(member.W_el * 1e6, 0, 1e6, 0.1, 1)
         df.addRow("W_pl (cm³):", self._Wpl)
-        self._mplrd_lbl = QLabel("—")
-        self._mplrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
-        df.addRow("M_pl.Rd (kN·m):", self._mplrd_lbl)
         df.addRow("W_el (cm³):", self._Wel)
         self._melrd_lbl = QLabel("—")
         self._melrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
@@ -493,9 +490,9 @@ class _MemberForm(QWidget):
                    self._As_t, self._fyk):
             _w.valueChanged.connect(self._update_mrd_display)
 
-        # Connect steel/timber fields to live M_pl.Rd / M_el.Rd display
-        for _w in (self._fy, self._Wpl, self._Wel):
-            _w.valueChanged.connect(self._update_mplrd_display)
+        # Connect steel/timber fields to live M_el.Rd display
+        for _w in (self._fy, self._Wel):
+            _w.valueChanged.connect(self._update_melrd_display)
 
         _dl2.addWidget(design_box)
         tabs.addTab(_ds_tab, "Design")
@@ -506,7 +503,7 @@ class _MemberForm(QWidget):
         self._fy_lbl.setText(_MLBLS[min(_cur, 3)])
         self._update_design_visibility(_cur)
         self._update_mrd_display()
-        self._update_mplrd_display()
+        self._update_melrd_display()
 
         layout.addWidget(tabs)
 
@@ -540,9 +537,8 @@ class _MemberForm(QWidget):
             return
         df = self._design_form
         is_conc = (mat_idx == 1)
-        df.setRowVisible(self._Wpl,      not is_conc)
-        df.setRowVisible(self._mplrd_lbl, not is_conc)
-        df.setRowVisible(self._Wel,      not is_conc)
+        df.setRowVisible(self._Wpl,       not is_conc)
+        df.setRowVisible(self._Wel,       not is_conc)
         df.setRowVisible(self._melrd_lbl, not is_conc)
         df.setRowVisible(self._b_sec,  is_conc)
         df.setRowVisible(self._h_sec,  is_conc)
@@ -574,14 +570,12 @@ class _MemberForm(QWidget):
         else:
             self._mrd_lbl.setText("—")
 
-    def _update_mplrd_display(self, _val: float = 0.0) -> None:
-        """Live M_pl.Rd and M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, γM0 = 1.0)."""
-        if not hasattr(self, "_mplrd_lbl"):
+    def _update_melrd_display(self, _val: float = 0.0) -> None:
+        """Live M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, elastic, γM0 = 1.0)."""
+        if not hasattr(self, "_melrd_lbl"):
             return
-        fy  = self._fy.value() * 1e6       # Pa
-        Wpl = self._Wpl.value() * 1e-6     # m³
-        Wel = self._Wel.value() * 1e-6     # m³
-        self._mplrd_lbl.setText(f"{Wpl * fy / 1e3:.2f} kN·m" if Wpl > 0 and fy > 0 else "—")
+        fy  = self._fy.value() * 1e6
+        Wel = self._Wel.value() * 1e-6
         self._melrd_lbl.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
 
     def _pick_section(self) -> None:
@@ -1041,9 +1035,6 @@ class _MultiMemberForm(QWidget):
         self._Wel_m = _spin(first.W_el * 1e6, 0, 1e6, 10, 1)
         self._design_form_m.addRow(self._fy_lbl_m, self._fy_m)
         self._design_form_m.addRow("W_pl (cm³):", self._Wpl_m)
-        self._mplrd_lbl_m = QLabel("—")
-        self._mplrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
-        self._design_form_m.addRow("M_pl.Rd (kN·m):", self._mplrd_lbl_m)
         self._design_form_m.addRow("W_el (cm³):", self._Wel_m)
         self._melrd_lbl_m = QLabel("—")
         self._melrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
@@ -1074,12 +1065,12 @@ class _MultiMemberForm(QWidget):
                    self._cover_m, self._As_t_m, self._fyk_m):
             _w.valueChanged.connect(self._update_mrd_display_m)
 
-        for _w in (self._fy_m, self._Wpl_m, self._Wel_m):
-            _w.valueChanged.connect(self._update_mplrd_display_m)
+        for _w in (self._fy_m, self._Wel_m):
+            _w.valueChanged.connect(self._update_melrd_display_m)
 
         self._mat_preset.currentIndexChanged.connect(self._update_design_visibility_m)
         self._update_design_visibility_m(self._mat_preset.currentIndex())
-        self._update_mplrd_display_m()
+        self._update_melrd_display_m()
 
         # ── Apply button ──────────────────────────────────────────────────────
         btn = QPushButton(f"Apply to all {len(members)} members")
@@ -1101,9 +1092,8 @@ class _MultiMemberForm(QWidget):
     def _update_design_visibility_m(self, idx: int = 0) -> None:
         is_conc = (idx == 1)
         df = self._design_form_m
-        df.setRowVisible(self._Wpl_m,      not is_conc)
-        df.setRowVisible(self._mplrd_lbl_m, not is_conc)
-        df.setRowVisible(self._Wel_m,      not is_conc)
+        df.setRowVisible(self._Wpl_m,       not is_conc)
+        df.setRowVisible(self._Wel_m,       not is_conc)
         df.setRowVisible(self._melrd_lbl_m, not is_conc)
         df.setRowVisible(self._b_sec_m,  is_conc)
         df.setRowVisible(self._h_sec_m,  is_conc)
@@ -1132,14 +1122,12 @@ class _MultiMemberForm(QWidget):
         else:
             self._mrd_lbl_m.setText("—")
 
-    def _update_mplrd_display_m(self, _val: float = 0.0) -> None:
-        """Live M_pl.Rd / M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, γM0 = 1.0)."""
-        if not hasattr(self, "_mplrd_lbl_m"):
+    def _update_melrd_display_m(self, _val: float = 0.0) -> None:
+        """Live M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, elastic, γM0 = 1.0)."""
+        if not hasattr(self, "_melrd_lbl_m"):
             return
         fy  = self._fy_m.value() * 1e6
-        Wpl = self._Wpl_m.value() * 1e-6
         Wel = self._Wel_m.value() * 1e-6
-        self._mplrd_lbl_m.setText(f"{Wpl * fy / 1e3:.2f} kN·m" if Wpl > 0 and fy > 0 else "—")
         self._melrd_lbl_m.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
 
     def _dl_populate_m(self) -> None:
@@ -1414,8 +1402,7 @@ class ResultsPanel(QWidget):
         ])
 
         self._design_table = self._make_table([
-            "Member", "M_Ed (kN·m)", "M_pl (kN·m)", "M_el (kN·m)",
-            "η_pl (%)", "η_el (%)", "Status",
+            "Member", "M_Ed (kN·m)", "M_Rd (kN·m)", "η (%)", "Status",
         ])
 
         self._tabs.addTab(self._wrap(self._disp_table),   "Displacements")
@@ -1800,50 +1787,38 @@ class ResultsPanel(QWidget):
                 mat = "steel"   # steel / custom / zero density all use steel formula
 
             if mat == "concrete":
-                b    = md.b_sec if md else 0.0
-                d    = md.d_eff if md else 0.0
-                As   = md.As_tension if md else 0.0
+                b     = md.b_sec if md else 0.0
+                d     = md.d_eff if md else 0.0
+                As    = md.As_tension if md else 0.0
                 fyk_v = md.fyk if md else 500e6
-                fck  = fk
-                M_el = 0.0
+                fck   = fk
                 if b > 0 and d > 0 and As > 0 and fck > 0:
-                    fcd = fck / 1.5
-                    fyd = fyk_v / 1.15
-                    x   = min(As * fyd / (0.8 * b * fcd), d)
-                    M_pl = As * fyd * (d - 0.4 * x)
-                    eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
-                    eta_el = None
-                    status = ("PASS ✓" if eta_pl <= 100.0 else "FAIL ✗") if eta_pl is not None else "N/A"
+                    fcd  = fck / 1.5
+                    fyd  = fyk_v / 1.15
+                    x    = min(As * fyd / (0.8 * b * fcd), d)
+                    M_Rd = As * fyd * (d - 0.4 * x)
+                    eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
+                    status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else "N/A"
                 else:
-                    M_pl = 0.0
-                    eta_pl = eta_el = None
+                    M_Rd = 0.0
+                    eta  = None
                     status = "Set b/d/As"
-            elif mat == "timber":
-                M_pl = 0.0
-                M_el = fk * W_el          # elastic check, EN 1995 (no γ_M applied here)
-                eta_pl = None
-                eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
-                status = ("PASS ✓" if eta_el <= 100.0 else "FAIL ✗") if eta_el is not None else "N/A — set W_el"
-            else:                         # steel / custom
-                M_pl = fk * W_pl
-                M_el = fk * W_el
-                eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
-                eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
-                status = ("PASS ✓" if eta_pl <= 100.0 else "FAIL ✗") if eta_pl is not None else "N/A — set W_pl"
+            else:                         # steel / timber / custom — elastic check
+                M_Rd = fk * W_el
+                eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
+                status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else "N/A — set W_el"
 
             self._set_row(self._design_table, row, [
                 str(mid),
                 f"{M_Ed / 1e3:.3f}",
-                f"{M_pl / 1e3:.3f}" if M_pl > 0 else "—",
-                f"{M_el / 1e3:.3f}" if M_el > 0 else "—",
-                f"{eta_pl:.1f}" if eta_pl is not None else "—",
-                f"{eta_el:.1f}" if eta_el is not None else "—",
+                f"{M_Rd / 1e3:.3f}" if M_Rd > 0 else "—",
+                f"{eta:.1f}" if eta is not None else "—",
                 status,
             ])
             self._design_row_to_member.append(mid)
 
             # Colour-code by utilisation
-            eta_ref = eta_pl if mat != "timber" else eta_el
+            eta_ref = eta
             if mat == "concrete" and eta_ref is None:
                 bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # blue-grey — dims not set
             elif eta_ref is not None:
