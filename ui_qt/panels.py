@@ -1457,6 +1457,27 @@ class ResultsPanel(QWidget):
 
     # ── public ────────────────────────────────────────────────────────────────
 
+    def _configure_dof_tables(self, dpn: int) -> None:
+        """Update column count and headers of displacement/reaction tables for dpn."""
+        if dpn == 6:
+            self._disp_table.setColumnCount(7)
+            self._disp_table.setHorizontalHeaderLabels(
+                ["Node", "dx (mm)", "dy (mm)", "dz (mm)", "θx (mrad)", "θy (mrad)", "θz (mrad)"]
+            )
+            self._react_table.setColumnCount(7)
+            self._react_table.setHorizontalHeaderLabels(
+                ["Node", "Fx (kN)", "Fy (kN)", "Fz (kN)", "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"]
+            )
+        else:
+            self._disp_table.setColumnCount(4)
+            self._disp_table.setHorizontalHeaderLabels(
+                ["Node", "dx (mm)", "dy (mm)", "θ (mrad)"]
+            )
+            self._react_table.setColumnCount(4)
+            self._react_table.setHorizontalHeaderLabels(
+                ["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"]
+            )
+
     def populate(self, displacements, reactions, member_results, model_state,
                  dpn: int = 3, **kwargs) -> None:
         """Fill all three tables with solver results and rebuild row→ID maps.
@@ -1474,18 +1495,25 @@ class ResultsPanel(QWidget):
         self._force_row_to_member = []
         self._design_row_to_member = []
 
-        # θ_z is at DOF offset 2 in 2D and offset 5 in 3D
-        rot_offset = 5 if dpn == 6 else 2
+        self._configure_dof_tables(dpn)
 
         # ── Displacements ──────────────────────────────────────────────────────
         self._disp_table.setRowCount(len(model_state.nodes))
         for row, nd in enumerate(model_state.nodes):
             base = nd.id * dpn
-            dx = displacements[base]              * 1e3
-            dy = displacements[base + 1]          * 1e3
-            th = displacements[base + rot_offset] * 1e3
-            self._set_row(self._disp_table, row,
-                          [str(nd.id), f"{dx:.4f}", f"{dy:.4f}", f"{th:.4f}"])
+            if dpn == 6:
+                d = displacements[base:base + 6] * 1e3
+                self._set_row(self._disp_table, row, [
+                    str(nd.id),
+                    f"{d[0]:.4f}", f"{d[1]:.4f}", f"{d[2]:.4f}",
+                    f"{d[3]:.4f}", f"{d[4]:.4f}", f"{d[5]:.4f}",
+                ])
+            else:
+                dx = displacements[base]     * 1e3
+                dy = displacements[base + 1] * 1e3
+                th = displacements[base + 2] * 1e3
+                self._set_row(self._disp_table, row,
+                              [str(nd.id), f"{dx:.4f}", f"{dy:.4f}", f"{th:.4f}"])
             self._disp_row_to_node.append(nd.id)
 
         # ── Reactions ──────────────────────────────────────────────────────────
@@ -1493,11 +1521,19 @@ class ResultsPanel(QWidget):
         self._react_table.setRowCount(len(react_rows))
         for row, nd in enumerate(react_rows):
             base = nd.id * dpn
-            fx = reactions[base]              / 1e3
-            fy = reactions[base + 1]          / 1e3
-            m  = reactions[base + rot_offset] / 1e3
-            self._set_row(self._react_table, row,
-                          [str(nd.id), f"{fx:.3f}", f"{fy:.3f}", f"{m:.3f}"])
+            if dpn == 6:
+                r6 = reactions[base:base + 6]
+                self._set_row(self._react_table, row, [
+                    str(nd.id),
+                    f"{r6[0]/1e3:.3f}", f"{r6[1]/1e3:.3f}", f"{r6[2]/1e3:.3f}",
+                    f"{r6[3]/1e3:.3f}", f"{r6[4]/1e3:.3f}", f"{r6[5]/1e3:.3f}",
+                ])
+            else:
+                fx = reactions[base]     / 1e3
+                fy = reactions[base + 1] / 1e3
+                m  = reactions[base + 2] / 1e3
+                self._set_row(self._react_table, row,
+                              [str(nd.id), f"{fx:.3f}", f"{fy:.3f}", f"{m:.3f}"])
             self._react_row_to_node.append(nd.id)
 
         # ── Member forces — peak M scan using sub-element endpoints ─────────────
@@ -1639,19 +1675,27 @@ class ResultsPanel(QWidget):
         state = model_state
         n_runs = len(solve_runs)
 
-        rot_offset = 5 if dpn == 6 else 2
+        self._configure_dof_tables(dpn)
 
         # ── Displacements ─────────────────────────────────────────────────────
         self._disp_table.setRowCount(len(state.nodes))
         for row, nd in enumerate(state.nodes):
             base = nd.id * dpn
-            dx = max((r['displacements'][base]              for r in solve_runs), key=abs)
-            dy = max((r['displacements'][base + 1]          for r in solve_runs), key=abs)
-            th = max((r['displacements'][base + rot_offset] for r in solve_runs), key=abs)
-            self._set_row(self._disp_table, row, [
-                str(nd.id),
-                f"{dx * 1e3:.4f}", f"{dy * 1e3:.4f}", f"{th * 1e3:.4f}",
-            ])
+            if dpn == 6:
+                d = [max((r['displacements'][base + k] for r in solve_runs), key=abs) for k in range(6)]
+                self._set_row(self._disp_table, row, [
+                    str(nd.id),
+                    f"{d[0]*1e3:.4f}", f"{d[1]*1e3:.4f}", f"{d[2]*1e3:.4f}",
+                    f"{d[3]*1e3:.4f}", f"{d[4]*1e3:.4f}", f"{d[5]*1e3:.4f}",
+                ])
+            else:
+                dx = max((r['displacements'][base]     for r in solve_runs), key=abs)
+                dy = max((r['displacements'][base + 1] for r in solve_runs), key=abs)
+                th = max((r['displacements'][base + 2] for r in solve_runs), key=abs)
+                self._set_row(self._disp_table, row, [
+                    str(nd.id),
+                    f"{dx * 1e3:.4f}", f"{dy * 1e3:.4f}", f"{th * 1e3:.4f}",
+                ])
             self._disp_row_to_node.append(nd.id)
 
         # ── Reactions ─────────────────────────────────────────────────────────
@@ -1660,16 +1704,27 @@ class ResultsPanel(QWidget):
         for row, nd in enumerate(react_rows):
             base = nd.id * dpn
             runs_with_r = [r for r in solve_runs if 'reactions' in r]
-            if runs_with_r:
-                fx = max((r['reactions'][base]              for r in runs_with_r), key=abs)
-                fy = max((r['reactions'][base + 1]          for r in runs_with_r), key=abs)
-                m  = max((r['reactions'][base + rot_offset] for r in runs_with_r), key=abs)
+            if dpn == 6:
+                if runs_with_r:
+                    r6 = [max((r['reactions'][base + k] for r in runs_with_r), key=abs) for k in range(6)]
+                else:
+                    r6 = [0.0] * 6
+                self._set_row(self._react_table, row, [
+                    str(nd.id),
+                    f"{r6[0]/1e3:.3f}", f"{r6[1]/1e3:.3f}", f"{r6[2]/1e3:.3f}",
+                    f"{r6[3]/1e3:.3f}", f"{r6[4]/1e3:.3f}", f"{r6[5]/1e3:.3f}",
+                ])
             else:
-                fx = fy = m = 0.0
-            self._set_row(self._react_table, row, [
-                str(nd.id),
-                f"{fx / 1e3:.3f}", f"{fy / 1e3:.3f}", f"{m / 1e3:.3f}",
-            ])
+                if runs_with_r:
+                    fx = max((r['reactions'][base]     for r in runs_with_r), key=abs)
+                    fy = max((r['reactions'][base + 1] for r in runs_with_r), key=abs)
+                    m  = max((r['reactions'][base + 2] for r in runs_with_r), key=abs)
+                else:
+                    fx = fy = m = 0.0
+                self._set_row(self._react_table, row, [
+                    str(nd.id),
+                    f"{fx / 1e3:.3f}", f"{fy / 1e3:.3f}", f"{m / 1e3:.3f}",
+                ])
             self._react_row_to_node.append(nd.id)
 
         # ── Member forces (simplified 4-column envelope) ───────────────────────
