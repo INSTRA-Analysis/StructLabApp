@@ -1707,7 +1707,7 @@ class StructView(QGraphicsView):
         # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
             shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            if self.scene().model_state.mode_3d and not shift:
+            if self.scene().model_state.mode_3d and shift:
                 self._orbit_last = event.pos()
                 self.scene().clear_overlays()
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
