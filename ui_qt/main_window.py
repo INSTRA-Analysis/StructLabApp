@@ -214,7 +214,8 @@ class MainWindow(QMainWindow):
 
         preset_menu.addSeparator()
         _section("── Trusses ─────────────────")
-        _add("Pratt Roof Truss — SHS 200, 8 panels", P.demo_truss_pratt)
+        _add("Pratt Roof Truss — SHS 200, 8 panels",            P.demo_truss_pratt)
+        _add("3D Pratt Space Truss — SHS, 12×4 m, 4 panels",   P.demo_3d_pratt_roof)
 
         preset_menu.addSeparator()
         _section("── Mixed & Special ─────────")
