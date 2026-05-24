@@ -1296,6 +1296,7 @@ class StructView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._pan_last = None    # QPoint when middle-button is held (pan)
         self._orbit_last = None  # QPoint when middle is held (3D orbit)
+        self._orbit_center: tuple[float,float,float] | None = None  # world pivot
         self._view_cube = ViewCube()
         self.setMouseTracking(True)  # needed for hover updates
 
@@ -1682,6 +1683,23 @@ class StructView(QGraphicsView):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self.scale(factor, factor)
 
+    def _selected_centroid(self) -> tuple[float,float,float] | None:
+        """World centroid of selected nodes/members, or None if nothing selected."""
+        from ui_qt.canvas_items import NodeItem, MemberItem
+        ms = self.scene().model_state
+        xs, ys, zs = [], [], []
+        for item in self.scene().selectedItems():
+            if isinstance(item, NodeItem):
+                xs.append(item.node.x); ys.append(item.node.y); zs.append(item.node.z)
+            elif isinstance(item, MemberItem):
+                ni = ms.get_node(item.member.node_i)
+                nj = ms.get_node(item.member.node_j)
+                if ni and nj:
+                    xs += [ni.x, nj.x]; ys += [ni.y, nj.y]; zs += [ni.z, nj.z]
+        if not xs:
+            return None
+        return (sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs))
+
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
@@ -1709,6 +1727,7 @@ class StructView(QGraphicsView):
             shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
             if self.scene().model_state.mode_3d and shift:
                 self._orbit_last = event.pos()
+                self._orbit_center = self._selected_centroid()
                 self.scene().clear_overlays()
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
             else:
@@ -1722,9 +1741,23 @@ class StructView(QGraphicsView):
         if self._orbit_last is not None:
             delta = event.pos() - self._orbit_last
             self._orbit_last = event.pos()
+            # Capture pivot screen position before reprojection
+            if self._orbit_center is not None:
+                sx0, sy0 = _proj.isometric(*self._orbit_center)
+                vp_before = self.mapFromScene(QPointF(sx0, sy0))
             _proj.ISO_AZIMUTH   = _proj.ISO_AZIMUTH + delta.x() * 0.3
             _proj.ISO_ELEVATION = max(5.0, min(85.0, _proj.ISO_ELEVATION - delta.y() * 0.3))
             self.scene().reproject()
+            # Adjust scroll bars so pivot stays at same screen position
+            if self._orbit_center is not None:
+                sx1, sy1 = _proj.isometric(*self._orbit_center)
+                vp_after = self.mapFromScene(QPointF(sx1, sy1))
+                self.horizontalScrollBar().setValue(
+                    self.horizontalScrollBar().value() + int(vp_after.x() - vp_before.x())
+                )
+                self.verticalScrollBar().setValue(
+                    self.verticalScrollBar().value() + int(vp_after.y() - vp_before.y())
+                )
             event.accept()
             return
         if self._pan_last is not None:
