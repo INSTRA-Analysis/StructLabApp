@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
     # ── Edit menu ─────────────────────────────────────────────────────────────
 
     def _build_edit_menu(self, mb) -> None:
-        from PyQt6.QtGui import QAction
+        from PyQt6.QtGui import QAction, QKeySequence
         edit_menu = mb.addMenu("Edit")
         edit_menu.addAction("Undo",      "Ctrl+Z", self._scene.undo)
         edit_menu.addAction("Redo",      "Ctrl+Y", self._scene.redo)
@@ -244,6 +244,8 @@ class MainWindow(QMainWindow):
         self._act_3d_mode.setCheckable(True)
         self._act_3d_mode.setChecked(False)
         self._act_3d_mode.triggered.connect(self._toggle_3d_mode)
+        self._act_3d_mode.setShortcut(QKeySequence("Ctrl+3"))
+        self._act_3d_mode.setToolTip("Toggle 3D modeling mode (Ctrl+3)")
         edit_menu.addAction(self._act_3d_mode)
 
     # ── Selection menu ────────────────────────────────────────────────────────
@@ -706,6 +708,9 @@ class MainWindow(QMainWindow):
             tb.addWidget(btn)
 
         self._mode_buttons[CanvasMode.SELECT].setChecked(True)
+
+        tb.addSeparator()
+        tb.addAction(self._act_3d_mode)
 
         # ── member type selector ───────────────────────────────────────────────
         tb.addWidget(QLabel(" Type:"))
