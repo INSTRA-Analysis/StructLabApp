@@ -145,7 +145,7 @@ def compute_auto_scales(
         L  = math.hypot(nj.x - ni.x, nj.y - ni.y)
         # Sample M(x) at 20 points to find true maximum (UDL produces mid-span peak)
         xs = np.linspace(0.0, L, 20)
-        M_vals = res.M_i + res.V_i * xs
+        M_vals = res.M_i + res._bmd_V_i * xs
         for eload in model.element_loads:
             if eload.element_id == res.element_id:
                 from core.load import LoadType
@@ -256,7 +256,7 @@ def _stitch_M(
             continue
         L_sub = el.length
         xs    = np.linspace(0.0, L_sub, 12)
-        M_sub = res.M_i + res.V_i * xs
+        M_sub = res.M_i + res._bmd_V_i * xs
         for eload in load_map.get(el_id, []):
             if eload.load_type == LoadType.UDL:
                 M_sub = M_sub - eload.magnitude * xs ** 2 / 2

@@ -61,6 +61,18 @@ class ElementResult:
             return My if abs(My) >= abs(Mz) else Mz
         return self.end_forces[5]
 
+    @property
+    def _bmd_V_i(self) -> float:
+        """Effective shear for M(x) = M_i + _bmd_V_i * x.
+
+        dM_z/dx = +V_y  (M_z plane)
+        dM_y/dx = -V_z  (M_y plane, e.g. vertical members with global-Y load)
+        """
+        if self.is_3d:
+            My, Mz = self.end_forces[4], self.end_forces[5]
+            return -self.end_forces[2] if abs(My) >= abs(Mz) else self.end_forces[1]
+        return self.end_forces[1]
+
     # ── 3D-specific accessors (valid when is_3d is True) ─────────────────
     @property
     def V_y_i(self) -> float: return self.end_forces[1]
@@ -189,7 +201,7 @@ class Postprocessor:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Compute V(x) and M(x) along element from end forces and element loads."""
         V = np.full_like(x, er.V_i)
-        M = er.M_i + er.V_i * x
+        M = er.M_i + er._bmd_V_i * x
 
         for eload in self._load_map.get(el.id, []):
             if eload.load_type == LoadType.UDL:
