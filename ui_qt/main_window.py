@@ -165,9 +165,10 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         file_menu = mb.addMenu("File")
-        file_menu.addAction("New",   "Ctrl+N", self._on_new)
-        file_menu.addAction("Open…", "Ctrl+O", self._on_open)
-        file_menu.addAction("Save…", "Ctrl+S", self._on_save)
+        file_menu.addAction("New",      "Ctrl+N",       self._on_new)
+        file_menu.addAction("Open…",   "Ctrl+O",       self._on_open)
+        file_menu.addAction("Save",    "Ctrl+S",       self._on_save)
+        file_menu.addAction("Save As…","Ctrl+Shift+S", self._on_save_as)
         file_menu.addSeparator()
         file_menu.addAction("Project Info…", self._on_project_info)
         file_menu.addSeparator()
@@ -2228,13 +2229,27 @@ class MainWindow(QMainWindow):
             self._open_file(path)
 
     def _on_save(self) -> None:
+        """Save to current file, or prompt for a path if none is set yet."""
+        if self._filepath:
+            self._save_to(self._filepath)
+        else:
+            self._on_save_as()
+
+    def _on_save_as(self) -> None:
+        """Always prompt for a new file path, then save."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save StructLab model", "", "StructLab files (*.slab);;All files (*)"
+            self, "Save StructLab model",
+            self._filepath or "",
+            "StructLab files (*.slab);;All files (*)",
         )
         if not path:
             return
         if not path.endswith(".slab"):
             path += ".slab"
+        self._save_to(path)
+
+    def _save_to(self, path: str) -> None:
+        """Write model to path, update state. Shared by Save and Save As."""
         try:
             from ui_qt.io import save_model
             save_model(self._scene.model_state, path)
