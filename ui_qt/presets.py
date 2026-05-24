@@ -1074,3 +1074,109 @@ def demo_space_truss() -> ModelState:
         _nload(s, nd.id, fz=-5_000.0)
     s.mode_3d = True
     return s
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Design-check showcase presets — section properties fully pre-filled
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def design_steel_beam() -> ModelState:
+    """Steel floor beam — IPE 360, S355, propped cantilever, elastic design check.
+
+    Fixed at wall (x = 0), roller at x = 8 m.
+    fy = 355 MPa, W_el and W_pl pre-filled → Design tab shows M_el.Rd and η.
+    Dead G: 20 kN/m.  Imposed Q: 12 kN/m.
+    G alone → η ≈ 50 %.  G + Q combined → η ≈ 79 % (amber, near limit).
+    """
+    s = ModelState()
+    s.load_cases[0].name = "Dead (G)"
+    lc_g = s.load_cases[0]
+    lc_q = s.add_load_case("Imposed (Q)", category="Q")
+
+    n0 = s.add_node(0.0, 0.0); n0.support_type = SupportType.FIXED
+    n1 = s.add_node(8.0, 0.0); n1.support_type = SupportType.ROLLER
+
+    m = _mb(s, n0.id, n1.id, IPE_360, udl=20_000.0, case=lc_g)
+    lc_q.set_member_load(m.id, MemberLoad(w_start=12_000.0, w_end=12_000.0))
+
+    # IPE 360, S355 — EN 10365: tf = 12.7 mm < 16 mm → fy = 355 MPa
+    m.fy   = 355e6       # Pa
+    m.W_el = 9.04e-4     # m³ — elastic section modulus (904 cm³)
+    m.W_pl = 1.019e-3    # m³ — plastic section modulus (1019 cm³)
+
+    return s
+
+
+def design_rc_beam() -> ModelState:
+    """RC propped cantilever — 300×500 mm, C30/37, concrete design check.
+
+    Fixed at wall (x = 0), roller at x = 8 m.  4 × H20 bottom bars (1257 mm²).
+    Design properties pre-filled → Design tab shows M_Rd and utilisation.
+    Dead G alone (18 kN/m): M_Ed ≈ 144 kN·m → η ≈ 66 % (green ✓).
+    G + Q combined (30 kN/m): M_Ed ≈ 240 kN·m → η ≈ 110 % (FAIL ✗) —
+    shows why a combination design check is needed.
+    """
+    s = ModelState()
+    s.load_cases[0].name = "Dead (G)"
+    lc_g = s.load_cases[0]
+    lc_q = s.add_load_case("Imposed (Q)", category="Q")
+
+    n0 = s.add_node(0.0, 0.0); n0.support_type = SupportType.FIXED
+    n1 = s.add_node(8.0, 0.0); n1.support_type = SupportType.ROLLER
+
+    m = _mb(s, n0.id, n1.id, RC_BM_300x500, udl=18_000.0, case=lc_g)
+    m.density = _RHO_RC
+    lc_q.set_member_load(m.id, MemberLoad(w_start=12_000.0, w_end=12_000.0))
+
+    # C30/37 + B500B — 4 × H20 bottom bars
+    m.fy         = 30e6      # Pa — fck (C30/37)
+    m.b_sec      = 0.300     # m
+    m.h_sec      = 0.500     # m
+    m.d_eff      = 0.445     # m — h − 35(cover) − 8(link) − 12(bar radius)
+    m.As_tension = 1.257e-3  # m² — 4 × H20 (4 × 314.2 mm²)
+    m.fyk        = 500e6     # Pa — B500B
+
+    return s
+
+
+def demo_3d_floor_grid() -> ModelState:
+    """3D floor frame — 4 × 4 column grid, 3 m bays, 3.5 m columns.
+
+    HEB 220 columns (FIXED bases), IPE 300 floor beams in X and Y directions.
+    Coordinate convention: X, Y = ground plane, Z = up (elevation).
+    Dead G: 10 kN/m on all floor beams (representative slab tributary load).
+    """
+    s = ModelState()
+    s.load_cases[0].name = "Dead (G)"
+    lc_g = s.load_cases[0]
+
+    bay, h = 3.0, 3.5
+
+    bases = [[s.add_node(col * bay, row * bay, 0.0) for col in range(4)]
+             for row in range(4)]
+    for row in bases:
+        for nd in row:
+            nd.support_type = SupportType.FIXED
+
+    tops = [[s.add_node(col * bay, row * bay, h) for col in range(4)]
+            for row in range(4)]
+
+    # Columns
+    for row in range(4):
+        for col in range(4):
+            _mb(s, bases[row][col].id, tops[row][col].id, HEB_220)
+
+    # Floor beams in X direction
+    for row in range(4):
+        for col in range(3):
+            _mb(s, tops[row][col].id, tops[row][col + 1].id,
+                IPE_300, udl=10_000.0, case=lc_g)
+
+    # Floor beams in Y direction
+    for row in range(3):
+        for col in range(4):
+            _mb(s, tops[row][col].id, tops[row + 1][col].id,
+                IPE_300, udl=10_000.0, case=lc_g)
+
+    s.mode_3d = True
+    return s
