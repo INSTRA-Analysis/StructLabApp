@@ -151,6 +151,9 @@ def compute_auto_scales(
                 from core.load import LoadType
                 if eload.load_type == LoadType.UDL:
                     M_vals = M_vals - eload.magnitude * xs ** 2 / 2
+                elif eload.load_type == LoadType.UVL:
+                    w1, w2 = eload.magnitude, eload.position
+                    M_vals = M_vals - w1 * xs**2 / 2 - (w2 - w1) * xs**3 / (6 * L)
         max_M = max(max_M, float(np.max(np.abs(M_vals))))
 
     if max_M > 0.0:
@@ -260,6 +263,9 @@ def _stitch_M(
         for eload in load_map.get(el_id, []):
             if eload.load_type == LoadType.UDL:
                 M_sub = M_sub - eload.magnitude * xs ** 2 / 2
+            elif eload.load_type == LoadType.UVL:
+                w1, w2 = eload.magnitude, eload.position
+                M_sub = M_sub - w1 * xs**2 / 2 - (w2 - w1) * xs**3 / (6 * L_sub)
         t_vals = (x_acc + xs) / L_total
         # exclude last point on all but final sub-element to avoid duplication
         end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
@@ -363,6 +369,9 @@ def _stitch_V(
         for eload in load_map.get(el_id, []):
             if eload.load_type == LoadType.UDL:
                 V_sub = V_sub - eload.magnitude * xs
+            elif eload.load_type == LoadType.UVL:
+                w1, w2 = eload.magnitude, eload.position
+                V_sub = V_sub - w1 * xs - (w2 - w1) * xs**2 / (2 * L_sub)
         t_vals = (x_acc + xs) / L_total
         end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
         all_t.extend(t_vals[:end].tolist())
