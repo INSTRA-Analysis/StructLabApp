@@ -972,6 +972,88 @@ def truss_wizard(
     return s
 
 
+def demo_3d_pratt_roof() -> ModelState:
+    """3D Pratt space truss roof — 12 m × 4 m plan, 2 m deep, 4 panels.
+
+    Two parallel 4-panel Pratt trusses in the XZ planes (y=0 and y=4 m)
+    connected by transverse chords at every panel point (top and bottom)
+    and X-braced plan diagonals on the top chord plane for lateral stability.
+    All members are BAR elements (pin-jointed space truss).
+
+    SHS 200×10 main chords (longitudinal + transverse), SHS 150×8 web members.
+    PIN supports at all 4 bottom-chord corner nodes.
+    Coordinate convention: X = span, Y = width, Z = elevation.
+    Dead G: 25 kN at each of the 6 interior top-chord panel points.
+    """
+    s = ModelState()
+    s.load_cases[0].name = "Roof Loads (G)"
+    lc_g = s.load_cases[0]
+
+    span, width, depth = 12.0, 4.0, 2.0
+    n_panels = 4
+    pw = span / n_panels   # 3.0 m panel width
+
+    # Bottom chord nodes: two rows at z=0
+    bot_f = [s.add_node(i * pw, 0.0,   0.0) for i in range(n_panels + 1)]
+    bot_b = [s.add_node(i * pw, width, 0.0) for i in range(n_panels + 1)]
+
+    # Top chord nodes: two rows at z=depth
+    top_f = [s.add_node(i * pw, 0.0,   depth) for i in range(n_panels + 1)]
+    top_b = [s.add_node(i * pw, width, depth) for i in range(n_panels + 1)]
+
+    # Supports: PIN at all 4 bottom corners
+    for nd in (bot_f[0], bot_f[n_panels], bot_b[0], bot_b[n_panels]):
+        nd.support_type = SupportType.PIN
+
+    # Panel loads at interior top-chord nodes (3 interior × 2 rows = 6 nodes)
+    for i in range(1, n_panels):
+        _nload(s, top_f[i].id, fz=-25_000.0, case=lc_g)
+        _nload(s, top_b[i].id, fz=-25_000.0, case=lc_g)
+
+    def _bar(ni: int, nj: int, profile: tuple) -> None:
+        m = s.add_member(ni, nj)
+        m.E, m.A, m.I = profile
+        m.element_type = ElementType.BAR
+
+    # Longitudinal bottom chords (X-direction, two rows)
+    for i in range(n_panels):
+        _bar(bot_f[i].id, bot_f[i + 1].id, SHS_200_10)
+        _bar(bot_b[i].id, bot_b[i + 1].id, SHS_200_10)
+
+    # Longitudinal top chords (X-direction, two rows)
+    for i in range(n_panels):
+        _bar(top_f[i].id, top_f[i + 1].id, SHS_200_10)
+        _bar(top_b[i].id, top_b[i + 1].id, SHS_200_10)
+
+    # Transverse chords (Y-direction) — bottom and top at every panel point
+    for i in range(n_panels + 1):
+        _bar(bot_f[i].id, bot_b[i].id, SHS_200_10)
+        _bar(top_f[i].id, top_b[i].id, SHS_200_10)
+
+    # Vertical web members (Z-direction) at every panel point, both rows
+    for i in range(n_panels + 1):
+        _bar(bot_f[i].id, top_f[i].id, SHS_150_8)
+        _bar(bot_b[i].id, top_b[i].id, SHS_150_8)
+
+    # Pratt diagonal web members in XZ planes
+    # Left half: bottom-outer → top-inner; right half: top-outer → bottom-inner
+    half = n_panels // 2
+    for i in range(half):
+        _bar(bot_f[i].id,         top_f[i + 1].id, SHS_150_8)
+        _bar(bot_b[i].id,         top_b[i + 1].id, SHS_150_8)
+    for i in range(half, n_panels):
+        _bar(bot_f[i + 1].id, top_f[i].id, SHS_150_8)
+        _bar(bot_b[i + 1].id, top_b[i].id, SHS_150_8)
+
+    # Top-chord horizontal plan bracing (X-bracing in top XY plane)
+    for i in range(n_panels):
+        _bar(top_f[i].id,     top_b[i + 1].id, SHS_150_8)
+        _bar(top_b[i].id,     top_f[i + 1].id, SHS_150_8)
+
+    s.mode_3d = True
+    return s
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  3D Presets — spatial structures with non-zero z coordinates
 # ═══════════════════════════════════════════════════════════════════════════════
