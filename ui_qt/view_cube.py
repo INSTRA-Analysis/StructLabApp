@@ -133,7 +133,7 @@ class ViewCube:
                 fy = sum(pts[c][1] for c in corners) / 4
                 lp = QPen(_CLH if hov else _CL); lp.setCosmetic(True)
                 painter.setPen(lp)
-                f = QFont("Arial", 7); f.setBold(True)
+                f = QFont("Arial"); f.setPointSizeF(7.0 / scale); f.setBold(True)
                 painter.setFont(f)
                 half_w = len(label) * 4.2 / scale
                 painter.drawText(QPointF(fx - half_w, fy + 4.5 / scale), label)
