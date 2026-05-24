@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsItem, QGraphicsPathItem,
     QGraphicsSimpleTextItem, QStyle,
 )
 from PyQt6.QtCore import Qt, QPointF, QRectF
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QTransform
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QTransform, QPolygonF
 
 from ui_qt.model_state import (
     ModelState, NodeData, MemberData,
@@ -23,6 +25,37 @@ from ui_qt.model_state import (
 )
 from ui_qt.projection import isometric, is_3d_model, inverse_isometric
 import ui_qt.projection as _proj_mod
+
+# ── local axis triad toggle ───────────────────────────────────────────────────
+_SHOW_LOCAL_AXES_ALL: bool = False
+
+def set_show_local_axes(show: bool) -> None:
+    global _SHOW_LOCAL_AXES_ALL
+    _SHOW_LOCAL_AXES_ALL = show
+
+_VERT_THRESHOLD = 0.95   # same as FrameElement._VERTICAL_THRESHOLD
+
+def _compute_local_axes(xi: float, yi: float, zi: float,
+                        xj: float, yj: float, zj: float,
+                        beta_rad: float
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Return (x̂, ŷ, ẑ) local axis triad matching the solver convention."""
+    dx, dy, dz = xj - xi, yj - yi, zj - zi
+    L = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if L < 1e-12:
+        return None
+    x_hat = np.array([dx/L, dy/L, dz/L])
+    ref   = np.array([0.0, 0.0, 1.0])
+    if abs(np.dot(x_hat, ref)) > _VERT_THRESHOLD:
+        z_hat = np.cross(x_hat, np.array([1.0, 0.0, 0.0]))
+    else:
+        z_hat = np.cross(x_hat, ref)
+    z_hat /= np.linalg.norm(z_hat)
+    y_hat = np.cross(z_hat, x_hat)
+    if beta_rad != 0.0:
+        cb, sb  = math.cos(beta_rad), math.sin(beta_rad)
+        y_hat, z_hat = cb*y_hat + sb*z_hat, -sb*y_hat + cb*z_hat
+    return x_hat, y_hat, z_hat
 
 # ── visual constants ──────────────────────────────────────────────────────────
 PX_PER_M   = 80
@@ -615,6 +648,56 @@ class MemberItem(QGraphicsLineItem):
     def paint(self, painter, option, widget=None) -> None:
         option.state = option.state & ~QStyle.StateFlag.State_Selected
         super().paint(painter, option, widget)
+        if self._scene.model_state.mode_3d and (_SHOW_LOCAL_AXES_ALL or self._is_selected):
+            ni = self._scene.model_state.get_node(self.member.node_i)
+            nj = self._scene.model_state.get_node(self.member.node_j)
+            if ni and nj:
+                self._paint_triad(painter, ni, nj)
+
+    def _paint_triad(self, painter, ni: "NodeData", nj: "NodeData") -> None:
+        """Draw local axis triad (x̂=red, ŷ=green, ẑ=blue) at member midpoint."""
+        views = self._scene.views()
+        if not views:
+            return
+        scale = views[0].transform().m11()
+        arm_m = 28.0 / (PX_PER_M * scale)   # fixed ~28 screen-px arms
+
+        axes = _compute_local_axes(ni.x, ni.y, ni.z, nj.x, nj.y, nj.z,
+                                   self.member.beta_angle)
+        if axes is None:
+            return
+        mx, my, mz = (ni.x + nj.x) / 2, (ni.y + nj.y) / 2, (ni.z + nj.z) / 2
+        sx0, sy0 = isometric(mx, my, mz)
+
+        painter.save()
+        ah = 5.0 / scale   # arrowhead size in scene units
+        for vec, rgb in [
+            (axes[0], (220,  60,  60)),   # x̂ — red
+            (axes[1], ( 50, 200,  50)),   # ŷ — green
+            (axes[2], ( 60, 110, 230)),   # ẑ — blue
+        ]:
+            ex = mx + arm_m * float(vec[0])
+            ey = my + arm_m * float(vec[1])
+            ez = mz + arm_m * float(vec[2])
+            sx1, sy1 = isometric(ex, ey, ez)
+            col = QColor(*rgb)
+            pen = QPen(col); pen.setCosmetic(True); pen.setWidthF(1.8)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(sx0, sy0), QPointF(sx1, sy1))
+            # Arrowhead
+            ddx, ddy = sx1 - sx0, sy1 - sy0
+            dlen = math.hypot(ddx, ddy)
+            if dlen > 1e-6:
+                ux, uy = ddx / dlen, ddy / dlen
+                px, py = -uy * ah * 0.45, ux * ah * 0.45
+                tip = QPointF(sx1, sy1)
+                b1  = QPointF(sx1 - ux*ah + px, sy1 - uy*ah + py)
+                b2  = QPointF(sx1 - ux*ah - px, sy1 - uy*ah - py)
+                painter.setBrush(QBrush(col))
+                painter.setPen(QPen(Qt.PenStyle.NoPen))
+                painter.drawPolygon(QPolygonF([tip, b1, b2]))
+                painter.setBrush(QBrush())
+        painter.restore()
 
     def _apply_pen(self) -> None:
         if self._is_selected:

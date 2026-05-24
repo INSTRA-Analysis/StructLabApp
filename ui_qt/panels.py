@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from PyQt6.QtGui import QBrush, QColor, QFont, QPixmap
@@ -319,13 +320,25 @@ class _MemberForm(QWidget):
         _Iy_val    = member.I_y if member.I_y is not None else member.I
         self._Iy   = _spin(_Iy_val * 1e6,          0, 1e6,    1,    2)
         self._J    = _spin(member.J * 1e6,         0, 1e6,    0.01, 3)
-        self._beta = _spin(member.beta_angle, -6.283, 6.283,  0.1,  3)
+        self._beta = _spin(math.degrees(member.beta_angle), -180.0, 180.0, 5.0, 1)
         sf.addRow("E (GPa):",         self._E)
         sf.addRow("A (m²):",          self._A)
         sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)
         sf.addRow("I_y (×10⁻⁶ m⁴):", self._Iy)
         sf.addRow("J (×10⁻⁶ m⁴):",   self._J)
-        sf.addRow("β angle (rad):",   self._beta)
+        _beta_w = QWidget()
+        _beta_l = QHBoxLayout(_beta_w)
+        _beta_l.setContentsMargins(0, 0, 0, 0)
+        _beta_l.setSpacing(4)
+        _beta_l.addWidget(self._beta)
+        for _lbl, _delta in [("−90°", -90.0), ("+90°", +90.0)]:
+            _b = QPushButton(_lbl)
+            _b.setFixedSize(42, 24)
+            _b.clicked.connect(lambda _c=False, d=_delta: self._beta.setValue(
+                max(-180.0, min(180.0, self._beta.value() + d))
+            ))
+            _beta_l.addWidget(_b)
+        sf.addRow("β angle (°):",     _beta_w)
         sf.setRowVisible(3, mode_3d)
         sf.setRowVisible(4, mode_3d)
         sf.setRowVisible(5, mode_3d)
@@ -334,12 +347,8 @@ class _MemberForm(QWidget):
         sf.addRow("", _pick_btn)
 
         self._mat_preset = QComboBox()
-        self._mat_preset.addItems(["Steel (7850)", "Concrete (2500)", "Timber (500)", "Custom"])
-        _PRESETS = [7850.0, 2500.0, 500.0]
-        def _density_from_preset(idx: int, presets=_PRESETS) -> None:
-            if idx < len(presets):
-                self._density.setValue(presets[idx])
-        self._mat_preset.currentIndexChanged.connect(_density_from_preset)
+        self._mat_preset.addItems(["Steel S275", "Concrete C25/30", "Timber C24", "Custom"])
+        self._mat_preset.currentIndexChanged.connect(self._on_material_preset_changed)
         sf.addRow("Material:", self._mat_preset)
 
         self._density = _spin(member.density, 0, 20000, 50, 0)
@@ -350,7 +359,7 @@ class _MemberForm(QWidget):
         sf.addRow("Density (kg/m³):", self._density)
 
         self._mat_preset.blockSignals(True)
-        for _i, _d in enumerate(_PRESETS):
+        for _i, _d in enumerate([7850.0, 2500.0, 500.0]):
             if abs(member.density - _d) < 1.0:
                 self._mat_preset.setCurrentIndex(_i)
                 break
@@ -470,9 +479,15 @@ class _MemberForm(QWidget):
         df.addRow("fy (MPa):",   self._fy)
         df.addRow("W_pl (cm³):", self._Wpl)
         df.addRow("W_el (cm³):", self._Wel)
+        self._fy_lbl = df.labelForField(self._fy)
         _dl2.addWidget(design_box)
 
         tabs.addTab(_ds_tab, "Design")
+
+        # Sync fy label with the material already detected above
+        _MLBLS = ["fy (MPa):", "fck (MPa):", "fk (MPa):", "fy (MPa):"]
+        if self._fy_lbl:
+            self._fy_lbl.setText(_MLBLS[min(self._mat_preset.currentIndex(), 3)])
 
         layout.addWidget(tabs)
 
@@ -480,6 +495,24 @@ class _MemberForm(QWidget):
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
 
+    # (E_GPa, fk_MPa, density, fy_label)
+    _MAT_PRESETS = [
+        (210.0, 275.0, 7850.0, "fy (MPa):"),    # 0  Steel S275
+        ( 30.0,  25.0, 2500.0, "fck (MPa):"),   # 1  Concrete C25/30
+        ( 11.0,  24.0,  500.0, "fk (MPa):"),    # 2  Timber C24
+    ]
+
+    def _on_material_preset_changed(self, idx: int) -> None:
+        if idx >= len(self._MAT_PRESETS):
+            return  # Custom — leave fields as-is
+        E_gpa, fk_mpa, dens, lbl = self._MAT_PRESETS[idx]
+        self._E.setValue(E_gpa)
+        self._density.blockSignals(True)
+        self._density.setValue(dens)
+        self._density.blockSignals(False)
+        self._fy.setValue(fk_mpa)
+        if hasattr(self, "_fy_lbl") and self._fy_lbl:
+            self._fy_lbl.setText(lbl)
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -605,7 +638,7 @@ class _MemberForm(QWidget):
         m.I       = self._I.value() * 1e-6
         m.I_y     = self._Iy.value() * 1e-6
         m.J       = self._J.value() * 1e-6
-        m.beta_angle = self._beta.value()
+        m.beta_angle = math.radians(self._beta.value())
         m.density = self._density.value()
         m.n_sub   = self._nsub.value()
         m.fy      = self._fy.value() * 1e6
@@ -1479,20 +1512,35 @@ class ResultsPanel(QWidget):
 
         for row, (mid, M_Ed) in enumerate(m_ed_data):
             md   = model_state.get_member(mid)
-            fy   = md.fy   if md else 275e6
+            fk   = md.fy   if md else 275e6
             W_pl = md.W_pl if md else 0.0
             W_el = md.W_el if md else 0.0
+            dens = md.density if md else 0.0
 
-            M_pl = fy * W_pl
-            M_el = fy * W_el
-
-            eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
-            eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
-
-            if eta_pl is not None:
-                status = "PASS ✓" if eta_pl <= 100.0 else "FAIL ✗"
+            # Infer material family from density
+            if 2000 <= dens <= 3000:
+                mat = "concrete"
+            elif 300 <= dens <= 800:
+                mat = "timber"
             else:
-                status = "N/A — set W_pl"
+                mat = "steel"   # steel / custom / zero density all use steel formula
+
+            if mat == "concrete":
+                M_pl = M_el = 0.0
+                eta_pl = eta_el = None
+                status = "Manual check req."
+            elif mat == "timber":
+                M_pl = 0.0
+                M_el = fk * W_el          # elastic check, EN 1995 (no γ_M applied here)
+                eta_pl = None
+                eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
+                status = ("PASS ✓" if eta_el <= 100.0 else "FAIL ✗") if eta_el is not None else "N/A — set W_el"
+            else:                         # steel / custom
+                M_pl = fk * W_pl
+                M_el = fk * W_el
+                eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
+                eta_el = (M_Ed / M_el * 100) if M_el > 0 else None
+                status = ("PASS ✓" if eta_pl <= 100.0 else "FAIL ✗") if eta_pl is not None else "N/A — set W_pl"
 
             self._set_row(self._design_table, row, [
                 str(mid),
@@ -1506,16 +1554,18 @@ class ResultsPanel(QWidget):
             self._design_row_to_member.append(mid)
 
             # Colour-code by utilisation
-            if eta_pl is not None:
-                if eta_pl <= 80.0:
+            eta_ref = eta_pl if mat != "timber" else eta_el
+            if mat == "concrete":
+                bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # blue-grey — manual
+            elif eta_ref is not None:
+                if eta_ref <= 80.0:
                     bg, fg = QColor("#1b3a1b"), QColor("#90ee90")   # green — low
-                elif eta_pl <= 100.0:
+                elif eta_ref <= 100.0:
                     bg, fg = QColor("#3a3000"), QColor("#ffe066")   # amber — near limit
                 else:
                     bg, fg = QColor("#3a0000"), QColor("#ff6b6b")   # red — exceeded
             else:
-                bg = QColor(30, 30, 30)
-                fg = QColor("#909090")
+                bg, fg = QColor(30, 30, 30), QColor("#909090")
 
             bg_brush = QBrush(bg)
             fg_brush = QBrush(fg)
