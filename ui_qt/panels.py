@@ -77,28 +77,17 @@ class PropertiesPanel(QWidget):
     def show_empty(self) -> None:
         self._replace(None)
 
-    def _is_3d(self) -> bool:
-        if not self._model_state:
-            return False
-        # Consistent with _node_pos: treat model as 3D if mode_3d flag is set
-        # OR if any node already has a non-zero z coordinate.
-        return self._model_state.mode_3d or any(
-            n.z != 0.0 for n in self._model_state.nodes
-        )
-
     def show_node(self, node: NodeData) -> None:
-        self._replace(_NodeForm(node, self._active_case(), self._on_apply, self._is_3d()))
+        self._replace(_NodeForm(node, self._active_case(), self._on_apply))
 
     def show_member(self, member: MemberData) -> None:
-        self._replace(_MemberForm(
-            member, self._model_state, self._on_apply, self._is_3d(),
-        ))
+        self._replace(_MemberForm(member, self._model_state, self._on_apply))
 
     def show_nodes(self, nodes: list) -> None:
-        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply, self._is_3d()))
+        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply))
 
     def show_members(self, members: list) -> None:
-        self._replace(_MultiMemberForm(members, self._active_case(), self._on_apply, self._is_3d()))
+        self._replace(_MultiMemberForm(members, self._active_case(), self._on_apply))
 
     def show_mixed(self, nodes: list, members: list, on_filter) -> None:
         self._replace(_MixedFilterForm(nodes, members, on_filter))
@@ -129,12 +118,11 @@ class PropertiesPanel(QWidget):
 
 class _NodeForm(QWidget):
     def __init__(self, node: NodeData, load_case: LoadCase | None,
-                 on_apply, mode_3d: bool = False) -> None:
+                 on_apply) -> None:
         super().__init__()
         self._node      = node
         self._load_case = load_case
         self._on_apply  = on_apply
-        self._mode_3d   = mode_3d
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -146,22 +134,17 @@ class _NodeForm(QWidget):
         self._x = _spin(node.x, -1000, 1000, 0.25)
         self._y = _spin(node.y, -1000, 1000, 0.25)
         self._z = _spin(node.z, -1000, 1000, 0.25)
-        form.addRow("x (m):", self._x)     # row 0
-        form.addRow("y (m):", self._y)     # row 1
-        form.addRow("z (m):", self._z)     # row 2
-        form.setRowVisible(2, mode_3d)
+        form.addRow("x (m):", self._x)
+        form.addRow("y (m):", self._y)
+        form.addRow("z (m):", self._z)
         layout.addWidget(coord_box)
 
         # ── support ──────────────────────────────────────────────────────────
         sup_box = QGroupBox("Support")
         sup_layout = QVBoxLayout(sup_box)
         self._sup_combo = QComboBox()
-        if mode_3d:
-            self._sup_names = ["FREE","FIXED","PIN","ROLLER","ROLLER_Y","ROLLER_Z","SPRING"]
-            self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
-        else:
-            self._sup_names = ["FREE","FIXED","PIN","ROLLER","ROLLER_Y","SPRING"]
-            self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Spring"])
+        self._sup_names = ["FREE","FIXED","PIN","ROLLER","ROLLER_Y","ROLLER_Z","SPRING"]
+        self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
         _cur = node.support_type.name
         _cur_idx = self._sup_names.index(_cur) if _cur in self._sup_names else 0
         self._sup_combo.setCurrentIndex(_cur_idx)
@@ -176,18 +159,12 @@ class _NodeForm(QWidget):
         self._kth   = _spin(node.spring_ktheta, 0, 1e12, 1e5, 0)
         self._krx   = _spin(node.spring_krx,    0, 1e12, 1e5, 0)
         self._kry   = _spin(node.spring_kry,    0, 1e12, 1e5, 0)
-        self._krz   = _spin(node.spring_krz,    0, 1e12, 1e5, 0)
-        sg.addRow("k_x (N/m):",     self._kx)   # row 0
-        sg.addRow("k_y (N/m):",     self._ky)   # row 1
-        sg.addRow("k_z (N/m):",     self._kz)   # row 2
-        sg.addRow("k_θ (N·m/rad):", self._kth)  # row 3
-        sg.addRow("k_rx (N·m/rad):", self._krx) # row 4
-        sg.addRow("k_ry (N·m/rad):", self._kry) # row 5
-        sg.addRow("k_rz (N·m/rad):", self._krz) # row 6
-        sg.setRowVisible(2, mode_3d)
-        sg.setRowVisible(4, mode_3d)
-        sg.setRowVisible(5, mode_3d)
-        sg.setRowVisible(6, mode_3d)
+        sg.addRow("k_x (N/m):",      self._kx)
+        sg.addRow("k_y (N/m):",      self._ky)
+        sg.addRow("k_z (N/m):",      self._kz)
+        sg.addRow("k_θz (N·m/rad):", self._kth)
+        sg.addRow("k_rx (N·m/rad):", self._krx)
+        sg.addRow("k_ry (N·m/rad):", self._kry)
         sup_layout.addWidget(self._spring_group)
         layout.addWidget(sup_box)
         self._toggle_spring()
@@ -202,15 +179,12 @@ class _NodeForm(QWidget):
         self._m  = _spin(nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(nl.moment_y / 1e3, -1e6, 1e6, 1)
-        lf.addRow("Fx (kN):",   self._fx)   # row 0
-        lf.addRow("Fy (kN):",   self._fy)   # row 1
-        lf.addRow("Fz (kN):",   self._fz)   # row 2
-        lf.addRow("Mz (kN·m):", self._m)    # row 3
-        lf.addRow("Mx (kN·m):", self._mx)   # row 4
-        lf.addRow("My (kN·m):", self._my)   # row 5
-        lf.setRowVisible(2, mode_3d)
-        lf.setRowVisible(4, mode_3d)
-        lf.setRowVisible(5, mode_3d)
+        lf.addRow("Fx (kN):",   self._fx)
+        lf.addRow("Fy (kN):",   self._fy)
+        lf.addRow("Fz (kN):",   self._fz)
+        lf.addRow("Mz (kN·m):", self._m)
+        lf.addRow("Mx (kN·m):", self._mx)
+        lf.addRow("My (kN·m):", self._my)
         layout.addWidget(load_box)
 
         btn = QPushButton("Apply")
@@ -225,7 +199,7 @@ class _NodeForm(QWidget):
         node = self._node
         node.x = self._x.value()
         node.y = self._y.value()
-        node.z = self._z.value() if self._mode_3d else 0.0
+        node.z = self._z.value()
         node.support_type  = SupportType[self._sup_names[self._sup_combo.currentIndex()]]
         node.spring_kx     = self._kx.value()
         node.spring_ky     = self._ky.value()
@@ -233,7 +207,6 @@ class _NodeForm(QWidget):
         node.spring_ktheta = self._kth.value()
         node.spring_krx    = self._krx.value()
         node.spring_kry    = self._kry.value()
-        node.spring_krz    = self._krz.value()
         if self._load_case is not None:
             self._load_case.set_node_load(node.id, NodeLoad(
                 fx=self._fx.value() * 1e3,
@@ -284,13 +257,12 @@ def _load_summary(ml: MemberLoad) -> str:
 
 class _MemberForm(QWidget):
     def __init__(self, member: MemberData, model_state,
-                 on_apply, mode_3d: bool = False) -> None:
+                 on_apply) -> None:
         super().__init__()
         self._member      = member
         self._model_state = model_state
         self._load_case   = model_state.active_case if model_state else None
         self._on_apply    = on_apply
-        self._mode_3d     = mode_3d
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -339,9 +311,6 @@ class _MemberForm(QWidget):
             ))
             _beta_l.addWidget(_b)
         sf.addRow("β angle (°):",     _beta_w)
-        sf.setRowVisible(3, mode_3d)
-        sf.setRowVisible(4, mode_3d)
-        sf.setRowVisible(5, mode_3d)
         _pick_btn = QPushButton("Pick from library...")
         _pick_btn.clicked.connect(self._pick_section)
         sf.addRow("", _pick_btn)
@@ -401,8 +370,6 @@ class _MemberForm(QWidget):
         dl_layout.addWidget(self._dl_table)
         dl_btn_row = QHBoxLayout()
         for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]:
-            if _key == "qy" and not mode_3d:
-                continue
             _b = QPushButton(_lbl)
             _b.setFixedHeight(28)
             _b.clicked.connect(lambda checked=False, k=_key: self._dl_add_entry(k))
@@ -627,8 +594,6 @@ class _MemberForm(QWidget):
             return
         for lc in self._model_state.load_cases:
             for dl in lc.get_member_load(self._member.id).dist_loads:
-                if dl.direction == "qy" and not self._mode_3d:
-                    continue
                 if dl.direction == "qz":  # hidden from UI
                     continue
                 self._dl_add_row(lc.id, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
@@ -910,12 +875,11 @@ class _MultiMemberForm(QWidget):
     ]
 
     def __init__(self, members: list, load_case: LoadCase | None,
-                 on_apply, mode_3d: bool = False) -> None:
+                 on_apply) -> None:
         super().__init__()
         self._members   = members
         self._load_case = load_case
         self._on_apply  = on_apply
-        self._mode_3d   = mode_3d
         first = members[0]
 
         root = QVBoxLayout(self)
@@ -1020,12 +984,6 @@ class _MultiMemberForm(QWidget):
         lf.addRow("qz start (kN/m):", self._qz_start)
         lf.addRow("qz end   (kN/m):", self._qz_end)
         lf.addRow("", QLabel("Global Z (↓ gravity)  —  + downward  (3D)"))
-        lf.setRowVisible(6,  mode_3d)
-        lf.setRowVisible(7,  mode_3d)
-        lf.setRowVisible(8,  mode_3d)
-        lf.setRowVisible(9,  mode_3d)
-        lf.setRowVisible(10, mode_3d)
-        lf.setRowVisible(11, mode_3d)
         load_l.addWidget(load_box)
 
         # ── Design tab ────────────────────────────────────────────────────────
@@ -1182,12 +1140,11 @@ class _MultiNodeForm(QWidget):
     """Edit shared support and load properties across multiple selected nodes."""
 
     def __init__(self, nodes: list, load_case: LoadCase | None,
-                 on_apply, mode_3d: bool = False) -> None:
+                 on_apply) -> None:
         super().__init__()
         self._nodes     = nodes
         self._load_case = load_case
         self._on_apply  = on_apply
-        self._mode_3d   = mode_3d
         first = nodes[0]
 
         layout = QVBoxLayout(self)
@@ -1202,12 +1159,8 @@ class _MultiNodeForm(QWidget):
         sup_box = QGroupBox("Support")
         sup_layout = QVBoxLayout(sup_box)
         self._sup_combo = QComboBox()
-        if mode_3d:
-            self._sup_names = ["FREE", "FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"]
-            self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
-        else:
-            self._sup_names = ["FREE", "FIXED", "PIN", "ROLLER", "ROLLER_Y", "SPRING"]
-            self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Spring"])
+        self._sup_names = ["FREE", "FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"]
+        self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
         all_same_sup = all(n.support_type == first.support_type for n in nodes)
         _cur = first.support_type.name
         _cur_idx = self._sup_names.index(_cur) if (all_same_sup and _cur in self._sup_names) else 0
@@ -1219,10 +1172,16 @@ class _MultiNodeForm(QWidget):
         sg = QFormLayout(self._spring_group)
         self._kx  = _spin(first.spring_kx,     0, 1e12, 1e5, 0)
         self._ky  = _spin(first.spring_ky,     0, 1e12, 1e5, 0)
+        self._kz  = _spin(first.spring_kz,     0, 1e12, 1e5, 0)
         self._kth = _spin(first.spring_ktheta, 0, 1e12, 1e5, 0)
-        sg.addRow("k_x (N/m):",     self._kx)  # row 0
-        sg.addRow("k_y (N/m):",     self._ky)  # row 1
-        sg.addRow("k_θ (N·m/rad):", self._kth) # row 2
+        self._krx = _spin(first.spring_krx,    0, 1e12, 1e5, 0)
+        self._kry = _spin(first.spring_kry,    0, 1e12, 1e5, 0)
+        sg.addRow("k_x (N/m):",      self._kx)
+        sg.addRow("k_y (N/m):",      self._ky)
+        sg.addRow("k_z (N/m):",      self._kz)
+        sg.addRow("k_θz (N·m/rad):", self._kth)
+        sg.addRow("k_rx (N·m/rad):", self._krx)
+        sg.addRow("k_ry (N·m/rad):", self._kry)
         sup_layout.addWidget(self._spring_group)
         layout.addWidget(sup_box)
         self._toggle_spring()
@@ -1237,15 +1196,12 @@ class _MultiNodeForm(QWidget):
         self._m  = _spin(first_nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(first_nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(first_nl.moment_y / 1e3, -1e6, 1e6, 1)
-        lf.addRow("Fx (kN):",   self._fx)  # row 0
-        lf.addRow("Fy (kN):",   self._fy)  # row 1
-        lf.addRow("Fz (kN):",   self._fz)  # row 2
-        lf.addRow("Mz (kN·m):", self._m)   # row 3
-        lf.addRow("Mx (kN·m):", self._mx)  # row 4
-        lf.addRow("My (kN·m):", self._my)  # row 5
-        lf.setRowVisible(2, mode_3d)
-        lf.setRowVisible(4, mode_3d)
-        lf.setRowVisible(5, mode_3d)
+        lf.addRow("Fx (kN):",   self._fx)
+        lf.addRow("Fy (kN):",   self._fy)
+        lf.addRow("Fz (kN):",   self._fz)
+        lf.addRow("Mz (kN·m):", self._m)
+        lf.addRow("Mx (kN·m):", self._mx)
+        lf.addRow("My (kN·m):", self._my)
         layout.addWidget(load_box)
 
         btn = QPushButton(f"Apply to all {len(nodes)} nodes")
@@ -1259,18 +1215,24 @@ class _MultiNodeForm(QWidget):
         sup_type = SupportType[self._sup_names[self._sup_combo.currentIndex()]]
         kx  = self._kx.value()
         ky  = self._ky.value()
+        kz  = self._kz.value()
         kth = self._kth.value()
+        krx = self._krx.value()
+        kry = self._kry.value()
         fx  = self._fx.value() * 1e3
         fy  = self._fy.value() * 1e3
-        fz  = self._fz.value() * 1e3 if self._mode_3d else 0.0
+        fz  = self._fz.value() * 1e3
         m   = self._m.value()  * 1e3
-        mx  = self._mx.value() * 1e3 if self._mode_3d else 0.0
-        my  = self._my.value() * 1e3 if self._mode_3d else 0.0
+        mx  = self._mx.value() * 1e3
+        my  = self._my.value() * 1e3
         for nd in self._nodes:
             nd.support_type  = sup_type
             nd.spring_kx     = kx
             nd.spring_ky     = ky
+            nd.spring_kz     = kz
             nd.spring_ktheta = kth
+            nd.spring_krx    = krx
+            nd.spring_kry    = kry
             if self._load_case is not None:
                 self._load_case.set_node_load(nd.id, NodeLoad(
                     fx=fx, fy=fy, fz=fz, moment=m, moment_x=mx, moment_y=my

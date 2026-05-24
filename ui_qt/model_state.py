@@ -499,8 +499,7 @@ class ModelState:
 
     # ── convenience ───────────────────────────────────────────────────────────
 
-    def clear(self, keep_mode_3d: bool = False) -> None:
-        _mode = self.mode_3d if keep_mode_3d else False
+    def clear(self) -> None:
         self.nodes.clear()
         self.members.clear()
         self.load_cases.clear()
@@ -508,7 +507,7 @@ class ModelState:
         self.combinations.clear()
         self.active_case_id = 0
         self.metadata = ProjectMetadata()
-        self.mode_3d = _mode
+        self.mode_3d = True
         self._next_node_id = 0
         self._next_member_id = 0
         self._next_case_id = 1
