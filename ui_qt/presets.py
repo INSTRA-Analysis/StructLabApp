@@ -102,10 +102,10 @@ def gerber_beam() -> ModelState:
 def portal_frame() -> ModelState:
     """Single-bay portal frame, 4 m wide × 3 m tall. H=10 kN at beam-column joint."""
     s = ModelState()
-    n0 = s.add_node(0, 0); n0.support_type = SupportType.PIN
-    n1 = s.add_node(0, 3)
-    n2 = s.add_node(4, 3)
-    n3 = s.add_node(4, 0); n3.support_type = SupportType.PIN
+    n0 = s.add_node(0, 0, 0); n0.support_type = SupportType.PIN
+    n1 = s.add_node(0, 0, 3)
+    n2 = s.add_node(4, 0, 3)
+    n3 = s.add_node(4, 0, 0); n3.support_type = SupportType.PIN
     _nload(s, n1.id, fx=10_000.0)
     s.add_member(0, 1)
     s.add_member(1, 2)
@@ -116,11 +116,11 @@ def portal_frame() -> ModelState:
 def mixed_beam_bar() -> ModelState:
     """Simply-supported beam with vertical bar prop at midspan (P=1 N)."""
     s = ModelState()
-    n0 = s.add_node(0, 0); n0.support_type = SupportType.PIN
-    n1 = s.add_node(2, 0)
-    n2 = s.add_node(4, 0); n2.support_type = SupportType.ROLLER
-    n3 = s.add_node(2, -2); n3.support_type = SupportType.ROLLER
-    _nload(s, n1.id, fy=-1.0)
+    n0 = s.add_node(0, 0, 0); n0.support_type = SupportType.PIN
+    n1 = s.add_node(2, 0, 0)
+    n2 = s.add_node(4, 0, 0); n2.support_type = SupportType.ROLLER
+    n3 = s.add_node(2, 0, -2); n3.support_type = SupportType.ROLLER
+    _nload(s, n1.id, fz=-1.0)
     s.add_member(0, 1)
     s.add_member(1, 2)
     bar = s.add_member(1, 3); bar.element_type = ElementType.BAR
@@ -151,7 +151,7 @@ def frame_wizard(n_bays: int, n_stories: int,
     for story in range(n_stories + 1):
         row = []
         for bay in range(n_bays + 1):
-            nd = s.add_node(bay * bay_width, story * story_height)
+            nd = s.add_node(bay * bay_width, 0, story * story_height)
             if story == 0:
                 nd.support_type = SupportType.PIN
             row.append(nd)
@@ -179,13 +179,13 @@ def setback_office_frame() -> ModelState:
     lc_g = s.load_cases[0]
     lc_w = s.add_load_case("Wind (W)", category="W")
 
-    g  = [s.add_node(x, 0.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
-    s1 = [s.add_node(x, 2.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
-    s2 = [s.add_node(x, 4.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
-    s3 = [s.add_node(x, 7.0)  for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
-    s4 = [s.add_node(x, 10.0) for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
-    s5 = [s.add_node(x, 13.0) for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
-    sr = [s.add_node(x, 16.0) for x in [3.0, 6.0, 9.0]]
+    g  = [s.add_node(x, 0, 0.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    s1 = [s.add_node(x, 0, 2.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    s2 = [s.add_node(x, 0, 4.0)  for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    s3 = [s.add_node(x, 0, 7.0)  for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
+    s4 = [s.add_node(x, 0, 10.0) for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
+    s5 = [s.add_node(x, 0, 13.0) for x in [1.5, 3.0, 6.0, 9.0, 10.5]]
+    sr = [s.add_node(x, 0, 16.0) for x in [3.0, 6.0, 9.0]]
 
     for n in g:
         n.support_type = SupportType.PIN
@@ -232,9 +232,9 @@ def braced_industrial_frame() -> ModelState:
     lc_g = s.load_cases[0]
     lc_w = s.add_load_case("Wind (W)", category="W")
 
-    g  = [s.add_node(x, 0.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
-    s1 = [s.add_node(x, 3.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
-    s2 = [s.add_node(x, 6.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    g  = [s.add_node(x, 0, 0.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    s1 = [s.add_node(x, 0, 3.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
+    s2 = [s.add_node(x, 0, 6.0) for x in [0.0, 3.0, 6.0, 9.0, 12.0]]
     for n in g:
         n.support_type = SupportType.PIN
 
@@ -263,9 +263,9 @@ def pratt_truss_bridge() -> ModelState:
     bot[0].support_type = SupportType.PIN
     bot[6].support_type = SupportType.ROLLER
 
-    top = [s.add_node(x, 2.0) for x in [1.0, 3.0, 5.0, 7.0, 9.0, 11.0]]
+    top = [s.add_node(x, 0, 2.0) for x in [1.0, 3.0, 5.0, 7.0, 9.0, 11.0]]
     for n in top:
-        _nload(s, n.id, fy=-40_000.0, case=lc_g)
+        _nload(s, n.id, fz=-40_000.0, case=lc_g)
 
     for i in range(6):
         _mb(s, bot[i].id, bot[i+1].id, SHS_200_10, etype=ElementType.BAR)
@@ -323,10 +323,10 @@ def steel_industrial_portal() -> ModelState:
     lc_q = s.add_load_case("Snow (Q)", category="Q")
     lc_w = s.add_load_case("Wind (W)", category="W")
 
-    n0 = s.add_node(0.0,  0.0); n0.support_type = SupportType.FIXED
-    n1 = s.add_node(0.0,  7.0)   # left eave
-    n2 = s.add_node(14.0, 7.0)   # right eave
-    n3 = s.add_node(14.0, 0.0); n3.support_type = SupportType.FIXED
+    n0 = s.add_node(0.0,  0.0, 0.0); n0.support_type = SupportType.FIXED
+    n1 = s.add_node(0.0,  0.0, 7.0)   # left eave
+    n2 = s.add_node(14.0, 0.0, 7.0)   # right eave
+    n3 = s.add_node(14.0, 0.0, 0.0); n3.support_type = SupportType.FIXED
 
     _mb(s, n0.id, n1.id, HEB_340)                                # left column
     rafter = _mb(s, n1.id, n2.id, IPE_500, udl=10_000.0, case=lc_g)  # rafter
@@ -388,8 +388,8 @@ def steel_vierendeel_bridge() -> ModelState:
 
     pw, ph = 3.0, 2.0   # panel width, height
 
-    bot = [s.add_node(i * pw, 0.0) for i in range(6)]
-    top = [s.add_node(i * pw, ph) for i in range(6)]
+    bot = [s.add_node(i * pw, 0.0, 0.0) for i in range(6)]
+    top = [s.add_node(i * pw, 0.0, ph) for i in range(6)]
 
     bot[0].support_type = SupportType.PIN
     bot[5].support_type = SupportType.ROLLER
@@ -424,7 +424,7 @@ def rc_moment_frame() -> ModelState:
     lc_w = s.add_load_case("Wind (W)", category="W")
 
     bw, sh = 7.0, 3.5
-    grid = [[s.add_node(col * bw, row * sh) for col in range(3)] for row in range(3)]
+    grid = [[s.add_node(col * bw, 0, row * sh) for col in range(3)] for row in range(3)]
 
     for n in grid[0]:
         n.support_type = SupportType.FIXED
@@ -593,10 +593,10 @@ def demo_frame_steel() -> ModelState:
     lc_q = s.add_load_case("Snow (Q)", category="Q")
     lc_w = s.add_load_case("Wind (W)", category="W")
 
-    n0 = s.add_node(0.0,  0.0); n0.support_type = SupportType.FIXED
-    n1 = s.add_node(0.0,  5.0)   # left eave
-    n2 = s.add_node(10.0, 5.0)   # right eave
-    n3 = s.add_node(10.0, 0.0); n3.support_type = SupportType.FIXED
+    n0 = s.add_node(0.0,  0.0, 0.0); n0.support_type = SupportType.FIXED
+    n1 = s.add_node(0.0,  0.0, 5.0)   # left eave
+    n2 = s.add_node(10.0, 0.0, 5.0)   # right eave
+    n3 = s.add_node(10.0, 0.0, 0.0); n3.support_type = SupportType.FIXED
 
     _mb(s, n0.id, n1.id, HEB_260)
     rafter = _mb(s, n1.id, n2.id, IPE_450, udl=12_000.0, case=lc_g)
@@ -621,7 +621,7 @@ def demo_frame_rc() -> ModelState:
     lc_w = s.add_load_case("Wind (W)", category="W")
 
     bw, sh = 6.0, 3.0
-    grid = [[s.add_node(col * bw, row * sh) for col in range(3)] for row in range(4)]
+    grid = [[s.add_node(col * bw, 0, row * sh) for col in range(3)] for row in range(4)]
 
     for n in grid[0]:
         n.support_type = SupportType.FIXED
@@ -659,14 +659,14 @@ def demo_truss_pratt() -> ModelState:
 
     panel_w, depth, n = 2.0, 2.0, 8
 
-    bot = [s.add_node(i * panel_w, 0.0)   for i in range(n + 1)]
-    top = [s.add_node(i * panel_w, depth) for i in range(n + 1)]
+    bot = [s.add_node(i * panel_w, 0.0, 0.0)   for i in range(n + 1)]
+    top = [s.add_node(i * panel_w, 0.0, depth) for i in range(n + 1)]
 
     bot[0].support_type = SupportType.PIN
     bot[n].support_type = SupportType.ROLLER
 
     for i in range(1, n):
-        _nload(s, top[i].id, fy=-30_000.0, case=lc_q)
+        _nload(s, top[i].id, fz=-30_000.0, case=lc_q)
 
     for i in range(n):
         _mb(s, bot[i].id, bot[i + 1].id, SHS_200_10, etype=ElementType.BAR)
@@ -698,7 +698,7 @@ def demo_mixed() -> ModelState:
     n0 = s.add_node(0.0,  0.0); n0.support_type = SupportType.PIN
     n1 = s.add_node(6.0,  0.0)   # beam midspan — top of strut
     n2 = s.add_node(12.0, 0.0); n2.support_type = SupportType.ROLLER
-    n3 = s.add_node(6.0, -3.0); n3.support_type = SupportType.PIN   # strut base
+    n3 = s.add_node(6.0, 0.0, -3.0); n3.support_type = SupportType.PIN   # strut base
 
     _mb(s, n0.id, n1.id, IPE_360, udl=20_000.0, case=lc_g)
     _mb(s, n1.id, n2.id, IPE_360, udl=20_000.0, case=lc_g)
@@ -760,10 +760,10 @@ def demo_wind_portal_qx() -> ModelState:
     lc_w = s.add_load_case("Wind (W)",  category="W")
 
     # ── geometry ──────────────────────────────────────────────────────────────
-    n0 = s.add_node(0.0,  0.0); n0.support_type = SupportType.FIXED   # left base
-    n1 = s.add_node(0.0,  6.0)                                          # left eave
-    n2 = s.add_node(12.0, 6.0)                                          # right eave
-    n3 = s.add_node(12.0, 0.0); n3.support_type = SupportType.FIXED   # right base
+    n0 = s.add_node(0.0,  0.0, 0.0); n0.support_type = SupportType.FIXED   # left base
+    n1 = s.add_node(0.0,  0.0, 6.0)                                         # left eave
+    n2 = s.add_node(12.0, 0.0, 6.0)                                         # right eave
+    n3 = s.add_node(12.0, 0.0, 0.0); n3.support_type = SupportType.FIXED   # right base
 
     # ── members ───────────────────────────────────────────────────────────────
     left_col  = _mb(s, n0.id, n1.id, HEB_300)
@@ -879,10 +879,10 @@ def portal_wizard(
 
     base_sup = SupportType.FIXED if fixed_base else SupportType.PIN
 
-    n0 = s.add_node(0.0,   0.0); n0.support_type = base_sup
-    n1 = s.add_node(0.0,   height)
-    n2 = s.add_node(span,  height)
-    n3 = s.add_node(span,  0.0); n3.support_type = base_sup
+    n0 = s.add_node(0.0,  0.0, 0.0); n0.support_type = base_sup
+    n1 = s.add_node(0.0,  0.0, height)
+    n2 = s.add_node(span, 0.0, height)
+    n3 = s.add_node(span, 0.0, 0.0); n3.support_type = base_sup
 
     col_profile = (E_col, A_col, I_col)
     raf_profile = (E_raf, A_raf, I_raf)
@@ -928,8 +928,8 @@ def truss_wizard(
 
     panel_w = span / n_panels
 
-    bot = [s.add_node(i * panel_w, 0.0)   for i in range(n_panels + 1)]
-    top = [s.add_node(i * panel_w, depth) for i in range(n_panels + 1)]
+    bot = [s.add_node(i * panel_w, 0.0, 0.0)   for i in range(n_panels + 1)]
+    top = [s.add_node(i * panel_w, 0.0, depth) for i in range(n_panels + 1)]
 
     bot[0].support_type = SupportType.PIN
     bot[n_panels].support_type = SupportType.ROLLER
@@ -937,7 +937,7 @@ def truss_wizard(
     if panel_load > 0.0:
         loaded = top if load_on_top else bot
         for i in range(1, n_panels):
-            _nload(s, loaded[i].id, fy=-panel_load, case=lc_q)
+            _nload(s, loaded[i].id, fz=-panel_load, case=lc_q)
 
     def _bar(ni: int, nj: int, profile: tuple) -> None:
         m = s.add_member(ni, nj)
