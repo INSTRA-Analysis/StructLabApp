@@ -421,6 +421,11 @@ class MainWindow(QMainWindow):
         self._on_selection_changed()
         self._scene.update()   # redraw grid
 
+    def _on_toggle_local_axes(self, checked: bool) -> None:
+        from ui_qt.canvas_items import set_show_local_axes
+        set_show_local_axes(checked)
+        self._scene.update()
+
     def _sync_3d_action(self) -> None:
         """Keep the Edit → 3D Mode checkmark in sync with the loaded state."""
         if hasattr(self, "_act_3d_mode"):
@@ -958,6 +963,18 @@ class MainWindow(QMainWindow):
         self._plane_spin.valueChanged.connect(lambda v: self._scene.set_plane_offset(v))
         self._view_tb.addWidget(self._plane_label)
         self._view_tb.addWidget(self._plane_spin)
+
+        self._view_tb.addSeparator()
+        self._local_axes_btn = QPushButton("⊕ Axes")
+        self._local_axes_btn.setCheckable(True)
+        self._local_axes_btn.setFixedSize(62, 28)
+        self._local_axes_btn.setToolTip(
+            "Show local axis triad on all members\n"
+            "Red = x̂ (along member)  Green = ŷ (strong axis)  Blue = ẑ (weak axis)\n"
+            "Triad is always shown on selected members regardless of this toggle."
+        )
+        self._local_axes_btn.toggled.connect(self._on_toggle_local_axes)
+        self._view_tb.addWidget(self._local_axes_btn)
 
         self._view_tb.setVisible(False)  # shown only in 3D mode
 
