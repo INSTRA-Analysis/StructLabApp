@@ -653,6 +653,7 @@ class MainWindow(QMainWindow):
             tb.addWidget(btn)
 
         self._mode_buttons[CanvasMode.SELECT].setChecked(True)
+        self._set_mode(CanvasMode.SELECT)   # activate drag mode immediately
 
         # ── member type selector ───────────────────────────────────────────────
         tb.addWidget(QLabel(" Type:"))
