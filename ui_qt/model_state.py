@@ -380,9 +380,15 @@ class MemberData:
     n_sub: int = 10    # sub-elements per member for analysis mesh
     density: float = 0.0  # kg/m³ — 0 disables self-weight for this member
     beta_angle: float = 0.0  # rad — section rotation about local x-axis (3D only)
-    fy: float = 275e6   # Pa — yield strength (EN 1993-1-1, default S275)
+    fy: float = 275e6   # Pa — yield strength / fck / fk depending on material
     W_pl: float = 0.0   # m³ — plastic section modulus (strong axis), 0 = not set
     W_el: float = 0.0   # m³ — elastic section modulus (strong axis), 0 = not set
+    # Concrete section geometry (EN 1992-1-1 §6.1 check, all SI units)
+    b_sec:      float = 0.0    # m  — section width
+    h_sec:      float = 0.0    # m  — total depth
+    d_eff:      float = 0.0    # m  — effective depth to tension steel centroid
+    As_tension: float = 0.0    # m² — tension reinforcement area
+    fyk:        float = 500e6  # Pa — reinforcement yield strength (default 500 MPa)
 
 
 # ── Full model state ──────────────────────────────────────────────────────────
@@ -539,7 +545,9 @@ class ModelState:
                  "E": m.E, "A": m.A, "I": m.I,
                  "I_y": m.I_y, "J": m.J, "beta_angle": m.beta_angle,
                  "n_sub": m.n_sub, "density": m.density,
-                 "fy": m.fy, "W_pl": m.W_pl, "W_el": m.W_el}
+                 "fy": m.fy, "W_pl": m.W_pl, "W_el": m.W_el,
+                 "b_sec": m.b_sec, "h_sec": m.h_sec, "d_eff": m.d_eff,
+                 "As_tension": m.As_tension, "fyk": m.fyk}
                 for m in self.members
             ],
             "load_cases": [lc.to_dict() for lc in self.load_cases],
@@ -593,6 +601,11 @@ class ModelState:
                 fy=md.get("fy", 275e6),
                 W_pl=md.get("W_pl", 0.0),
                 W_el=md.get("W_el", 0.0),
+                b_sec=md.get("b_sec", 0.0),
+                h_sec=md.get("h_sec", 0.0),
+                d_eff=md.get("d_eff", 0.0),
+                As_tension=md.get("As_tension", 0.0),
+                fyk=md.get("fyk", 500e6),
             ))
         if "load_cases" in d:
             s.load_cases.clear()

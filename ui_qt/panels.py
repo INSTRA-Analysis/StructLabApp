@@ -472,22 +472,49 @@ class _MemberForm(QWidget):
         _dl2.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         design_box = QGroupBox("Design properties")
-        df = QFormLayout(design_box)
-        self._fy   = _spin(member.fy / 1e6,    0, 2000, 5,   0)
-        self._Wpl  = _spin(member.W_pl * 1e6,  0, 1e6,  0.1, 1)
-        self._Wel  = _spin(member.W_el * 1e6,  0, 1e6,  0.1, 1)
-        df.addRow("fy (MPa):",   self._fy)
+        self._design_form = QFormLayout(design_box)
+        df = self._design_form
+
+        # ── Characteristic strength (label updates with material) ─────────────
+        self._fy     = _spin(member.fy / 1e6,    0, 2000, 5,   0)
+        self._fy_lbl = QLabel("fy (MPa):")
+        df.addRow(self._fy_lbl, self._fy)
+
+        # ── Steel / timber: section moduli ────────────────────────────────────
+        self._Wpl = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)
+        self._Wel = _spin(member.W_el * 1e6, 0, 1e6, 0.1, 1)
         df.addRow("W_pl (cm³):", self._Wpl)
         df.addRow("W_el (cm³):", self._Wel)
-        self._fy_lbl = df.labelForField(self._fy)
-        _dl2.addWidget(design_box)
 
+        # ── Concrete: section geometry (EN 1992-1-1 §6.1) ────────────────────
+        self._b_sec = _spin(member.b_sec * 1000, 0, 5000, 10, 0)
+        self._h_sec = _spin(member.h_sec * 1000, 0, 5000, 10, 0)
+        self._d_eff = _spin(member.d_eff * 1000, 0, 5000, 10, 0)
+        self._As_t  = _spin(member.As_tension * 1e6, 0, 100000, 50, 0)
+        self._fyk   = _spin(member.fyk / 1e6,  200, 1000, 10, 0)
+        df.addRow("b (mm):",   self._b_sec)
+        df.addRow("h (mm):",   self._h_sec)
+        df.addRow("d (mm):",   self._d_eff)
+        df.addRow("As (mm²):", self._As_t)
+        df.addRow("fyk (MPa):", self._fyk)
+        self._mrd_lbl = QLabel("—")
+        self._mrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
+        df.addRow("M_Rd (kN·m):", self._mrd_lbl)
+
+        # Connect concrete fields to live M_Rd display
+        for _w in (self._fy, self._b_sec, self._h_sec, self._d_eff,
+                   self._As_t, self._fyk):
+            _w.valueChanged.connect(self._update_mrd_display)
+
+        _dl2.addWidget(design_box)
         tabs.addTab(_ds_tab, "Design")
 
-        # Sync fy label with the material already detected above
+        # Sync visibility + label with detected material
         _MLBLS = ["fy (MPa):", "fck (MPa):", "fk (MPa):", "fy (MPa):"]
-        if self._fy_lbl:
-            self._fy_lbl.setText(_MLBLS[min(self._mat_preset.currentIndex(), 3)])
+        _cur   = self._mat_preset.currentIndex()
+        self._fy_lbl.setText(_MLBLS[min(_cur, 3)])
+        self._update_design_visibility(_cur)
+        self._update_mrd_display()
 
         layout.addWidget(tabs)
 
@@ -504,15 +531,49 @@ class _MemberForm(QWidget):
 
     def _on_material_preset_changed(self, idx: int) -> None:
         if idx >= len(self._MAT_PRESETS):
-            return  # Custom — leave fields as-is
+            self._update_design_visibility(idx)
+            return  # Custom — leave field values as-is
         E_gpa, fk_mpa, dens, lbl = self._MAT_PRESETS[idx]
         self._E.setValue(E_gpa)
         self._density.blockSignals(True)
         self._density.setValue(dens)
         self._density.blockSignals(False)
         self._fy.setValue(fk_mpa)
-        if hasattr(self, "_fy_lbl") and self._fy_lbl:
-            self._fy_lbl.setText(lbl)
+        self._fy_lbl.setText(lbl)
+        self._update_design_visibility(idx)
+
+    def _update_design_visibility(self, mat_idx: int) -> None:
+        """Show concrete section fields or steel/timber W_pl/W_el based on material."""
+        if not hasattr(self, "_design_form"):
+            return
+        df = self._design_form
+        is_conc = (mat_idx == 1)
+        df.setRowVisible(self._Wpl,   not is_conc)
+        df.setRowVisible(self._Wel,   not is_conc)
+        df.setRowVisible(self._b_sec, is_conc)
+        df.setRowVisible(self._h_sec, is_conc)
+        df.setRowVisible(self._d_eff, is_conc)
+        df.setRowVisible(self._As_t,  is_conc)
+        df.setRowVisible(self._fyk,   is_conc)
+        df.setRowVisible(self._mrd_lbl, is_conc)
+
+    def _update_mrd_display(self, _val: float = 0.0) -> None:
+        """Recompute and display M_Rd live from concrete section inputs."""
+        if not hasattr(self, "_mrd_lbl"):
+            return
+        fck = self._fy.value() * 1e6
+        b   = self._b_sec.value() / 1000
+        d   = self._d_eff.value() / 1000
+        As  = self._As_t.value()  / 1e6
+        fyk = self._fyk.value()   * 1e6
+        if b > 0 and d > 0 and As > 0 and fck > 0:
+            fcd = fck / 1.5
+            fyd = fyk / 1.15
+            x   = min(As * fyd / (0.8 * b * fcd), d)
+            mrd = As * fyd * (d - 0.4 * x)
+            self._mrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m")
+        else:
+            self._mrd_lbl.setText("—")
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -644,6 +705,11 @@ class _MemberForm(QWidget):
         m.fy      = self._fy.value() * 1e6
         m.W_pl    = self._Wpl.value() * 1e-6
         m.W_el    = self._Wel.value() * 1e-6
+        m.b_sec       = self._b_sec.value() / 1000
+        m.h_sec       = self._h_sec.value() / 1000
+        m.d_eff       = self._d_eff.value() / 1000
+        m.As_tension  = self._As_t.value()  / 1e6
+        m.fyk         = self._fyk.value()   * 1e6
         if self._load_case is not None:
             # ── point loads (active case) ─────────────────────────────────────
             point_loads = []
@@ -1526,9 +1592,24 @@ class ResultsPanel(QWidget):
                 mat = "steel"   # steel / custom / zero density all use steel formula
 
             if mat == "concrete":
-                M_pl = M_el = 0.0
-                eta_pl = eta_el = None
-                status = "Manual check req."
+                b    = md.b_sec if md else 0.0
+                d    = md.d_eff if md else 0.0
+                As   = md.As_tension if md else 0.0
+                fyk_v = md.fyk if md else 500e6
+                fck  = fk
+                M_el = 0.0
+                if b > 0 and d > 0 and As > 0 and fck > 0:
+                    fcd = fck / 1.5
+                    fyd = fyk_v / 1.15
+                    x   = min(As * fyd / (0.8 * b * fcd), d)
+                    M_pl = As * fyd * (d - 0.4 * x)
+                    eta_pl = (M_Ed / M_pl * 100) if M_pl > 0 else None
+                    eta_el = None
+                    status = ("PASS ✓" if eta_pl <= 100.0 else "FAIL ✗") if eta_pl is not None else "N/A"
+                else:
+                    M_pl = 0.0
+                    eta_pl = eta_el = None
+                    status = "Set b/d/As"
             elif mat == "timber":
                 M_pl = 0.0
                 M_el = fk * W_el          # elastic check, EN 1995 (no γ_M applied here)
@@ -1555,8 +1636,8 @@ class ResultsPanel(QWidget):
 
             # Colour-code by utilisation
             eta_ref = eta_pl if mat != "timber" else eta_el
-            if mat == "concrete":
-                bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # blue-grey — manual
+            if mat == "concrete" and eta_ref is None:
+                bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # blue-grey — dims not set
             elif eta_ref is not None:
                 if eta_ref <= 80.0:
                     bg, fg = QColor("#1b3a1b"), QColor("#90ee90")   # green — low
