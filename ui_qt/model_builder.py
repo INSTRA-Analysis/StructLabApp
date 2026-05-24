@@ -58,7 +58,7 @@ def build_model(state: ModelState,
         *i*, from node_i end to node_j end.
     """
     lc = load_case if load_case is not None else state.active_case
-    model = Model()
+    model = Model(ui_is_3d=state.mode_3d)
 
     # ── 3D consistency: if any UI node has z≠0, force all z=0 → 1e-12 ─────
     # Must modify state.nodes BEFORE creating core nodes, so that intermediate
