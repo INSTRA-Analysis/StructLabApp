@@ -39,6 +39,9 @@ def _dspin(val: float, lo: float, hi: float, step: float,
 class SectionPickerDialog(QDialog):
     """Modal dialog to choose material + section; returns (E, A, I, W_pl, W_el) on accept."""
 
+    # Session-level memory — survives between opens within one app run
+    _last_state: dict = {}
+
     def __init__(self, current_E: float, current_A: float, current_I: float,
                  parent=None) -> None:
         super().__init__(parent)
@@ -81,10 +84,12 @@ class SectionPickerDialog(QDialog):
         prev_form = QFormLayout(prev_box)
         self._lbl_A   = QLabel("—")
         self._lbl_I   = QLabel("—")
+        self._lbl_Wpl = QLabel("—")
         self._lbl_Wel = QLabel("—")
-        prev_form.addRow("A (cm²):",       self._lbl_A)
-        prev_form.addRow("I (cm⁴):",       self._lbl_I)
-        prev_form.addRow("W_el (cm³):",    self._lbl_Wel)
+        prev_form.addRow("A (cm²):",    self._lbl_A)
+        prev_form.addRow("I (cm⁴):",   self._lbl_I)
+        prev_form.addRow("W_pl (cm³):", self._lbl_Wpl)
+        prev_form.addRow("W_el (cm³):", self._lbl_Wel)
         layout.addWidget(prev_box)
 
         # ── Buttons ───────────────────────────────────────────────────────────
@@ -98,8 +103,10 @@ class SectionPickerDialog(QDialog):
 
         # Wire live preview — call after all widgets exist
         self._tabs.currentChanged.connect(self._update_preview)
-        self._mat_combo.setCurrentIndex(0)   # triggers _on_material_changed
-        self._update_preview()               # populate preview on first open
+
+        # Restore last-used state (or fall back to defaults)
+        self._restore_last_state(current_E)
+        self._update_preview()
 
     # ── Tab builders ──────────────────────────────────────────────────────────
 
@@ -162,6 +169,78 @@ class SectionPickerDialog(QDialog):
         form.addRow("Height h (m):",    self._rhs_h)
         form.addRow("Wall thick t (m):", self._rhs_t)
         return w
+
+    # ── State persistence ─────────────────────────────────────────────────────
+
+    def _restore_last_state(self, current_E: float) -> None:
+        st = SectionPickerDialog._last_state
+        if not st:
+            # First open: match material from E if possible, else default Steel S275
+            for name, (E, _) in MATERIALS.items():
+                if abs(E - current_E) < 1e8:
+                    idx = self._mat_combo.findText(name)
+                    if idx >= 0:
+                        self._mat_combo.setCurrentIndex(idx)
+                        break
+            else:
+                self._mat_combo.setCurrentIndex(0)
+            return
+
+        # Restore material
+        mat_idx = self._mat_combo.findText(st.get("material", "Steel S275"))
+        self._mat_combo.setCurrentIndex(max(0, mat_idx))
+
+        # Restore active tab
+        tab = st.get("tab", 0)
+        if 0 <= tab < self._tabs.count():
+            self._tabs.setCurrentIndex(tab)
+
+        # Restore steel series / profile
+        if tab == 0:
+            series = st.get("series", "")
+            if series:
+                si = self._series_combo.findText(series)
+                if si >= 0:
+                    self._series_combo.setCurrentIndex(si)
+            prof = st.get("profile", "")
+            if prof:
+                pi = self._profile_combo.findText(prof)
+                if pi >= 0:
+                    self._profile_combo.setCurrentIndex(pi)
+
+        # Restore parametric dimensions
+        if tab == 1:
+            self._rect_b.setValue(st.get("rect_b", 0.3))
+            self._rect_h.setValue(st.get("rect_h", 0.5))
+        elif tab == 2:
+            self._tb_bf.setValue(st.get("tb_bf", 0.8))
+            self._tb_hf.setValue(st.get("tb_hf", 0.12))
+            self._tb_bw.setValue(st.get("tb_bw", 0.25))
+            self._tb_hw.setValue(st.get("tb_hw", 0.5))
+        elif tab == 3:
+            self._circ_d.setValue(st.get("circ_d", 0.4))
+        elif tab == 4:
+            self._rhs_b.setValue(st.get("rhs_b", 0.2))
+            self._rhs_h.setValue(st.get("rhs_h", 0.3))
+            self._rhs_t.setValue(st.get("rhs_t", 0.01))
+
+    def _save_last_state(self) -> None:
+        SectionPickerDialog._last_state = {
+            "material": self._mat_combo.currentText(),
+            "tab":      self._tabs.currentIndex(),
+            "series":   self._series_combo.currentText(),
+            "profile":  self._profile_combo.currentText(),
+            "rect_b":   self._rect_b.value(),
+            "rect_h":   self._rect_h.value(),
+            "tb_bf":    self._tb_bf.value(),
+            "tb_hf":    self._tb_hf.value(),
+            "tb_bw":    self._tb_bw.value(),
+            "tb_hw":    self._tb_hw.value(),
+            "circ_d":   self._circ_d.value(),
+            "rhs_b":    self._rhs_b.value(),
+            "rhs_h":    self._rhs_h.value(),
+            "rhs_t":    self._rhs_t.value(),
+        }
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -231,11 +310,13 @@ class SectionPickerDialog(QDialog):
         if result is None:
             self._lbl_A.setText("—")
             self._lbl_I.setText("—")
+            self._lbl_Wpl.setText("—")
             self._lbl_Wel.setText("—")
         else:
             A, I, W_pl, W_el = result
             self._lbl_A.setText(f"{A * 1e4:.2f} cm²")
             self._lbl_I.setText(f"{I * 1e8:.2f} cm⁴")
+            self._lbl_Wpl.setText(f"{W_pl * 1e6:.1f} cm³" if W_pl > 0 else "—")
             self._lbl_Wel.setText(f"{W_el * 1e6:.1f} cm³" if W_el > 0 else "—")
 
     def _on_accept(self) -> None:
@@ -245,6 +326,7 @@ class SectionPickerDialog(QDialog):
         A, I, W_pl, W_el = result
         E = self._E_spin.value() * 1e9
         self._result = (E, A, I, W_pl, W_el)
+        self._save_last_state()
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────

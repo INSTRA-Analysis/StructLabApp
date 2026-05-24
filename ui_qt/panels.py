@@ -458,27 +458,44 @@ class _MemberForm(QWidget):
         self._Wpl = _spin(member.W_pl * 1e6, 0, 1e6, 0.1, 1)
         self._Wel = _spin(member.W_el * 1e6, 0, 1e6, 0.1, 1)
         df.addRow("W_pl (cm³):", self._Wpl)
+        self._mplrd_lbl = QLabel("—")
+        self._mplrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
+        df.addRow("M_pl.Rd (kN·m):", self._mplrd_lbl)
         df.addRow("W_el (cm³):", self._Wel)
+        self._melrd_lbl = QLabel("—")
+        self._melrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
+        df.addRow("M_el.Rd (kN·m):", self._melrd_lbl)
 
         # ── Concrete: section geometry (EN 1992-1-1 §6.1) ────────────────────
         self._b_sec = _spin(member.b_sec * 1000, 0, 5000, 10, 0)
         self._h_sec = _spin(member.h_sec * 1000, 0, 5000, 10, 0)
-        self._d_eff = _spin(member.d_eff * 1000, 0, 5000, 10, 0)
+        # Cover: derive from stored h and d if available, else default 50 mm
+        _h_mm = member.h_sec * 1000
+        _d_mm = member.d_eff * 1000
+        _cov0 = round(_h_mm - _d_mm) if (_h_mm > 0 and _d_mm > 0) else 50
+        self._cover = _spin(_cov0, 0, 500, 5, 0)
+        self._d_lbl = QLabel("—")
+        self._d_lbl.setStyleSheet("color:#aaaaaa; font-size:10px;")
         self._As_t  = _spin(member.As_tension * 1e6, 0, 100000, 50, 0)
         self._fyk   = _spin(member.fyk / 1e6,  200, 1000, 10, 0)
-        df.addRow("b (mm):",   self._b_sec)
-        df.addRow("h (mm):",   self._h_sec)
-        df.addRow("d (mm):",   self._d_eff)
-        df.addRow("As (mm²):", self._As_t)
-        df.addRow("fyk (MPa):", self._fyk)
+        df.addRow("b (mm):",      self._b_sec)
+        df.addRow("h (mm):",      self._h_sec)
+        df.addRow("Cover c (mm):", self._cover)
+        df.addRow("d = h−c (mm):", self._d_lbl)
+        df.addRow("As (mm²):",    self._As_t)
+        df.addRow("fyk (MPa):",   self._fyk)
         self._mrd_lbl = QLabel("—")
         self._mrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
         df.addRow("M_Rd (kN·m):", self._mrd_lbl)
 
         # Connect concrete fields to live M_Rd display
-        for _w in (self._fy, self._b_sec, self._h_sec, self._d_eff,
+        for _w in (self._fy, self._b_sec, self._h_sec, self._cover,
                    self._As_t, self._fyk):
             _w.valueChanged.connect(self._update_mrd_display)
+
+        # Connect steel/timber fields to live M_pl.Rd / M_el.Rd display
+        for _w in (self._fy, self._Wpl, self._Wel):
+            _w.valueChanged.connect(self._update_mplrd_display)
 
         _dl2.addWidget(design_box)
         tabs.addTab(_ds_tab, "Design")
@@ -489,6 +506,7 @@ class _MemberForm(QWidget):
         self._fy_lbl.setText(_MLBLS[min(_cur, 3)])
         self._update_design_visibility(_cur)
         self._update_mrd_display()
+        self._update_mplrd_display()
 
         layout.addWidget(tabs)
 
@@ -522,13 +540,16 @@ class _MemberForm(QWidget):
             return
         df = self._design_form
         is_conc = (mat_idx == 1)
-        df.setRowVisible(self._Wpl,   not is_conc)
-        df.setRowVisible(self._Wel,   not is_conc)
-        df.setRowVisible(self._b_sec, is_conc)
-        df.setRowVisible(self._h_sec, is_conc)
-        df.setRowVisible(self._d_eff, is_conc)
-        df.setRowVisible(self._As_t,  is_conc)
-        df.setRowVisible(self._fyk,   is_conc)
+        df.setRowVisible(self._Wpl,      not is_conc)
+        df.setRowVisible(self._mplrd_lbl, not is_conc)
+        df.setRowVisible(self._Wel,      not is_conc)
+        df.setRowVisible(self._melrd_lbl, not is_conc)
+        df.setRowVisible(self._b_sec,  is_conc)
+        df.setRowVisible(self._h_sec,  is_conc)
+        df.setRowVisible(self._cover,  is_conc)
+        df.setRowVisible(self._d_lbl,  is_conc)
+        df.setRowVisible(self._As_t,   is_conc)
+        df.setRowVisible(self._fyk,    is_conc)
         df.setRowVisible(self._mrd_lbl, is_conc)
 
     def _update_mrd_display(self, _val: float = 0.0) -> None:
@@ -537,9 +558,13 @@ class _MemberForm(QWidget):
             return
         fck = self._fy.value() * 1e6
         b   = self._b_sec.value() / 1000
-        d   = self._d_eff.value() / 1000
+        h   = self._h_sec.value() / 1000
+        c   = self._cover.value() / 1000
+        d   = h - c
         As  = self._As_t.value()  / 1e6
         fyk = self._fyk.value()   * 1e6
+        if hasattr(self, "_d_lbl"):
+            self._d_lbl.setText(f"{d * 1000:.0f} mm" if d > 0 else "—")
         if b > 0 and d > 0 and As > 0 and fck > 0:
             fcd = fck / 1.5
             fyd = fyk / 1.15
@@ -548,6 +573,16 @@ class _MemberForm(QWidget):
             self._mrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m")
         else:
             self._mrd_lbl.setText("—")
+
+    def _update_mplrd_display(self, _val: float = 0.0) -> None:
+        """Live M_pl.Rd and M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, γM0 = 1.0)."""
+        if not hasattr(self, "_mplrd_lbl"):
+            return
+        fy  = self._fy.value() * 1e6       # Pa
+        Wpl = self._Wpl.value() * 1e-6     # m³
+        Wel = self._Wel.value() * 1e-6     # m³
+        self._mplrd_lbl.setText(f"{Wpl * fy / 1e3:.2f} kN·m" if Wpl > 0 and fy > 0 else "—")
+        self._melrd_lbl.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -566,6 +601,7 @@ class _MemberForm(QWidget):
                 self._Wpl.setValue(W_pl * 1e6)
             if W_el > 0:
                 self._Wel.setValue(W_el * 1e6)
+            self._apply()   # save immediately — no extra Apply click needed
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -673,7 +709,7 @@ class _MemberForm(QWidget):
         m.W_el    = self._Wel.value() * 1e-6
         m.b_sec       = self._b_sec.value() / 1000
         m.h_sec       = self._h_sec.value() / 1000
-        m.d_eff       = self._d_eff.value() / 1000
+        m.d_eff       = (self._h_sec.value() - self._cover.value()) / 1000
         m.As_tension  = self._As_t.value()  / 1e6
         m.fyk         = self._fyk.value()   * 1e6
         if self._load_case is not None:
@@ -1001,29 +1037,45 @@ class _MultiMemberForm(QWidget):
         self._Wel_m = _spin(first.W_el * 1e6, 0, 1e6, 10, 1)
         self._design_form_m.addRow(self._fy_lbl_m, self._fy_m)
         self._design_form_m.addRow("W_pl (cm³):", self._Wpl_m)
+        self._mplrd_lbl_m = QLabel("—")
+        self._mplrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
+        self._design_form_m.addRow("M_pl.Rd (kN·m):", self._mplrd_lbl_m)
         self._design_form_m.addRow("W_el (cm³):", self._Wel_m)
+        self._melrd_lbl_m = QLabel("—")
+        self._melrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
+        self._design_form_m.addRow("M_el.Rd (kN·m):", self._melrd_lbl_m)
 
         self._b_sec_m = _spin(first.b_sec * 1000,       0, 5000,   10, 0)
         self._h_sec_m = _spin(first.h_sec * 1000,       0, 5000,   10, 0)
-        self._d_eff_m = _spin(first.d_eff * 1000,       0, 5000,   10, 0)
+        _h_mm_m = first.h_sec * 1000
+        _d_mm_m = first.d_eff * 1000
+        _cov0_m = round(_h_mm_m - _d_mm_m) if (_h_mm_m > 0 and _d_mm_m > 0) else 50
+        self._cover_m = _spin(_cov0_m, 0, 500, 5, 0)
+        self._d_lbl_m = QLabel("—")
+        self._d_lbl_m.setStyleSheet("color:#aaaaaa; font-size:10px;")
         self._As_t_m  = _spin(first.As_tension * 1e6,   0, 100000, 50, 0)
         self._fyk_m   = _spin(first.fyk / 1e6,        200, 1000,   10, 0)
-        self._design_form_m.addRow("b (mm):",    self._b_sec_m)
-        self._design_form_m.addRow("h (mm):",    self._h_sec_m)
-        self._design_form_m.addRow("d (mm):",    self._d_eff_m)
-        self._design_form_m.addRow("As (mm²):",  self._As_t_m)
-        self._design_form_m.addRow("fyk (MPa):", self._fyk_m)
+        self._design_form_m.addRow("b (mm):",       self._b_sec_m)
+        self._design_form_m.addRow("h (mm):",       self._h_sec_m)
+        self._design_form_m.addRow("Cover c (mm):", self._cover_m)
+        self._design_form_m.addRow("d = h−c (mm):", self._d_lbl_m)
+        self._design_form_m.addRow("As (mm²):",     self._As_t_m)
+        self._design_form_m.addRow("fyk (MPa):",    self._fyk_m)
         self._mrd_lbl_m = QLabel("—")
         self._mrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
         self._design_form_m.addRow("M_Rd (kN·m):", self._mrd_lbl_m)
         des_l.addWidget(des_box)
 
         for _w in (self._fy_m, self._b_sec_m, self._h_sec_m,
-                   self._d_eff_m, self._As_t_m, self._fyk_m):
+                   self._cover_m, self._As_t_m, self._fyk_m):
             _w.valueChanged.connect(self._update_mrd_display_m)
+
+        for _w in (self._fy_m, self._Wpl_m, self._Wel_m):
+            _w.valueChanged.connect(self._update_mplrd_display_m)
 
         self._mat_preset.currentIndexChanged.connect(self._update_design_visibility_m)
         self._update_design_visibility_m(self._mat_preset.currentIndex())
+        self._update_mplrd_display_m()
 
         # ── Apply button ──────────────────────────────────────────────────────
         btn = QPushButton(f"Apply to all {len(members)} members")
@@ -1045,21 +1097,28 @@ class _MultiMemberForm(QWidget):
     def _update_design_visibility_m(self, idx: int = 0) -> None:
         is_conc = (idx == 1)
         df = self._design_form_m
-        df.setRowVisible(self._Wpl_m,   not is_conc)
-        df.setRowVisible(self._Wel_m,   not is_conc)
-        df.setRowVisible(self._b_sec_m, is_conc)
-        df.setRowVisible(self._h_sec_m, is_conc)
-        df.setRowVisible(self._d_eff_m, is_conc)
-        df.setRowVisible(self._As_t_m,  is_conc)
-        df.setRowVisible(self._fyk_m,   is_conc)
+        df.setRowVisible(self._Wpl_m,      not is_conc)
+        df.setRowVisible(self._mplrd_lbl_m, not is_conc)
+        df.setRowVisible(self._Wel_m,      not is_conc)
+        df.setRowVisible(self._melrd_lbl_m, not is_conc)
+        df.setRowVisible(self._b_sec_m,  is_conc)
+        df.setRowVisible(self._h_sec_m,  is_conc)
+        df.setRowVisible(self._cover_m,  is_conc)
+        df.setRowVisible(self._d_lbl_m,  is_conc)
+        df.setRowVisible(self._As_t_m,   is_conc)
+        df.setRowVisible(self._fyk_m,    is_conc)
         df.setRowVisible(self._mrd_lbl_m, is_conc)
 
     def _update_mrd_display_m(self, _val: float = 0.0) -> None:
         fck = self._fy_m.value() * 1e6
         b   = self._b_sec_m.value() / 1000
-        d   = self._d_eff_m.value() / 1000
+        h   = self._h_sec_m.value() / 1000
+        c   = self._cover_m.value() / 1000
+        d   = h - c
         As  = self._As_t_m.value()  / 1e6
         fyk = self._fyk_m.value()   * 1e6
+        if hasattr(self, "_d_lbl_m"):
+            self._d_lbl_m.setText(f"{d * 1000:.0f} mm" if d > 0 else "—")
         if b > 0 and d > 0 and As > 0 and fck > 0:
             fcd = fck / 1.5
             fyd = fyk / 1.15
@@ -1068,6 +1127,16 @@ class _MultiMemberForm(QWidget):
             self._mrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m")
         else:
             self._mrd_lbl_m.setText("—")
+
+    def _update_mplrd_display_m(self, _val: float = 0.0) -> None:
+        """Live M_pl.Rd / M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, γM0 = 1.0)."""
+        if not hasattr(self, "_mplrd_lbl_m"):
+            return
+        fy  = self._fy_m.value() * 1e6
+        Wpl = self._Wpl_m.value() * 1e-6
+        Wel = self._Wel_m.value() * 1e-6
+        self._mplrd_lbl_m.setText(f"{Wpl * fy / 1e3:.2f} kN·m" if Wpl > 0 and fy > 0 else "—")
+        self._melrd_lbl_m.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
 
     def _dl_populate_m(self) -> None:
         self._dl_table_m.setRowCount(0)
@@ -1131,8 +1200,11 @@ class _MultiMemberForm(QWidget):
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
-            self._Wpl_m.setValue(W_pl * 1e6)
-            self._Wel_m.setValue(W_el * 1e6)
+            if W_pl > 0:
+                self._Wpl_m.setValue(W_pl * 1e6)
+            if W_el > 0:
+                self._Wel_m.setValue(W_el * 1e6)
+            self._apply()   # save immediately — no extra Apply click needed
 
     def _apply(self) -> None:
         type_names = ["BEAM", "BAR", "PIN_LEFT", "PIN_RIGHT"]
@@ -1147,7 +1219,7 @@ class _MultiMemberForm(QWidget):
         W_el    = self._Wel_m.value() * 1e-6
         b_sec   = self._b_sec_m.value() / 1000
         h_sec   = self._h_sec_m.value() / 1000
-        d_eff   = self._d_eff_m.value() / 1000
+        d_eff   = (self._h_sec_m.value() - self._cover_m.value()) / 1000
         As_t    = self._As_t_m.value()  / 1e6
         fyk     = self._fyk_m.value()   * 1e6
         # Collect distributed loads from table, keyed by case_id
