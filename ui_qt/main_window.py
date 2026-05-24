@@ -807,9 +807,9 @@ class MainWindow(QMainWindow):
         # Diagram scale spinbox
         tb.addWidget(QLabel("  Diag ×:"))
         self._diag_scale_spin = QDoubleSpinBox()
-        self._diag_scale_spin.setRange(0.01, 1000.0)
-        self._diag_scale_spin.setValue(1.0)
-        self._diag_scale_spin.setSingleStep(0.5)
+        self._diag_scale_spin.setRange(0.01, 10000.0)
+        self._diag_scale_spin.setValue(100.0)
+        self._diag_scale_spin.setSingleStep(10.0)
         self._diag_scale_spin.setDecimals(2)
         self._diag_scale_spin.setFixedWidth(95)
         self._diag_scale_spin.valueChanged.connect(self._redraw_overlays)

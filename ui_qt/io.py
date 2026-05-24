@@ -63,7 +63,7 @@ def load_model(filepath: str | Path) -> ModelState:
             E=md.get("E", 210e9),
             A=md.get("A", 0.03),
             I=md.get("I", 300e-6),
-            n_sub=md.get("n_sub", 10),
+            n_sub=md.get("n_sub", 50),
             density=md.get("density", 0.0),
         )
         s.members.append(member)

@@ -377,7 +377,7 @@ class MemberData:
     I: float = DEFAULT_I        # I_z — strong-axis moment of inertia (m⁴)
     I_y: float | None = None    # weak-axis moment of inertia (m⁴, defaults to I)
     J: float = 0.0              # torsional constant (m⁴, 3D only)
-    n_sub: int = 10    # sub-elements per member for analysis mesh
+    n_sub: int = 50    # sub-elements per member for analysis mesh
     density: float = 0.0  # kg/m³ — 0 disables self-weight for this member
     beta_angle: float = 0.0  # rad — section rotation about local x-axis (3D only)
     fy: float = 275e6   # Pa — yield strength / fck / fk depending on material
@@ -593,7 +593,7 @@ class ModelState:
                 id=md["id"], node_i=md["ni"], node_j=md["nj"],
                 element_type=ElementType[md["type"]],
                 E=md.get("E", 210e9), A=md.get("A", 0.03),
-                I=md.get("I", 300e-6), n_sub=md.get("n_sub", 10),
+                I=md.get("I", 300e-6), n_sub=md.get("n_sub", 50),
                 I_y=md.get("I_y", None), J=md.get("J", 0.0),
                 beta_angle=md.get("beta_angle", 0.0),
                 density=md.get("density", 0.0),
