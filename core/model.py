@@ -22,6 +22,9 @@ class Model:
     supports: list[Support] = field(default_factory=list)
     nodal_loads: list[NodalLoad] = field(default_factory=list)
     element_loads: list[ElementLoad] = field(default_factory=list)
+    # Set by model_builder when the UI is in 3D mode (even if all z==0).
+    # Tells canvas_overlay to use isometric projection regardless of node z-values.
+    ui_is_3d: bool = False
 
     @property
     def dofs_per_node(self) -> int:

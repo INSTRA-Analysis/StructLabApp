@@ -52,7 +52,7 @@ def _model_to_scene(x: float, y: float) -> tuple[float, float]:
 
 def _node_to_scene(node, model: "Model") -> tuple[float, float]:
     """Return (scene_x, scene_y) using isometric projection for 3D models."""
-    if model.is_3d:
+    if model.is_3d or model.ui_is_3d:
         from ui_qt.projection import isometric
         return isometric(node.x, node.y, node.z)
     return _model_to_scene(node.x, node.y)
