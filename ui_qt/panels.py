@@ -903,6 +903,12 @@ class _MixedFilterForm(QWidget):
 class _MultiMemberForm(QWidget):
     """Edit shared properties across multiple selected members at once."""
 
+    _MAT_PRESETS = [
+        (210.0, 275.0, 7850.0, "fy (MPa):"),
+        ( 30.0,  25.0, 2500.0, "fck (MPa):"),
+        ( 11.0,  24.0,  500.0, "fk (MPa):"),
+    ]
+
     def __init__(self, members: list, load_case: LoadCase | None,
                  on_apply, mode_3d: bool = False) -> None:
         super().__init__()
@@ -912,15 +918,24 @@ class _MultiMemberForm(QWidget):
         self._mode_3d   = mode_3d
         first = members[0]
 
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(4)
 
-        hdr = QLabel(f"<b>{len(members)} members selected</b><br>"
-                     "<small>Edits apply to all selected members</small>")
+        hdr = QLabel(f"<b>{len(members)} members selected</b>  "
+                     "<small style='color:#888'>— edits apply to all</small>")
         hdr.setWordWrap(True)
-        layout.addWidget(hdr)
+        root.addWidget(hdr)
 
-        # ── element type ─────────────────────────────────────────────────────
+        tabs = QTabWidget()
+        root.addWidget(tabs)
+
+        # ── Section tab ───────────────────────────────────────────────────────
+        sec_w = QWidget()
+        sec_l = QVBoxLayout(sec_w)
+        sec_l.setAlignment(Qt.AlignmentFlag.AlignTop)
+        tabs.addTab(sec_w, "Section")
+
         type_box = QGroupBox("Element type")
         tf = QFormLayout(type_box)
         self._type_combo = QComboBox()
@@ -931,9 +946,8 @@ class _MultiMemberForm(QWidget):
             type_names.index(first.element_type.name) if all_same_type else 0
         )
         tf.addRow("Type:", self._type_combo)
-        layout.addWidget(type_box)
+        sec_l.addWidget(type_box)
 
-        # ── section properties ─────────────────────────────────────────────
         sec_box = QGroupBox("Section properties")
         sf = QFormLayout(sec_box)
         self._E = _spin(first.E / 1e9, 0, 1000, 1, 1)
@@ -947,31 +961,38 @@ class _MultiMemberForm(QWidget):
         sf.addRow("", pick_btn)
 
         self._mat_preset = QComboBox()
-        self._mat_preset.addItems(["Steel (7850)", "Concrete (2500)", "Timber (500)", "Custom"])
-        _PRESETS_M = [7850.0, 2500.0, 500.0]
-        def _density_from_preset_m(idx: int, presets=_PRESETS_M) -> None:
-            if idx < len(presets):
-                self._density.setValue(presets[idx])
-        self._mat_preset.currentIndexChanged.connect(_density_from_preset_m)
+        self._mat_preset.addItems(["Steel S275", "Concrete C25/30", "Timber C24", "Custom"])
         sf.addRow("Material:", self._mat_preset)
 
         self._density = _spin(first.density, 0, 20000, 50, 0)
         self._density.setToolTip("0 = no self-weight contribution from this member")
-        self._density.valueChanged.connect(lambda: self._mat_preset.setCurrentIndex(3))
         sf.addRow("Density (kg/m³):", self._density)
 
+        self._nsub = QSpinBox()
+        self._nsub.setRange(1, 100)
+        self._nsub.setValue(first.n_sub)
+        sf.addRow("Sub-elements:", self._nsub)
+        sec_l.addWidget(sec_box)
+
+        # Wire material preset ↔ density
+        _preset_dens = [p[2] for p in self._MAT_PRESETS]
         self._mat_preset.blockSignals(True)
-        for _i, _d in enumerate(_PRESETS_M):
+        for _i, _d in enumerate(_preset_dens):
             if abs(first.density - _d) < 1.0:
                 self._mat_preset.setCurrentIndex(_i)
                 break
         else:
             self._mat_preset.setCurrentIndex(3)
         self._mat_preset.blockSignals(False)
+        self._mat_preset.currentIndexChanged.connect(self._on_mat_preset_m)
+        self._density.valueChanged.connect(lambda: self._mat_preset.setCurrentIndex(3))
 
-        layout.addWidget(sec_box)
+        # ── Loads tab ─────────────────────────────────────────────────────────
+        load_w = QWidget()
+        load_l = QVBoxLayout(load_w)
+        load_l.setAlignment(Qt.AlignmentFlag.AlignTop)
+        tabs.addTab(load_w, "Loads")
 
-        # ── distributed load (read from active load case for first member) ────
         first_ml = load_case.get_member_load(first.id) if load_case else MemberLoad()
         _w_s,  _w_e  = first_ml.net("w")
         _qx_s, _qx_e = first_ml.net("qx")
@@ -1005,20 +1026,89 @@ class _MultiMemberForm(QWidget):
         lf.setRowVisible(9,  mode_3d)
         lf.setRowVisible(10, mode_3d)
         lf.setRowVisible(11, mode_3d)
-        layout.addWidget(load_box)
+        load_l.addWidget(load_box)
 
-        # ── mesh ──────────────────────────────────────────────────────────
-        mesh_box = QGroupBox("Analysis mesh")
-        mf = QFormLayout(mesh_box)
-        self._nsub = QSpinBox()
-        self._nsub.setRange(1, 100)
-        self._nsub.setValue(first.n_sub)
-        mf.addRow("Sub-elements:", self._nsub)
-        layout.addWidget(mesh_box)
+        # ── Design tab ────────────────────────────────────────────────────────
+        des_w = QWidget()
+        des_l = QVBoxLayout(des_w)
+        des_l.setAlignment(Qt.AlignmentFlag.AlignTop)
+        tabs.addTab(des_w, "Design")
 
+        des_box = QGroupBox("Section capacity")
+        self._design_form_m = QFormLayout(des_box)
+        self._fy_lbl_m = QLabel("fy (MPa):")
+        self._fy_m  = _spin(first.fy / 1e6,   0, 2000, 5, 0)
+        self._Wpl_m = _spin(first.W_pl * 1e6, 0, 1e6, 10, 1)
+        self._Wel_m = _spin(first.W_el * 1e6, 0, 1e6, 10, 1)
+        self._design_form_m.addRow(self._fy_lbl_m, self._fy_m)
+        self._design_form_m.addRow("W_pl (cm³):", self._Wpl_m)
+        self._design_form_m.addRow("W_el (cm³):", self._Wel_m)
+
+        self._b_sec_m = _spin(first.b_sec * 1000,       0, 5000,   10, 0)
+        self._h_sec_m = _spin(first.h_sec * 1000,       0, 5000,   10, 0)
+        self._d_eff_m = _spin(first.d_eff * 1000,       0, 5000,   10, 0)
+        self._As_t_m  = _spin(first.As_tension * 1e6,   0, 100000, 50, 0)
+        self._fyk_m   = _spin(first.fyk / 1e6,        200, 1000,   10, 0)
+        self._design_form_m.addRow("b (mm):",    self._b_sec_m)
+        self._design_form_m.addRow("h (mm):",    self._h_sec_m)
+        self._design_form_m.addRow("d (mm):",    self._d_eff_m)
+        self._design_form_m.addRow("As (mm²):",  self._As_t_m)
+        self._design_form_m.addRow("fyk (MPa):", self._fyk_m)
+        self._mrd_lbl_m = QLabel("—")
+        self._mrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
+        self._design_form_m.addRow("M_Rd (kN·m):", self._mrd_lbl_m)
+        des_l.addWidget(des_box)
+
+        for _w in (self._fy_m, self._b_sec_m, self._h_sec_m,
+                   self._d_eff_m, self._As_t_m, self._fyk_m):
+            _w.valueChanged.connect(self._update_mrd_display_m)
+
+        self._mat_preset.currentIndexChanged.connect(self._update_design_visibility_m)
+        self._update_design_visibility_m(self._mat_preset.currentIndex())
+
+        # ── Apply button ──────────────────────────────────────────────────────
         btn = QPushButton(f"Apply to all {len(members)} members")
         btn.clicked.connect(self._apply)
-        layout.addWidget(btn)
+        root.addWidget(btn)
+
+    def _on_mat_preset_m(self, idx: int) -> None:
+        if idx < len(self._MAT_PRESETS):
+            e, fk_, dens, lbl = self._MAT_PRESETS[idx]
+            for w in (self._E, self._density, self._fy_m):
+                w.blockSignals(True)
+            self._E.setValue(e)
+            self._density.setValue(dens)
+            self._fy_m.setValue(fk_)
+            self._fy_lbl_m.setText(lbl)
+            for w in (self._E, self._density, self._fy_m):
+                w.blockSignals(False)
+
+    def _update_design_visibility_m(self, idx: int = 0) -> None:
+        is_conc = (idx == 1)
+        df = self._design_form_m
+        df.setRowVisible(self._Wpl_m,   not is_conc)
+        df.setRowVisible(self._Wel_m,   not is_conc)
+        df.setRowVisible(self._b_sec_m, is_conc)
+        df.setRowVisible(self._h_sec_m, is_conc)
+        df.setRowVisible(self._d_eff_m, is_conc)
+        df.setRowVisible(self._As_t_m,  is_conc)
+        df.setRowVisible(self._fyk_m,   is_conc)
+        df.setRowVisible(self._mrd_lbl_m, is_conc)
+
+    def _update_mrd_display_m(self, _val: float = 0.0) -> None:
+        fck = self._fy_m.value() * 1e6
+        b   = self._b_sec_m.value() / 1000
+        d   = self._d_eff_m.value() / 1000
+        As  = self._As_t_m.value()  / 1e6
+        fyk = self._fyk_m.value()   * 1e6
+        if b > 0 and d > 0 and As > 0 and fck > 0:
+            fcd = fck / 1.5
+            fyd = fyk / 1.15
+            x   = min(As * fyd / (0.8 * b * fcd), d)
+            mrd = As * fyd * (d - 0.4 * x)
+            self._mrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m")
+        else:
+            self._mrd_lbl_m.setText("—")
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -1033,6 +1123,8 @@ class _MultiMemberForm(QWidget):
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
+            self._Wpl_m.setValue(W_pl * 1e6)
+            self._Wel_m.setValue(W_el * 1e6)
 
     def _apply(self) -> None:
         type_names = ["BEAM", "BAR", "PIN_LEFT", "PIN_RIGHT"]
@@ -1042,6 +1134,14 @@ class _MultiMemberForm(QWidget):
         I       = self._I.value() * 1e-6
         density = self._density.value()
         n_sub   = self._nsub.value()
+        fy      = self._fy_m.value()  * 1e6
+        W_pl    = self._Wpl_m.value() * 1e-6
+        W_el    = self._Wel_m.value() * 1e-6
+        b_sec   = self._b_sec_m.value() / 1000
+        h_sec   = self._h_sec_m.value() / 1000
+        d_eff   = self._d_eff_m.value() / 1000
+        As_t    = self._As_t_m.value()  / 1e6
+        fyk     = self._fyk_m.value()   * 1e6
         w_start = self._w_start.value() * 1e3
         w_end   = self._w_end.value()   * 1e3
         for m in self._members:
@@ -1051,6 +1151,14 @@ class _MultiMemberForm(QWidget):
             m.I       = I
             m.density = density
             m.n_sub   = n_sub
+            m.fy      = fy
+            m.W_pl    = W_pl
+            m.W_el    = W_el
+            m.b_sec       = b_sec
+            m.h_sec       = h_sec
+            m.d_eff       = d_eff
+            m.As_tension  = As_t
+            m.fyk         = fyk
             if self._load_case is not None:
                 _dl: list[DistLoad] = []
                 _pairs = [
