@@ -1683,6 +1683,13 @@ class StructView(QGraphicsView):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self.scale(factor, factor)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.zoom_to_fit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def _selected_centroid(self) -> tuple[float,float,float] | None:
         """World centroid of selected nodes/members, or None if nothing selected."""
         from ui_qt.canvas_items import NodeItem, MemberItem
