@@ -50,13 +50,17 @@ _EDGES: list[tuple[int, int]] = [
     (0, 4), (1, 5), (2, 6), (3, 7),   # verticals
 ]
 
-# Top 4 corners → isometric view shortcuts
+# Corner → isometric view shortcuts  (top 4 above, bottom 4 below horizon)
 # Each entry: corner_index → (target_az_deg, target_el_deg)
 _ISO: dict[int, tuple[float, float]] = {
-    6: (-45.0,  30.0),   # Right-Back-Top  → SW default
-    5: ( 45.0,  30.0),   # Right-Front-Top → SE
-    7: (-135.0, 30.0),   # Left-Back-Top   → NW
-    4: ( 135.0, 30.0),   # Left-Front-Top  → NE
+    6: (-45.0,   30.0),   # Right-Back-Top    → SW default
+    5: ( 45.0,   30.0),   # Right-Front-Top   → SE
+    7: (-135.0,  30.0),   # Left-Back-Top     → NW
+    4: ( 135.0,  30.0),   # Left-Front-Top    → NE
+    2: (-45.0,  -30.0),   # Right-Back-Bottom → SW below
+    1: ( 45.0,  -30.0),   # Right-Front-Bottom → SE below
+    3: (-135.0, -30.0),   # Left-Back-Bottom  → NW below
+    0: ( 135.0, -30.0),   # Left-Front-Bottom → NE below
 }
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -140,8 +144,9 @@ class ViewCube:
         for a, b in _EDGES:
             painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
 
-        # Iso corner dots (top 4 only)
-        for ci in (4, 5, 6, 7):
+        # Iso corner dots — top set above horizon, bottom set below
+        corner_set = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
+        for ci in corner_set:
             hov = (self.hovered == f"corner:{ci}")
             cc  = _CCH if hov else _CCP
             r   = (self.CRAD + 2 if hov else self.CRAD) / scale
@@ -205,8 +210,9 @@ class ViewCube:
         cam = _cam_dir(az, el)
         cr  = (self.CRAD + 2) / scale
 
-        # Corner dots take priority (smaller targets, drawn on top)
-        for ci in (4, 5, 6, 7):
+        # Corner dots take priority — show set matching current viewing side
+        corner_set = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
+        for ci in corner_set:
             if math.hypot(sp.x() - pts[ci][0], sp.y() - pts[ci][1]) <= cr:
                 return f"corner:{ci}"
 
