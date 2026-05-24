@@ -1746,7 +1746,7 @@ class StructView(QGraphicsView):
                 sx0, sy0 = _proj.isometric(*self._orbit_center)
                 vp_before = self.mapFromScene(QPointF(sx0, sy0))
             _proj.ISO_AZIMUTH   = _proj.ISO_AZIMUTH + delta.x() * 0.3
-            _proj.ISO_ELEVATION = max(5.0, min(85.0, _proj.ISO_ELEVATION - delta.y() * 0.3))
+            _proj.ISO_ELEVATION = max(-89.0, min(89.0, _proj.ISO_ELEVATION - delta.y() * 0.3))
             self.scene().reproject()
             # Adjust scroll bars so pivot stays at same screen position
             if self._orbit_center is not None:
