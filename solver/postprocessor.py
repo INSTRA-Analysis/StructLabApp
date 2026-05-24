@@ -34,19 +34,32 @@ class ElementResult:
     @property
     def N_i(self) -> float: return self.end_forces[0]
     @property
-    def V_i(self) -> float: return self.end_forces[1]
+    def V_i(self) -> float:
+        if self.is_3d:
+            Vy, Vz = self.end_forces[1], self.end_forces[2]
+            return Vy if abs(Vy) >= abs(Vz) else Vz
+        return self.end_forces[1]
     @property
     def M_i(self) -> float:
-        return self.end_forces[5] if self.is_3d else self.end_forces[2]
+        if self.is_3d:
+            My, Mz = self.end_forces[4], self.end_forces[5]
+            return My if abs(My) >= abs(Mz) else Mz
+        return self.end_forces[2]
     @property
     def N_j(self) -> float:
         return self.end_forces[6] if self.is_3d else self.end_forces[3]
     @property
     def V_j(self) -> float:
-        return self.end_forces[7] if self.is_3d else self.end_forces[4]
+        if self.is_3d:
+            Vy, Vz = self.end_forces[7], self.end_forces[8]
+            return Vy if abs(Vy) >= abs(Vz) else Vz
+        return self.end_forces[4]
     @property
     def M_j(self) -> float:
-        return self.end_forces[11] if self.is_3d else self.end_forces[5]
+        if self.is_3d:
+            My, Mz = self.end_forces[10], self.end_forces[11]
+            return My if abs(My) >= abs(Mz) else Mz
+        return self.end_forces[5]
 
     # ── 3D-specific accessors (valid when is_3d is True) ─────────────────
     @property
