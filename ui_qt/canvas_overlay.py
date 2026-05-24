@@ -340,10 +340,11 @@ def _stitch_V(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (t_norm, V_vals) stitched across all sub-elements, t in [0,1].
 
-    Uses linear interpolation between V_i and V_j of each sub-element.
-    The solver guarantees V_j(k) == V_i(k+1) at internal nodes, so the
-    stitched profile is continuous — no stagger at sub-element boundaries.
+    V(x) = _bmd_V_i - w*x is the derivative of M(x) = M_i + _bmd_V_i*x - w*x²/2.
+    FEM equilibrium at internal nodes guarantees _bmd_V_i(k+1) = _bmd_V_i(k) - w*L(k),
+    so the stitched profile is continuous with no stagger at sub-element boundaries.
     """
+    from core.load import LoadType
     all_t: list[float] = []
     all_V: list[float] = []
     x_acc = 0.0
@@ -358,8 +359,10 @@ def _stitch_V(
             continue
         L_sub = el.length
         xs    = np.linspace(0.0, L_sub, 12)
-        # Linear V_i→V_j: continuous at boundaries, correct for UDL and no-load.
-        V_sub = res.V_i + (res.V_j - res.V_i) * (xs / L_sub)
+        V_sub = np.full(len(xs), res._bmd_V_i)
+        for eload in load_map.get(el_id, []):
+            if eload.load_type == LoadType.UDL:
+                V_sub = V_sub - eload.magnitude * xs
         t_vals = (x_acc + xs) / L_total
         end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
         all_t.extend(t_vals[:end].tolist())
