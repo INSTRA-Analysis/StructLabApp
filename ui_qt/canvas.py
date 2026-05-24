@@ -1388,7 +1388,7 @@ class StructView(QGraphicsView):
 
         # Product name
         font = painter.font()
-        font.setPointSizeF(8.0)
+        font.setPointSizeF(8.0 / scale)
         font.setBold(True)
         painter.setFont(font)
         name_pen = QPen(QColor(215, 215, 215))
@@ -1397,7 +1397,7 @@ class StructView(QGraphicsView):
         painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 0.88), "StructLabPro")
 
         # Version
-        font.setPointSizeF(7.0)
+        font.setPointSizeF(7.0 / scale)
         font.setBold(False)
         painter.setFont(font)
         ver_pen = QPen(QColor(130, 130, 130))
@@ -1543,78 +1543,108 @@ class StructView(QGraphicsView):
         painter.drawLine(QLineF(0, rect.top(), 0, rect.bottom()))
 
     def _draw_iso_grid(self, painter: QPainter, rect) -> None:
-        """Isometric grid: XY ground plane + active working plane overlay."""
-        minor_pen = QPen(QColor(55, 55, 62)); minor_pen.setCosmetic(True)
-        major_pen = QPen(QColor(75, 75, 85)); major_pen.setCosmetic(True)
+        """Isometric grid: adaptive spacing + viewport-following extent."""
+
+        # ── Adaptive spacing: pick finest that keeps lines >= 40 px apart ─────
+        scale            = self.transform().m11()
+        px_per_m_screen  = PX_PER_M * scale
+        _SPACINGS        = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0]
+        spacing          = 50.0
+        for s in _SPACINGS:
+            if s * px_per_m_screen >= 40.0:
+                spacing = s
+                break
+        major_spacing = spacing * 5.0
+
+        # ── Viewport centre in model space at z = 0 ───────────────────────────
+        vp_rect      = self.mapToScene(self.viewport().rect()).boundingRect()
+        vc           = vp_rect.center()
+        cx, cy       = inverse_isometric(vc.x(), vc.y(), 0.0)
+
+        # ── Extent: enough to fill viewport, capped at 50 m ──────────────────
+        extent_m = min(
+            max(vp_rect.width(), vp_rect.height()) / PX_PER_M * 1.5 + 5.0,
+            50.0,
+        )
+
+        # ── Pens ──────────────────────────────────────────────────────────────
+        minor_pen = QPen(QColor(52, 52, 60));  minor_pen.setCosmetic(True)
+        major_pen = QPen(QColor(82, 82, 94));  major_pen.setCosmetic(True)
+        major_pen.setWidthF(1.4)
         pl_minor  = QPen(QColor(0, 120, 140, 110)); pl_minor.setCosmetic(True)
         pl_major  = QPen(QColor(0, 155, 175, 180)); pl_major.setCosmetic(True)
+        pl_major.setWidthF(1.4)
 
         scene  = self.scene()
         plane  = scene._working_plane
         offset = scene._plane_offset
-        GR  = range(-2, 25)   # horizontal extent
-        ZR  = range(-2, 20)   # vertical (Z) extent for XZ/YZ planes
 
-        # ── XY ground floor (always drawn as orientation reference) ─────────────
-        for y_val in GR:
-            p1 = isometric(GR.start, y_val, 0)
-            p2 = isometric(GR.stop - 1, y_val, 0)
-            painter.setPen(major_pen if y_val % 5 == 0 else minor_pen)
-            painter.drawLine(QLineF(*p1, *p2))
-        for x_val in GR:
-            p1 = isometric(x_val, GR.start, 0)
-            p2 = isometric(x_val, GR.stop - 1, 0)
-            painter.setPen(major_pen if x_val % 5 == 0 else minor_pen)
-            painter.drawLine(QLineF(*p1, *p2))
+        # ── Helpers ───────────────────────────────────────────────────────────
+        def _range(center: float, ext: float) -> list[float]:
+            i0 = math.floor((center - ext) / spacing)
+            i1 = math.ceil( (center + ext) / spacing) + 1
+            return [i * spacing for i in range(i0, i1)]
 
-        # ── Active working plane overlay ─────────────────────────────────────────
+        def _z_range(ext: float) -> list[float]:
+            i0 = math.floor(-ext / spacing)
+            i1 = math.ceil(ext / spacing) + 1
+            return [i * spacing for i in range(i0, i1)]
+
+        def _is_major(val: float) -> bool:
+            return abs(round(val / major_spacing) * major_spacing - val) < spacing * 0.01
+
+        def _pen(val: float, mp: QPen, mjp: QPen) -> QPen:
+            return mjp if _is_major(val) else mp
+
+        x_vals = _range(cx, extent_m)
+        y_vals = _range(cy, extent_m)
+        z_vals = _z_range(extent_m)
+        x0, x1 = cx - extent_m, cx + extent_m
+        y0, y1 = cy - extent_m, cy + extent_m
+        z0 = z_vals[0] if z_vals else -2.0
+
+        # ── XY ground floor ───────────────────────────────────────────────────
+        for y_val in y_vals:
+            painter.setPen(_pen(y_val, minor_pen, major_pen))
+            painter.drawLine(QLineF(*isometric(x0, y_val, 0), *isometric(x1, y_val, 0)))
+        for x_val in x_vals:
+            painter.setPen(_pen(x_val, minor_pen, major_pen))
+            painter.drawLine(QLineF(*isometric(x_val, y0, 0), *isometric(x_val, y1, 0)))
+
+        # ── Active working plane overlay ──────────────────────────────────────
         if plane == WorkingPlane.XY and offset != 0.0:
-            # Elevated XY floor at Z = offset
-            for y_val in GR:
-                p1 = isometric(GR.start, y_val, offset)
-                p2 = isometric(GR.stop - 1, y_val, offset)
-                painter.setPen(pl_major if y_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
-            for x_val in GR:
-                p1 = isometric(x_val, GR.start, offset)
-                p2 = isometric(x_val, GR.stop - 1, offset)
-                painter.setPen(pl_major if x_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
+            for y_val in y_vals:
+                painter.setPen(_pen(y_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(x0, y_val, offset), *isometric(x1, y_val, offset)))
+            for x_val in x_vals:
+                painter.setPen(_pen(x_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(x_val, y0, offset), *isometric(x_val, y1, offset)))
         elif plane == WorkingPlane.XZ:
-            # Vertical XZ plane at Y = offset
-            for z_val in ZR:
-                p1 = isometric(GR.start, offset, z_val)
-                p2 = isometric(GR.stop - 1, offset, z_val)
-                painter.setPen(pl_major if z_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
-            for x_val in GR:
-                p1 = isometric(x_val, offset, ZR.start)
-                p2 = isometric(x_val, offset, ZR.stop - 1)
-                painter.setPen(pl_major if x_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
+            for z_val in z_vals:
+                painter.setPen(_pen(z_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(x0, offset, z_val), *isometric(x1, offset, z_val)))
+            for x_val in x_vals:
+                painter.setPen(_pen(x_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(x_val, offset, z0), *isometric(x_val, offset, extent_m)))
         elif plane == WorkingPlane.YZ:
-            # Vertical YZ plane at X = offset
-            for z_val in ZR:
-                p1 = isometric(offset, GR.start, z_val)
-                p2 = isometric(offset, GR.stop - 1, z_val)
-                painter.setPen(pl_major if z_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
-            for y_val in GR:
-                p1 = isometric(offset, y_val, ZR.start)
-                p2 = isometric(offset, y_val, ZR.stop - 1)
-                painter.setPen(pl_major if y_val % 5 == 0 else pl_minor)
-                painter.drawLine(QLineF(*p1, *p2))
+            for z_val in z_vals:
+                painter.setPen(_pen(z_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(offset, y0, z_val), *isometric(offset, y1, z_val)))
+            for y_val in y_vals:
+                painter.setPen(_pen(y_val, pl_minor, pl_major))
+                painter.drawLine(QLineF(*isometric(offset, y_val, z0), *isometric(offset, y_val, extent_m)))
 
         # ── ViewCube (top-right corner) ──────────────────────────────────────────
         scale = self.transform().m11()
-        vc_cx, vc_cy = self._view_cube.scene_center(rect, scale)
+        vp_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        vc_cx, vc_cy = self._view_cube.scene_center(vp_rect, scale)
         self._view_cube.paint(painter, vc_cx, vc_cy, scale)
 
         # ── Working plane label (just below the ViewCube) ────────────────────────
         lbl_pen = QPen(QColor("#00cccc")); lbl_pen.setCosmetic(True)
         painter.setPen(lbl_pen)
         z_font = painter.font()
-        z_font.setPointSize(8)
+        z_font.setPointSizeF(8.0 / scale)
         z_font.setBold(True)
         painter.setFont(z_font)
         _axis_map = {
@@ -1624,8 +1654,8 @@ class StructView(QGraphicsView):
             WorkingPlane.FREE: "Free (XY ground)",
         }
         plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
-        lbl_y = rect.top() + (self._view_cube.MARGIN * 2 + self._view_cube.HALF * 2 + 16) / scale
-        painter.drawText(QPointF(rect.right() - 215 / scale, lbl_y), plane_text)
+        lbl_y = vp_rect.top() + (self._view_cube.MARGIN * 2 + self._view_cube.HALF * 2 + 16) / scale
+        painter.drawText(QPointF(vp_rect.right() - 215 / scale, lbl_y), plane_text)
         z_font.setBold(False)
         painter.setFont(z_font)
 
@@ -1636,29 +1666,39 @@ class StructView(QGraphicsView):
             p.setWidthF(2.0)
             return p
 
-        font = painter.font()
-        font.setPointSize(8)
-        font.setBold(True)
-        painter.setFont(font)
-        ox, oy = isometric(0, 0, 0)
+        ax_font = painter.font()
+        ax_font.setPointSizeF(10.0 / scale)
+        ax_font.setBold(True)
+        painter.setFont(ax_font)
+        ox, oy   = isometric(0, 0, 0)
+        arm_m    = 40.0 / (PX_PER_M * scale)   # fixed 40 screen-px arm
 
-        xa, ya = isometric(2, 0, 0)
+        # Origin dot
+        painter.setBrush(QBrush(QColor(220, 220, 235, 230)))
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
+        painter.drawEllipse(QPointF(ox, oy), 4.0 / scale, 4.0 / scale)
+        painter.setBrush(QBrush())
+
+        # X arm — red
+        xa, ya_x = isometric(arm_m, 0, 0)
         painter.setPen(_axis3_pen(210, 60, 60))
-        painter.drawLine(QLineF(ox, oy, xa, ya))
-        painter.drawText(QPointF(xa + 4 / scale, ya + 4 / scale), "X")
+        painter.drawLine(QLineF(ox, oy, xa, ya_x))
+        painter.drawText(QPointF(xa + 5 / scale, ya_x + 5 / scale), "X")
 
-        ya_pos = isometric(0, 2, 0)
+        # Y arm — green
+        ya_x2, ya_y2 = isometric(0, arm_m, 0)
         painter.setPen(_axis3_pen(60, 190, 60))
-        painter.drawLine(QLineF(ox, oy, ya_pos[0], ya_pos[1]))
-        painter.drawText(QPointF(ya_pos[0] - 14 / scale, ya_pos[1] + 4 / scale), "Y")
+        painter.drawLine(QLineF(ox, oy, ya_x2, ya_y2))
+        painter.drawText(QPointF(ya_x2 - 14 / scale, ya_y2 + 5 / scale), "Y")
 
-        za_y = oy - 2 * PX_PER_M
+        # Z arm — blue (straight up in scene space)
+        za_sx, za_sy = isometric(0, 0, arm_m)
         painter.setPen(_axis3_pen(70, 110, 230))
-        painter.drawLine(QLineF(ox, oy, ox, za_y))
-        painter.drawText(QPointF(ox + 4 / scale, za_y - 4 / scale), "Z")
+        painter.drawLine(QLineF(ox, oy, za_sx, za_sy))
+        painter.drawText(QPointF(za_sx + 4 / scale, za_sy - 4 / scale), "Z")
 
-        font.setBold(False)
-        painter.setFont(font)
+        ax_font.setBold(False)
+        painter.setFont(ax_font)
 
     # ── zoom ──────────────────────────────────────────────────────────────────
 

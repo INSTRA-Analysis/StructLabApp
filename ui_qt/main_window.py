@@ -935,7 +935,7 @@ class MainWindow(QMainWindow):
         ]:
             btn = QPushButton(lbl)
             btn.setCheckable(True)
-            btn.setFixedSize(48, 28)
+            btn.setFixedSize(52 if lbl == "Free" else 48, 28)
             btn.setToolTip(tip)
             plane_group.addButton(btn)
             self._plane_btns[plane] = btn
@@ -953,7 +953,7 @@ class MainWindow(QMainWindow):
         self._plane_spin.setSingleStep(0.5)
         self._plane_spin.setDecimals(2)
         self._plane_spin.setSuffix(" m")
-        self._plane_spin.setFixedWidth(80)
+        self._plane_spin.setFixedWidth(100)
         self._plane_spin.setToolTip("Fixed coordinate on the locked axis")
         self._plane_spin.valueChanged.connect(lambda v: self._scene.set_plane_offset(v))
         self._view_tb.addWidget(self._plane_label)
