@@ -259,36 +259,42 @@ class SectionPickerDialog(QDialog):
         self._profile_combo.blockSignals(False)
         self._update_preview()
 
-    def _compute_section(self) -> tuple[float, float, float, float] | None:
-        """Return (A, I, W_pl, W_el) in SI units, or None on error."""
+    def _compute_section(self) -> tuple[float, float, float, float, float, float] | None:
+        """Return (A, I, W_pl, W_el, b, h) in SI units, or None on error.
+
+        b, h are cross-section width and height (m).  They are non-zero only
+        for parametric tabs where the dimensions are meaningful for the Design
+        tab (Rectangular, T-beam, Hollow RHS, Circular).
+        """
         tab = self._tabs.currentIndex()
         try:
-            if tab == 0:  # Steel
+            if tab == 0:  # Steel — profile dims not tracked individually
                 series = self._series_combo.currentText()
                 idx    = self._profile_combo.currentIndex()
                 if idx < 0:
                     return None
                 _, A, I, W_pl, W_el = STEEL_PROFILES[series][idx]
-                return A, I, W_pl, W_el
-            elif tab == 1:  # Rect
+                return A, I, W_pl, W_el, 0.0, 0.0
+            elif tab == 1:  # Rectangular
                 b = self._rect_b.value()
                 h = self._rect_h.value()
                 A, I = rectangular_section(b, h)
-                W_pl = b * h**2 / 4         # plastic modulus, solid rectangle
-                W_el = b * h**2 / 6         # elastic modulus, solid rectangle
-                return A, I, W_pl, W_el
-            elif tab == 2:  # T-beam
-                A, I = t_beam_section(
-                    self._tb_bf.value(), self._tb_hf.value(),
-                    self._tb_bw.value(), self._tb_hw.value(),
-                )
-                return A, I, 0.0, 0.0       # W_pl/W_el not computed for T-beam
-            elif tab == 3:  # Circ
+                W_pl = b * h**2 / 4
+                W_el = b * h**2 / 6
+                return A, I, W_pl, W_el, b, h
+            elif tab == 2:  # T-beam  (b = web width, h = total height)
+                bf = self._tb_bf.value()
+                hf = self._tb_hf.value()
+                bw = self._tb_bw.value()
+                hw = self._tb_hw.value()
+                A, I = t_beam_section(bf, hf, bw, hw)
+                return A, I, 0.0, 0.0, bw, hf + hw
+            elif tab == 3:  # Circular  (b = h = diameter)
                 d = self._circ_d.value()
                 A, I = circular_section(d)
-                W_pl = d**3 / 6                        # plastic modulus, solid circle
-                W_el = math.pi * d**3 / 32             # elastic modulus, solid circle
-                return A, I, W_pl, W_el
+                W_pl = d**3 / 6
+                W_el = math.pi * d**3 / 32
+                return A, I, W_pl, W_el, d, d
             elif tab == 4:  # Hollow RHS
                 b = self._rhs_b.value()
                 h = self._rhs_h.value()
@@ -297,8 +303,8 @@ class SectionPickerDialog(QDialog):
                 h_max = max(b, h)
                 b_max = min(b, h)
                 W_pl = (b_max * h_max**2 - (b_max - 2*t) * (h_max - 2*t)**2) / 4
-                W_el = 2 * I / h_max        # elastic modulus, hollow rectangle
-                return A, I, W_pl, W_el
+                W_el = 2 * I / h_max
+                return A, I, W_pl, W_el, b, h
         except Exception:
             return None
         return None
@@ -313,7 +319,7 @@ class SectionPickerDialog(QDialog):
             self._lbl_Wpl.setText("—")
             self._lbl_Wel.setText("—")
         else:
-            A, I, W_pl, W_el = result
+            A, I, W_pl, W_el, _b, _h = result
             self._lbl_A.setText(f"{A * 1e4:.2f} cm²")
             self._lbl_I.setText(f"{I * 1e8:.2f} cm⁴")
             self._lbl_Wpl.setText(f"{W_pl * 1e6:.1f} cm³" if W_pl > 0 else "—")
@@ -323,14 +329,18 @@ class SectionPickerDialog(QDialog):
         result = self._compute_section()
         if result is None:
             return
-        A, I, W_pl, W_el = result
+        A, I, W_pl, W_el, b, h = result
         E = self._E_spin.value() * 1e9
-        self._result = (E, A, I, W_pl, W_el)
+        self._result = (E, A, I, W_pl, W_el, b, h)
         self._save_last_state()
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────
 
-    def get_result(self) -> tuple[float, float, float, float, float] | None:
-        """Return (E, A, I, W_pl, W_el) in SI units, or None if cancelled."""
+    def get_result(self) -> tuple[float, float, float, float, float, float, float] | None:
+        """Return (E, A, I, W_pl, W_el, b, h) in SI units, or None if cancelled.
+
+        b and h are section width and height (m). They are non-zero for
+        Rectangular, T-beam, Circular, and Hollow RHS tabs.
+        """
         return self._result

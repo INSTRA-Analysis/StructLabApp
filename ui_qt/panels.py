@@ -593,7 +593,7 @@ class _MemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el = dlg.get_result()
+            E, A, I, W_pl, W_el, b, h = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
@@ -601,6 +601,10 @@ class _MemberForm(QWidget):
                 self._Wpl.setValue(W_pl * 1e6)
             if W_el > 0:
                 self._Wel.setValue(W_el * 1e6)
+            if b > 0:
+                self._b_sec.setValue(b * 1000)   # m → mm
+            if h > 0:
+                self._h_sec.setValue(h * 1000)   # m → mm
             self._apply()   # save immediately — no extra Apply click needed
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
@@ -1196,7 +1200,7 @@ class _MultiMemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el = dlg.get_result()
+            E, A, I, W_pl, W_el, b, h = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
@@ -1204,6 +1208,10 @@ class _MultiMemberForm(QWidget):
                 self._Wpl_m.setValue(W_pl * 1e6)
             if W_el > 0:
                 self._Wel_m.setValue(W_el * 1e6)
+            if b > 0:
+                self._b_sec_m.setValue(b * 1000)   # m → mm
+            if h > 0:
+                self._h_sec_m.setValue(h * 1000)   # m → mm
             self._apply()   # save immediately — no extra Apply click needed
 
     def _apply(self) -> None:
