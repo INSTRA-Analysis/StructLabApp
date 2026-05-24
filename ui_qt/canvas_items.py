@@ -257,6 +257,7 @@ class NodeItem(QGraphicsEllipseItem):
             SupportType.PIN:      ("#2980b9", "#1a5276"),
             SupportType.ROLLER:   ("#f39c12", "#9a7d0a"),
             SupportType.ROLLER_Y: ("#f39c12", "#9a7d0a"),
+            SupportType.ROLLER_Z: ("#00BCD4", "#00838F"),
             SupportType.SPRING:   ("#27ae60", "#1e8449"),
         }
         col, col_dk = _COL.get(stype, ("#cccccc", "#888888"))
@@ -387,6 +388,49 @@ class NodeItem(QGraphicsEllipseItem):
                     wheels.addEllipse(-s,      s + NODE_R + 3, 8, 8)
                     wheels.addEllipse(-s + 12, s + NODE_R + 3, 8, 8)
                     _path_item(wheels, col_dk, "#ffffff", pw=1.0)
+
+        elif stype == SupportType.ROLLER_Z:
+            # Free in Z (vertical); restrained in X and Y.
+            # Cone points along the horizontal bar direction; spreads + wheels along Z
+            # to visually communicate that the node can slide up/down.
+            if in_3d:
+                tip_x = bx * NODE_R
+                tip_y = by * NODE_R
+                base_ox = bx * (NODE_R + s)
+                base_oy = by * (NODE_R + s)
+                zdx, zdy = _proj_z_screen_dir()   # (0, -1) mostly — screen-up
+
+                z_shift = s * 0.32 * math.cos(el)
+                back = QPainterPath()
+                back.moveTo(tip_x,                          tip_y                          - z_shift)
+                back.lineTo(base_ox - zdx * s * 0.7,       base_oy - zdy * s * 0.7        - z_shift)
+                back.lineTo(base_ox + zdx * s * 0.7,       base_oy + zdy * s * 0.7        - z_shift)
+                back.closeSubpath()
+                _path_item(back, col_dk, col_dk, pw=0, z=0.85)
+
+                front = QPainterPath()
+                front.moveTo(tip_x, tip_y)
+                front.lineTo(base_ox - zdx * s * 0.7, base_oy - zdy * s * 0.7)
+                front.lineTo(base_ox + zdx * s * 0.7, base_oy + zdy * s * 0.7)
+                front.closeSubpath()
+                _path_item(front, col, "#ffffff", pw=1.5, z=1.0)
+
+                # Wheels arranged along Z (vertically) to show the node can slide in Z
+                wx = base_ox + bx * 4
+                wy = base_oy + by * 4
+                r2 = s - 4
+                wheels = QPainterPath()
+                wheels.addEllipse(wx - zdx * r2 - 4, wy - zdy * r2 - 4, 8, 8)
+                wheels.addEllipse(wx + zdx * r2 - 4, wy + zdy * r2 - 4, 8, 8)
+                _path_item(wheels, col_dk, "#ffffff", pw=1.0, z=1.1)
+            else:
+                # 2D fallback: downward triangle (ROLLER_Z has no clear 2D meaning)
+                tri = QPainterPath()
+                tri.moveTo(0, NODE_R)
+                tri.lineTo(-s, s + NODE_R)
+                tri.lineTo( s, s + NODE_R)
+                tri.closeSubpath()
+                _path_item(tri, col, "#ffffff", pw=1.5)
 
         elif stype == SupportType.SPRING:
             path = QPainterPath()
