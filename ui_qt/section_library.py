@@ -1,7 +1,7 @@
 """Section and material library for StructLab.
 
 Provides:
-  - MATERIALS dict: name → (E in Pa, label)
+  - MATERIALS dict: name → (E in Pa, density kg/m³, fy/fck Pa, mat_type, label)
   - STEEL_PROFILES dict: series → list of (name, A in m², I in m⁴, W_pl in m³, W_el in m³)
     W_pl is the plastic section modulus (strong axis) used for EC3 utilization checks.
     W_el is the elastic section modulus (strong axis) used for elastic fibre stress σ = M/W_el.
@@ -15,22 +15,30 @@ from __future__ import annotations
 import math
 
 # ── Materials ─────────────────────────────────────────────────────────────────
+# Each entry: (E in Pa, density in kg/m³, characteristic strength in Pa,
+#              mat_type ("steel"/"concrete"/"timber"), display label)
+# mat_type controls which design-check fields are shown in the Design tab.
 
-MATERIALS: dict[str, tuple[float, str]] = {
-    # name: (E in Pa, display label)   — ordered S275 first (most common EU structural steel)
-    "Steel S275":    (210e9, "E = 210 GPa  |  EN 1993-1-1"),
-    "Steel S235":    (210e9, "E = 210 GPa  |  EN 1993-1-1"),
-    "Steel S355":    (210e9, "E = 210 GPa  |  EN 1993-1-1"),
-    "Steel S460":    (210e9, "E = 210 GPa  |  EN 1993-1-1"),
-    "Concrete C20/25": ( 29e9, "Ecm = 29 GPa  |  EN 1992-1-1"),
-    "Concrete C25/30": ( 30e9, "Ecm = 30 GPa  |  EN 1992-1-1"),
-    "Concrete C30/37": ( 32e9, "Ecm = 32 GPa  |  EN 1992-1-1"),
-    "Concrete C35/45": ( 34e9, "Ecm = 34 GPa  |  EN 1992-1-1"),
-    "Concrete C40/50": ( 35e9, "Ecm = 35 GPa  |  EN 1992-1-1"),
-    "Timber GL24h":    ( 11.5e9, "E₀,mean = 11.5 GPa  |  EN 1995"),
-    "Timber GL28h":    ( 12.6e9, "E₀,mean = 12.6 GPa  |  EN 1995"),
-    "Aluminium":       ( 70e9,   "E = 70 GPa  |  EN 1999"),
-    "Custom":          (210e9,   "Enter E manually"),
+MATERIALS: dict[str, tuple[float, float, float, str, str]] = {
+    # Steel grades — EN 10025-2, fy for t ≤ 16 mm
+    "Steel S235":      (210e9, 7850, 235e6, "steel",    "E = 210 GPa  |  fy = 235 MPa  |  EN 1993"),
+    "Steel S275":      (210e9, 7850, 275e6, "steel",    "E = 210 GPa  |  fy = 275 MPa  |  EN 1993"),
+    "Steel S355":      (210e9, 7850, 355e6, "steel",    "E = 210 GPa  |  fy = 355 MPa  |  EN 1993"),
+    "Steel S420":      (210e9, 7850, 420e6, "steel",    "E = 210 GPa  |  fy = 420 MPa  |  EN 1993"),
+    "Steel S460":      (210e9, 7850, 460e6, "steel",    "E = 210 GPa  |  fy = 460 MPa  |  EN 1993"),
+    # Concrete grades — EN 1992-1-1, cylinder strength fck
+    "Concrete C20/25": ( 29e9, 2500,  20e6, "concrete", "Ecm = 29 GPa  |  fck = 20 MPa  |  EN 1992"),
+    "Concrete C25/30": ( 30e9, 2500,  25e6, "concrete", "Ecm = 30 GPa  |  fck = 25 MPa  |  EN 1992"),
+    "Concrete C30/37": ( 32e9, 2500,  30e6, "concrete", "Ecm = 32 GPa  |  fck = 30 MPa  |  EN 1992"),
+    "Concrete C35/45": ( 34e9, 2500,  35e6, "concrete", "Ecm = 34 GPa  |  fck = 35 MPa  |  EN 1992"),
+    "Concrete C40/50": ( 35e9, 2500,  40e6, "concrete", "Ecm = 35 GPa  |  fck = 40 MPa  |  EN 1992"),
+    # Glulam timber — EN 1995, bending strength fm,k
+    "Timber GL24h":    (11.5e9,  500,  24e6, "timber",  "E₀,mean = 11.5 GPa  |  fm,k = 24 MPa  |  EN 1995"),
+    "Timber GL28h":    (12.6e9,  500,  28e6, "timber",  "E₀,mean = 12.6 GPa  |  fm,k = 28 MPa  |  EN 1995"),
+    # Aluminium — EN 1999, 6082-T6 0.2% proof stress
+    "Aluminium":       ( 70e9,  2700, 260e6, "steel",   "E = 70 GPa  |  f0.2 = 260 MPa  |  EN 1999"),
+    # Custom — all values entered manually
+    "Custom":          (210e9,     0,   0.0, "steel",   "Enter E, density and strength manually"),
 }
 
 # ── Steel profiles ────────────────────────────────────────────────────────────

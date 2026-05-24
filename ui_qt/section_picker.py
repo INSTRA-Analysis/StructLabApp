@@ -1,11 +1,11 @@
 """Section picker dialog for StructLab.
 
 Opens from the member Properties panel. User selects:
-  - Material (sets E)
+  - Material (sets E, density, fy/fck/fm,k and mat_type)
   - Section type: Steel profile, Rectangular, T-beam, Circular, Hollow RHS
   - Profile / dimensions → A and I auto-computed
 
-On Accept, calls the callback with (E, A, I).
+On Accept, returns (E, A, I, W_pl, W_el, b, h, density, fy, mat_type).
 """
 
 from __future__ import annotations
@@ -37,7 +37,11 @@ def _dspin(val: float, lo: float, hi: float, step: float,
 
 
 class SectionPickerDialog(QDialog):
-    """Modal dialog to choose material + section; returns (E, A, I, W_pl, W_el) on accept."""
+    """Modal dialog to choose material + section.
+
+    Returns (E, A, I, W_pl, W_el, b, h, density, fy, mat_type) on accept.
+    mat_type is one of "steel", "concrete", "timber".
+    """
 
     # Session-level memory — survives between opens within one app run
     _last_state: dict = {}
@@ -46,8 +50,8 @@ class SectionPickerDialog(QDialog):
                  parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Section Library")
-        self.setMinimumWidth(420)
-        self._result: tuple[float, float, float, float, float] | None = None
+        self.setMinimumWidth(440)
+        self._result: tuple | None = None
 
         layout = QVBoxLayout(self)
 
@@ -57,12 +61,21 @@ class SectionPickerDialog(QDialog):
         self._mat_combo = QComboBox()
         self._mat_combo.addItems(list(MATERIALS.keys()))
         self._mat_label = QLabel()
-        self._mat_combo.currentTextChanged.connect(self._on_material_changed)
         mat_form.addRow("Material:", self._mat_combo)
         mat_form.addRow("",          self._mat_label)
 
         self._E_spin = _dspin(current_E / 1e9, 0.1, 1000, 1, 1)
         mat_form.addRow("E (GPa):", self._E_spin)
+
+        self._density_spin = _dspin(7850.0, 0.0, 30000.0, 50.0, 0)
+        mat_form.addRow("Density (kg/m³):", self._density_spin)
+
+        self._fy_row_lbl = QLabel("fy (MPa):")
+        self._fy_spin = _dspin(275.0, 0.0, 2000.0, 5.0, 0)
+        mat_form.addRow(self._fy_row_lbl, self._fy_spin)
+
+        # Connect after all spinboxes exist so _on_material_changed can access them
+        self._mat_combo.currentTextChanged.connect(self._on_material_changed)
         layout.addWidget(mat_box)
 
         # ── Section tabs ──────────────────────────────────────────────────────
@@ -176,7 +189,7 @@ class SectionPickerDialog(QDialog):
         st = SectionPickerDialog._last_state
         if not st:
             # First open: match material from E if possible, else default Steel S275
-            for name, (E, _) in MATERIALS.items():
+            for name, (E, _density, _fy, _mt, _lbl) in MATERIALS.items():
                 if abs(E - current_E) < 1e8:
                     idx = self._mat_combo.findText(name)
                     if idx >= 0:
@@ -186,9 +199,13 @@ class SectionPickerDialog(QDialog):
                 self._mat_combo.setCurrentIndex(0)
             return
 
-        # Restore material
+        # Restore material (fires _on_material_changed → auto-fills spinboxes)
         mat_idx = self._mat_combo.findText(st.get("material", "Steel S275"))
         self._mat_combo.setCurrentIndex(max(0, mat_idx))
+        # For Custom, restore manually-entered density and fy
+        if st.get("material") == "Custom":
+            self._density_spin.setValue(st.get("density", 0.0))
+            self._fy_spin.setValue(st.get("fy", 0.0))
 
         # Restore active tab
         tab = st.get("tab", 0)
@@ -227,6 +244,8 @@ class SectionPickerDialog(QDialog):
     def _save_last_state(self) -> None:
         SectionPickerDialog._last_state = {
             "material": self._mat_combo.currentText(),
+            "density":  self._density_spin.value(),
+            "fy":       self._fy_spin.value(),
             "tab":      self._tabs.currentIndex(),
             "series":   self._series_combo.currentText(),
             "profile":  self._profile_combo.currentText(),
@@ -244,12 +263,30 @@ class SectionPickerDialog(QDialog):
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
+    _FY_ROW_LABELS = {
+        "steel":    "fy (MPa):",
+        "concrete": "fck (MPa):",
+        "timber":   "fm,k (MPa):",
+    }
+
     def _on_material_changed(self, name: str) -> None:
-        E, label = MATERIALS[name]
+        E, density, fy, mat_type, label = MATERIALS[name]
         self._mat_label.setText(label)
-        if name != "Custom":
+        is_custom = (name == "Custom")
+        if not is_custom:
             self._E_spin.setValue(E / 1e9)
-        self._E_spin.setEnabled(name == "Custom")
+            if hasattr(self, "_density_spin"):
+                self._density_spin.setValue(density)
+            if hasattr(self, "_fy_spin"):
+                self._fy_spin.setValue(fy / 1e6)
+        for w in (self._E_spin,):
+            w.setEnabled(is_custom)
+        if hasattr(self, "_density_spin"):
+            self._density_spin.setEnabled(is_custom)
+        if hasattr(self, "_fy_spin"):
+            self._fy_spin.setEnabled(is_custom)
+        if hasattr(self, "_fy_row_lbl"):
+            self._fy_row_lbl.setText(self._FY_ROW_LABELS.get(mat_type, "f (MPa):"))
 
     def _on_series_changed(self, series: str) -> None:
         self._profile_combo.blockSignals(True)
@@ -330,17 +367,21 @@ class SectionPickerDialog(QDialog):
         if result is None:
             return
         A, I, W_pl, W_el, b, h = result
-        E = self._E_spin.value() * 1e9
-        self._result = (E, A, I, W_pl, W_el, b, h)
+        E        = self._E_spin.value() * 1e9
+        density  = self._density_spin.value()
+        fy       = self._fy_spin.value() * 1e6
+        mat_name = self._mat_combo.currentText()
+        _, _, _, mat_type, _ = MATERIALS[mat_name]
+        self._result = (E, A, I, W_pl, W_el, b, h, density, fy, mat_type)
         self._save_last_state()
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────
 
-    def get_result(self) -> tuple[float, float, float, float, float, float, float] | None:
-        """Return (E, A, I, W_pl, W_el, b, h) in SI units, or None if cancelled.
+    def get_result(self) -> tuple | None:
+        """Return (E, A, I, W_pl, W_el, b, h, density, fy, mat_type) or None if cancelled.
 
-        b and h are section width and height (m). They are non-zero for
-        Rectangular, T-beam, Circular, and Hollow RHS tabs.
+        All values in SI units (Pa, m², m⁴, m³, m, kg/m³).
+        mat_type is "steel", "concrete", or "timber".
         """
         return self._result

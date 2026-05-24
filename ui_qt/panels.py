@@ -259,6 +259,18 @@ def _load_summary(ml: MemberLoad) -> str:
     return "  ·  ".join(parts) if parts else "—"
 
 
+def _infer_mat_type(E: float) -> str:
+    """Guess material type from Young's modulus for initial Design-tab visibility."""
+    if 20e9 <= E <= 45e9:
+        return "concrete"
+    if 8e9 <= E <= 16e9:
+        return "timber"
+    return "steel"
+
+
+_MAT_TYPE_LABELS = {"steel": "fy (MPa):", "concrete": "fck (MPa):", "timber": "fk (MPa):"}
+
+
 # _MemberForm
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -322,26 +334,10 @@ class _MemberForm(QWidget):
         _pick_btn.clicked.connect(self._pick_section)
         sf.addRow("", _pick_btn)
 
-        self._mat_preset = QComboBox()
-        self._mat_preset.addItems(["Steel S275", "Concrete C25/30", "Timber C24", "Custom"])
-        self._mat_preset.currentIndexChanged.connect(self._on_material_preset_changed)
-        sf.addRow("Material:", self._mat_preset)
-
         self._density = _spin(member.density, 0, 20000, 50, 0)
         self._density.setToolTip("0 = no self-weight contribution from this member")
-        def _mark_custom() -> None:
-            self._mat_preset.setCurrentIndex(3)
-        self._density.valueChanged.connect(_mark_custom)
         sf.addRow("Density (kg/m³):", self._density)
 
-        self._mat_preset.blockSignals(True)
-        for _i, _d in enumerate([7850.0, 2500.0, 500.0]):
-            if abs(member.density - _d) < 1.0:
-                self._mat_preset.setCurrentIndex(_i)
-                break
-        else:
-            self._mat_preset.setCurrentIndex(3)
-        self._mat_preset.blockSignals(False)
         _sl.addWidget(sec_box)
 
         mesh_box = QGroupBox("Analysis mesh")
@@ -498,10 +494,9 @@ class _MemberForm(QWidget):
         tabs.addTab(_ds_tab, "Design")
 
         # Sync visibility + label with detected material
-        _MLBLS = ["fy (MPa):", "fck (MPa):", "fk (MPa):", "fy (MPa):"]
-        _cur   = self._mat_preset.currentIndex()
-        self._fy_lbl.setText(_MLBLS[min(_cur, 3)])
-        self._update_design_visibility(_cur)
+        _mat_type = _infer_mat_type(member.E)
+        self._fy_lbl.setText(_MAT_TYPE_LABELS.get(_mat_type, "fy (MPa):"))
+        self._update_design_visibility(_mat_type)
         self._update_mrd_display()
         self._update_melrd_display()
 
@@ -511,32 +506,12 @@ class _MemberForm(QWidget):
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
 
-    # (E_GPa, fk_MPa, density, fy_label)
-    _MAT_PRESETS = [
-        (210.0, 275.0, 7850.0, "fy (MPa):"),    # 0  Steel S275
-        ( 30.0,  25.0, 2500.0, "fck (MPa):"),   # 1  Concrete C25/30
-        ( 11.0,  24.0,  500.0, "fk (MPa):"),    # 2  Timber C24
-    ]
-
-    def _on_material_preset_changed(self, idx: int) -> None:
-        if idx >= len(self._MAT_PRESETS):
-            self._update_design_visibility(idx)
-            return  # Custom — leave field values as-is
-        E_gpa, fk_mpa, dens, lbl = self._MAT_PRESETS[idx]
-        self._E.setValue(E_gpa)
-        self._density.blockSignals(True)
-        self._density.setValue(dens)
-        self._density.blockSignals(False)
-        self._fy.setValue(fk_mpa)
-        self._fy_lbl.setText(lbl)
-        self._update_design_visibility(idx)
-
-    def _update_design_visibility(self, mat_idx: int) -> None:
-        """Show concrete section fields or steel/timber W_pl/W_el based on material."""
+    def _update_design_visibility(self, mat_type: str) -> None:
+        """Show concrete section fields or steel/timber W_pl/W_el based on material type."""
         if not hasattr(self, "_design_form"):
             return
         df = self._design_form
-        is_conc = (mat_idx == 1)
+        is_conc = (mat_type == "concrete")
         df.setRowVisible(self._Wpl,       not is_conc)
         df.setRowVisible(self._Wel,       not is_conc)
         df.setRowVisible(self._melrd_lbl, not is_conc)
@@ -587,10 +562,12 @@ class _MemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el, b, h = dlg.get_result()
+            E, A, I, W_pl, W_el, b, h, density, fy, mat_type = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
+            self._density.setValue(density)
+            self._fy.setValue(fy / 1e6)
             if W_pl > 0:
                 self._Wpl.setValue(W_pl * 1e6)
             if W_el > 0:
@@ -599,6 +576,8 @@ class _MemberForm(QWidget):
                 self._b_sec.setValue(b * 1000)   # m → mm
             if h > 0:
                 self._h_sec.setValue(h * 1000)   # m → mm
+            self._fy_lbl.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
+            self._update_design_visibility(mat_type)
             self._apply()   # save immediately — no extra Apply click needed
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
@@ -903,12 +882,6 @@ class _MixedFilterForm(QWidget):
 class _MultiMemberForm(QWidget):
     """Edit shared properties across multiple selected members at once."""
 
-    _MAT_PRESETS = [
-        (210.0, 275.0, 7850.0, "fy (MPa):"),
-        ( 30.0,  25.0, 2500.0, "fck (MPa):"),
-        ( 11.0,  24.0,  500.0, "fk (MPa):"),
-    ]
-
     def __init__(self, members: list, model_state,
                  on_apply) -> None:
         super().__init__()
@@ -960,10 +933,6 @@ class _MultiMemberForm(QWidget):
         pick_btn.clicked.connect(self._pick_section)
         sf.addRow("", pick_btn)
 
-        self._mat_preset = QComboBox()
-        self._mat_preset.addItems(["Steel S275", "Concrete C25/30", "Timber C24", "Custom"])
-        sf.addRow("Material:", self._mat_preset)
-
         self._density = _spin(first.density, 0, 20000, 50, 0)
         self._density.setToolTip("0 = no self-weight contribution from this member")
         sf.addRow("Density (kg/m³):", self._density)
@@ -973,19 +942,6 @@ class _MultiMemberForm(QWidget):
         self._nsub.setValue(first.n_sub)
         sf.addRow("Sub-elements:", self._nsub)
         sec_l.addWidget(sec_box)
-
-        # Wire material preset ↔ density
-        _preset_dens = [p[2] for p in self._MAT_PRESETS]
-        self._mat_preset.blockSignals(True)
-        for _i, _d in enumerate(_preset_dens):
-            if abs(first.density - _d) < 1.0:
-                self._mat_preset.setCurrentIndex(_i)
-                break
-        else:
-            self._mat_preset.setCurrentIndex(3)
-        self._mat_preset.blockSignals(False)
-        self._mat_preset.currentIndexChanged.connect(self._on_mat_preset_m)
-        self._density.valueChanged.connect(lambda: self._mat_preset.setCurrentIndex(3))
 
         # ── Loads tab ─────────────────────────────────────────────────────────
         load_w = QWidget()
@@ -1068,8 +1024,9 @@ class _MultiMemberForm(QWidget):
         for _w in (self._fy_m, self._Wel_m):
             _w.valueChanged.connect(self._update_melrd_display_m)
 
-        self._mat_preset.currentIndexChanged.connect(self._update_design_visibility_m)
-        self._update_design_visibility_m(self._mat_preset.currentIndex())
+        _mat_type_m = _infer_mat_type(first.E)
+        self._fy_lbl_m.setText(_MAT_TYPE_LABELS.get(_mat_type_m, "fy (MPa):"))
+        self._update_design_visibility_m(_mat_type_m)
         self._update_melrd_display_m()
 
         # ── Apply button ──────────────────────────────────────────────────────
@@ -1077,20 +1034,8 @@ class _MultiMemberForm(QWidget):
         btn.clicked.connect(self._apply)
         root.addWidget(btn)
 
-    def _on_mat_preset_m(self, idx: int) -> None:
-        if idx < len(self._MAT_PRESETS):
-            e, fk_, dens, lbl = self._MAT_PRESETS[idx]
-            for w in (self._E, self._density, self._fy_m):
-                w.blockSignals(True)
-            self._E.setValue(e)
-            self._density.setValue(dens)
-            self._fy_m.setValue(fk_)
-            self._fy_lbl_m.setText(lbl)
-            for w in (self._E, self._density, self._fy_m):
-                w.blockSignals(False)
-
-    def _update_design_visibility_m(self, idx: int = 0) -> None:
-        is_conc = (idx == 1)
+    def _update_design_visibility_m(self, mat_type: str = "steel") -> None:
+        is_conc = (mat_type == "concrete")
         df = self._design_form_m
         df.setRowVisible(self._Wpl_m,       not is_conc)
         df.setRowVisible(self._Wel_m,       not is_conc)
@@ -1188,10 +1133,12 @@ class _MultiMemberForm(QWidget):
             parent=self,
         )
         if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el, b, h = dlg.get_result()
+            E, A, I, W_pl, W_el, b, h, density, fy, mat_type = dlg.get_result()
             self._E.setValue(E / 1e9)
             self._A.setValue(A)
             self._I.setValue(I * 1e6)
+            self._density.setValue(density)
+            self._fy_m.setValue(fy / 1e6)
             if W_pl > 0:
                 self._Wpl_m.setValue(W_pl * 1e6)
             if W_el > 0:
@@ -1200,6 +1147,8 @@ class _MultiMemberForm(QWidget):
                 self._b_sec_m.setValue(b * 1000)   # m → mm
             if h > 0:
                 self._h_sec_m.setValue(h * 1000)   # m → mm
+            self._fy_lbl_m.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
+            self._update_design_visibility_m(mat_type)
             self._apply()   # save immediately — no extra Apply click needed
 
     def _apply(self) -> None:
