@@ -835,7 +835,7 @@ class _MixedFilterForm(QWidget):
                     continue
                 ids = {m.id for m in grp}
                 btn = QPushButton(f"{label}  ({len(grp)})")
-                btn.clicked.connect(lambda _ids=ids: on_filter(set(), _ids))
+                btn.clicked.connect(lambda checked, _ids=ids: on_filter(set(), _ids))
                 type_row.addWidget(btn)
 
             type_row.addStretch()
@@ -865,7 +865,7 @@ class _MixedFilterForm(QWidget):
                     btn_row = QHBoxLayout()
                     btn_p = QPushButton(f"{name}  ({len(grp)})")
                     btn_p.setToolTip(tip)
-                    btn_p.clicked.connect(lambda _ids=ids: on_filter(set(), _ids))
+                    btn_p.clicked.connect(lambda checked, _ids=ids: on_filter(set(), _ids))
                     btn_row.addWidget(btn_p)
                     btn_row.addStretch()
                     sec_layout.addLayout(btn_row)

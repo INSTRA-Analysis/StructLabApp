@@ -182,6 +182,7 @@ class MainWindow(QMainWindow):
 
         self._build_edit_menu(mb)
         self._build_selection_menu(mb)
+        self._build_tools_menu(mb)
         self._build_help_menu(mb)
 
         preset_menu = mb.addMenu("Presets")
@@ -373,6 +374,25 @@ class MainWindow(QMainWindow):
         help_menu.addAction("Keyboard Shortcuts…", self._on_keyboard_shortcuts)
         help_menu.addSeparator()
         help_menu.addAction("About StructLab…", self._on_about)
+
+    def _build_tools_menu(self, mb) -> None:
+        from PyQt6.QtGui import QKeySequence
+        tools_menu = mb.addMenu("Tools")
+        act = tools_menu.addAction("Python Console", self._open_console)
+        act.setShortcut(QKeySequence("Ctrl+`"))
+
+    def _open_console(self) -> None:
+        from ui_qt.console import ConsoleDialog
+        if not hasattr(self, "_console_dialog") or self._console_dialog is None:
+            self._console_dialog = ConsoleDialog(
+                self._scene.model_state, parent=self
+            )
+            self._console_dialog.finished.connect(
+                lambda: setattr(self, "_console_dialog", None)
+            )
+        self._console_dialog.show()
+        self._console_dialog.raise_()
+        self._console_dialog.activateWindow()
 
     def _on_keyboard_shortcuts(self) -> None:
         from ui_qt.dialogs import show_keyboard_shortcuts
