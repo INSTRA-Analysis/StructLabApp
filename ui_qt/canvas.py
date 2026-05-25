@@ -696,10 +696,15 @@ class StructCanvas(QGraphicsScene):
 
     # ── scene manipulation ────────────────────────────────────────────────────
 
+    def _current_view_scale(self) -> float:
+        views = self.views()
+        return views[0].transform().m11() if views else 1.0
+
     def _add_node_item(self, node: NodeData) -> NodeItem:
         item = NodeItem(node, self)
         self.addItem(item)
         self._node_items[node.id] = item
+        item.update_visual_scale(self._current_view_scale())
         if not getattr(self, "_suppress_changed", False):
             self.model_changed.emit()
         return item
@@ -712,6 +717,7 @@ class StructCanvas(QGraphicsScene):
         item = MemberItem(member, ni, nj, self)
         self.addItem(item)
         self._member_items[member.id] = item
+        item.update_visual_scale(self._current_view_scale())
         if not getattr(self, "_suppress_changed", False):
             self.model_changed.emit()
         return item
@@ -1705,10 +1711,23 @@ class StructView(QGraphicsView):
         pad = 80  # one grid unit (1 m) of breathing room on each side
         self.fitInView(rect.adjusted(-pad, -pad, pad, pad),
                        Qt.AspectRatioMode.KeepAspectRatio)
+        self._notify_zoom()
 
     def wheelEvent(self, event) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self.scale(factor, factor)
+        self._notify_zoom()
+
+    def _notify_zoom(self) -> None:
+        """Propagate current view scale to all node/member items for zoom-responsive sizing."""
+        sc = self.scene()
+        if sc is None:
+            return
+        view_scale = self.transform().m11()
+        for item in sc._node_items.values():
+            item.update_visual_scale(view_scale)
+        for item in sc._member_items.values():
+            item.update_visual_scale(view_scale)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
