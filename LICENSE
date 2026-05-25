@@ -1,71 +1,21 @@
-STRUCTLAB — PROPRIETARY SOFTWARE LICENSE
+MIT License
 
-Copyright (c) 2024–2026 Imed Mhamdi / INSTRA Analysis.
-All rights reserved.
+Copyright (c) 2024–2026 Imed Mhamdi / INSTRA Analysis
 
-This software, including all source code, compiled binaries, documentation,
-algorithms, and associated files (collectively, the "Software"), is the
-exclusive intellectual property of Imed Mhamdi / INSTRA Analysis.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-────────────────────────────────────────────────────────────────────────────
-PERMISSIONS
-────────────────────────────────────────────────────────────────────────────
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Authorized individuals who have received the Software directly from
-INSTRA Analysis are permitted to:
-
-  1. Install and run the compiled application on their own devices solely
-     for the purpose of evaluation, testing, or internal use as explicitly
-     agreed in writing with INSTRA Analysis.
-
-────────────────────────────────────────────────────────────────────────────
-RESTRICTIONS
-────────────────────────────────────────────────────────────────────────────
-
-Unless you have received prior written permission from INSTRA Analysis,
-you may NOT:
-
-  1. Copy, reproduce, or duplicate any part of the Software.
-  2. Modify, adapt, translate, or create derivative works based on the
-     Software or any part thereof.
-  3. Distribute, publish, sublicense, rent, lease, sell, or otherwise
-     transfer the Software or any rights in it to any third party.
-  4. Reverse engineer, decompile, disassemble, or otherwise attempt to
-     derive the source code from any compiled component of the Software.
-  5. Remove, obscure, or alter any copyright notice, trademark, or other
-     proprietary marking contained in or on the Software.
-  6. Use the Software, in whole or in part, as the basis for any competing
-     product or commercial offering.
-  7. Share access credentials, executable files, or model files with
-     parties not expressly authorised by INSTRA Analysis.
-
-────────────────────────────────────────────────────────────────────────────
-INTELLECTUAL PROPERTY
-────────────────────────────────────────────────────────────────────────────
-
-All engineering algorithms, numerical methods, data structures, and
-user-interface designs embodied in the Software remain the sole property
-of Imed Mhamdi / INSTRA Analysis regardless of the form in which they are
-accessed or executed.
-
-────────────────────────────────────────────────────────────────────────────
-NO WARRANTY
-────────────────────────────────────────────────────────────────────────────
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT. IN NO EVENT SHALL
-INSTRA ANALYSIS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
-ARISING FROM THE USE OR INABILITY TO USE THE SOFTWARE.
-
-────────────────────────────────────────────────────────────────────────────
-CONTACT
-────────────────────────────────────────────────────────────────────────────
-
-To request permissions beyond those granted above, or to report
-unauthorised use, contact:
-
-  Imed Mhamdi — INSTRA Analysis
-  imedm.imc@gmail.com
-
-────────────────────────────────────────────────────────────────────────────
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
