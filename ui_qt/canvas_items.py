@@ -197,6 +197,10 @@ class NodeItem(QGraphicsEllipseItem):
             movable = False  # 3D: disable drag, use properties panel for coordinates
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
 
+    def update_visual_scale(self, view_scale: float) -> None:
+        s = max(0.2, min(5.0, view_scale))
+        self.setScale(1.0 / s ** 0.3)
+
     def itemChange(self, change, value):
         ms = self._scene.model_state
         in_3d = ms.mode_3d or is_3d_model(ms.nodes)
@@ -753,6 +757,17 @@ class MemberItem(QGraphicsLineItem):
         pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
         pen_copy = QPen(pen)
         pen_copy.setWidth(3)
+        self._base_pen = pen_copy
+        self._apply_pen()
+
+    def update_visual_scale(self, view_scale: float) -> None:
+        if self._is_selected:
+            return
+        s = max(0.2, min(5.0, view_scale))
+        w = 3.0 / s ** 0.3
+        pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
+        pen_copy = QPen(pen)
+        pen_copy.setWidthF(w)
         self._base_pen = pen_copy
         self._apply_pen()
 
