@@ -20,6 +20,16 @@ docs/*.pdf
 Builds/
 BuildsStructLab*/
 
+# Dev-only folders (not part of the public release)
+benchmarks/
+Benchmark report/
+benchmark_report/
+docs/
+sdk_examples/
+ui/
+CLAUDE.md
+ROADMAP.md
+
 # Generated plot outputs from SDK examples / self-tests
 bmd_example.png
 continuous_beam_bmd.png
