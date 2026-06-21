@@ -440,6 +440,7 @@ class MainWindow(QMainWindow):
 
     def _set_working_plane(self, plane: WorkingPlane) -> None:
         """Switch the canvas working plane and sync toolbar button + label states."""
+        self._active_plane = plane
         self._scene.set_working_plane(plane)
         for p, btn in self._plane_btns.items():
             btn.setChecked(p == plane)
@@ -448,6 +449,19 @@ class MainWindow(QMainWindow):
         show_offset = plane != WorkingPlane.FREE
         self._plane_label.setVisible(show_offset)
         self._plane_spin.setVisible(show_offset)
+        if show_offset:
+            # Restore this plane's remembered offset without triggering a save-back
+            restored = self._plane_offsets.get(plane, 0.0)
+            self._plane_spin.blockSignals(True)
+            self._plane_spin.setValue(restored)
+            self._plane_spin.blockSignals(False)
+            self._scene.set_plane_offset(restored)
+
+    def _on_plane_offset_changed(self, value: float) -> None:
+        """Spin-box changed: push to scene and remember per plane."""
+        self._scene.set_plane_offset(value)
+        if self._active_plane != WorkingPlane.FREE:
+            self._plane_offsets[self._active_plane] = value
 
     def _on_set_view(self, azimuth: float, elevation: float,
                      plane: WorkingPlane | None = None) -> None:
@@ -933,16 +947,24 @@ class MainWindow(QMainWindow):
 
         self._plane_btns[WorkingPlane.XY].setChecked(True)  # default
 
+        # Per-plane offset memory — each plane remembers its own locked coordinate
+        self._plane_offsets: dict[WorkingPlane, float] = {
+            WorkingPlane.XY: 0.0,
+            WorkingPlane.XZ: 0.0,
+            WorkingPlane.YZ: 0.0,
+        }
+        self._active_plane: WorkingPlane = WorkingPlane.XY
+
         # Dynamic axis label + offset spinbox
         self._plane_label = QLabel(" Z =")
         self._plane_spin = QDoubleSpinBox()
-        self._plane_spin.setRange(-100.0, 100.0)
+        self._plane_spin.setRange(-1000.0, 1000.0)
         self._plane_spin.setSingleStep(0.5)
         self._plane_spin.setDecimals(2)
         self._plane_spin.setSuffix(" m")
         self._plane_spin.setFixedWidth(100)
-        self._plane_spin.setToolTip("Fixed coordinate on the locked axis")
-        self._plane_spin.valueChanged.connect(lambda v: self._scene.set_plane_offset(v))
+        self._plane_spin.setToolTip("Fixed coordinate on the locked axis (per-plane memory)")
+        self._plane_spin.valueChanged.connect(self._on_plane_offset_changed)
         self._view_tb.addWidget(self._plane_label)
         self._view_tb.addWidget(self._plane_spin)
 
