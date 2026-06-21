@@ -205,7 +205,17 @@ def _member_scene_geometry(
     el_by_id: dict,
 ) -> tuple | None:
     """Return (ix_s, iy_s, jx_s, jy_s, L_px, cos_s, sin_s, perp_x, perp_y, L_total)
-    for the UI member defined by ordered sub-element IDs, or None if degenerate."""
+    for the UI member defined by ordered sub-element IDs, or None if degenerate.
+
+    Perpendicular convention
+    -----------------------
+    For 3D members the perpendicular is derived from the element's structural
+    local y-axis (R3[:, 1]) projected through the current isometric view.  This
+    keeps the BMD/SFD fixed in the plane of bending regardless of the orbit
+    angle — a gravity-loaded horizontal beam always draws its diagram below itself.
+
+    For 2D members the classical screen-space perpendicular is used (unchanged).
+    """
     first_el = el_by_id.get(el_ids[0])
     last_el  = el_by_id.get(el_ids[-1])
     if first_el is None or last_el is None:
@@ -221,18 +231,47 @@ def _member_scene_geometry(
     if L_px < 1e-6:
         return None
 
-    cos_s  = dx_s / L_px
-    sin_s  = dy_s / L_px
-    perp_x = -sin_s
-    perp_y =  cos_s
-    # Normalise perp to a consistent half-plane so that reversed ni↔nj node
-    # ordering doesn't flip the BMD to the wrong side.  Convention: sagging
-    # (positive M) always draws toward the lower-right of the screen, i.e. the
-    # perp should satisfy perp_y > 0 (downward), or perp_x > 0 when the member
-    # is exactly vertical on screen (perp_y ≈ 0).
-    if perp_y < -1e-9 or (abs(perp_y) < 1e-9 and perp_x < 0):
-        perp_x = -perp_x
-        perp_y = -perp_y
+    cos_s = dx_s / L_px
+    sin_s = dy_s / L_px
+
+    if (model.is_3d or model.ui_is_3d) and hasattr(first_el, '_R3'):
+        # Project the element's structural local y-axis (3D world space) through
+        # the current isometric transform.  The result gives the on-screen
+        # direction that corresponds to +local_y in 3D.
+        # Positive M (sagging) draws in the −local_y direction (tensile at bottom
+        # of section), so we negate before projecting.
+        from ui_qt.projection import ISO_AZIMUTH, ISO_ELEVATION
+        y_hat = first_el._R3[:, 1]          # local y in global 3D coords
+        az = math.radians(ISO_AZIMUTH)
+        el = math.radians(ISO_ELEVATION)
+        # Project −y_hat (orthographic: no PX_PER_M needed — we just need direction)
+        x1   = -y_hat[0] * math.cos(az) - y_hat[1] * math.sin(az)
+        y1   =  y_hat[0] * math.sin(az) - y_hat[1] * math.cos(az)
+        py_x =  x1
+        py_y =  y1 * math.sin(el) + y_hat[2] * math.cos(el)
+        py_L =  math.hypot(py_x, py_y)
+
+        if py_L > 1e-6:
+            # Use the structurally correct perpendicular.
+            perp_x = py_x / py_L
+            perp_y = py_y / py_L
+        else:
+            # Degenerate: local y points directly into/out of screen (e.g. top
+            # view of a horizontal beam).  Fall back to screen-space perp.
+            perp_x = -sin_s
+            perp_y =  cos_s
+            if perp_y < -1e-9 or (abs(perp_y) < 1e-9 and perp_x < 0):
+                perp_x = -perp_x
+                perp_y = -perp_y
+    else:
+        # 2D model: standard screen-space perpendicular, normalised so that
+        # sagging (positive M) always draws toward the lower-right on screen.
+        perp_x = -sin_s
+        perp_y =  cos_s
+        if perp_y < -1e-9 or (abs(perp_y) < 1e-9 and perp_x < 0):
+            perp_x = -perp_x
+            perp_y = -perp_y
+
     L_total = sum(el_by_id[e].length for e in el_ids if e in el_by_id)
     return ix_s, iy_s, jx_s, jy_s, L_px, cos_s, sin_s, perp_x, perp_y, L_total
 
