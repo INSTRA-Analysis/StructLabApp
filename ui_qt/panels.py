@@ -457,7 +457,7 @@ class _MemberForm(QWidget):
         df.addRow("W_el (cm³):", self._Wel)
         self._melrd_lbl = QLabel("—")
         self._melrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
-        df.addRow("M_el.Rd (kN·m):", self._melrd_lbl)
+        df.addRow("M_Rd (kN·m):", self._melrd_lbl)
 
         # ── Concrete: section geometry (EN 1992-1-1 §6.1) ────────────────────
         self._b_sec = _spin(member.b_sec * 1000, 0, 5000, 10, 0)
@@ -486,8 +486,8 @@ class _MemberForm(QWidget):
                    self._As_t, self._fyk):
             _w.valueChanged.connect(self._update_mrd_display)
 
-        # Connect steel/timber fields to live M_el.Rd display
-        for _w in (self._fy, self._Wel):
+        # Connect steel/timber fields to live M_Rd display (plastic preferred)
+        for _w in (self._fy, self._Wpl, self._Wel):
             _w.valueChanged.connect(self._update_melrd_display)
 
         _dl2.addWidget(design_box)
@@ -546,12 +546,26 @@ class _MemberForm(QWidget):
             self._mrd_lbl.setText("—")
 
     def _update_melrd_display(self, _val: float = 0.0) -> None:
-        """Live M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, elastic, γM0 = 1.0)."""
+        """Live M_Rd for steel / timber — plastic (W_pl) preferred, elastic (W_el) fallback.
+
+        EC3 §6.2.5: M_c,Rd = W_pl × fy / γ_M0  (Class 1/2)
+                              W_el × fy / γ_M0  (Class 3)
+        γ_M0 = 1.0 per EN 1993-1-1 §6.1(1).
+        """
         if not hasattr(self, "_melrd_lbl"):
             return
-        fy  = self._fy.value() * 1e6
-        Wel = self._Wel.value() * 1e-6
-        self._melrd_lbl.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
+        fy      = self._fy.value()  * 1e6    # Pa
+        Wpl     = self._Wpl.value() * 1e-6   # m³
+        Wel     = self._Wel.value() * 1e-6   # m³
+        gamma_M0 = 1.0
+        if Wpl > 0 and fy > 0:
+            mrd = Wpl * fy / gamma_M0
+            self._melrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m  (pl)")
+        elif Wel > 0 and fy > 0:
+            mrd = Wel * fy / gamma_M0
+            self._melrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m  (el)")
+        else:
+            self._melrd_lbl.setText("—")
 
     def _pick_section(self) -> None:
         from ui_qt.section_picker import SectionPickerDialog
@@ -994,7 +1008,7 @@ class _MultiMemberForm(QWidget):
         self._design_form_m.addRow("W_el (cm³):", self._Wel_m)
         self._melrd_lbl_m = QLabel("—")
         self._melrd_lbl_m.setStyleSheet("color:#00cccc; font-weight:bold;")
-        self._design_form_m.addRow("M_el.Rd (kN·m):", self._melrd_lbl_m)
+        self._design_form_m.addRow("M_Rd (kN·m):", self._melrd_lbl_m)
 
         self._b_sec_m = _spin(first.b_sec * 1000,       0, 5000,   10, 0)
         self._h_sec_m = _spin(first.h_sec * 1000,       0, 5000,   10, 0)
@@ -1021,7 +1035,7 @@ class _MultiMemberForm(QWidget):
                    self._cover_m, self._As_t_m, self._fyk_m):
             _w.valueChanged.connect(self._update_mrd_display_m)
 
-        for _w in (self._fy_m, self._Wel_m):
+        for _w in (self._fy_m, self._Wpl_m, self._Wel_m):
             _w.valueChanged.connect(self._update_melrd_display_m)
 
         _mat_type_m = _infer_mat_type(first.E)
@@ -1068,12 +1082,21 @@ class _MultiMemberForm(QWidget):
             self._mrd_lbl_m.setText("—")
 
     def _update_melrd_display_m(self, _val: float = 0.0) -> None:
-        """Live M_el.Rd for steel / timber (EN 1993-1-1 §6.2.5, elastic, γM0 = 1.0)."""
+        """Live M_Rd for steel / timber — plastic (W_pl) preferred, elastic (W_el) fallback."""
         if not hasattr(self, "_melrd_lbl_m"):
             return
-        fy  = self._fy_m.value() * 1e6
-        Wel = self._Wel_m.value() * 1e-6
-        self._melrd_lbl_m.setText(f"{Wel * fy / 1e3:.2f} kN·m" if Wel > 0 and fy > 0 else "—")
+        fy      = self._fy_m.value()  * 1e6
+        Wpl     = self._Wpl_m.value() * 1e-6
+        Wel     = self._Wel_m.value() * 1e-6
+        gamma_M0 = 1.0
+        if Wpl > 0 and fy > 0:
+            mrd = Wpl * fy / gamma_M0
+            self._melrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m  (pl)")
+        elif Wel > 0 and fy > 0:
+            mrd = Wel * fy / gamma_M0
+            self._melrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m  (el)")
+        else:
+            self._melrd_lbl_m.setText("—")
 
     def _dl_populate_m(self) -> None:
         self._dl_table_m.setRowCount(0)
@@ -1791,6 +1814,7 @@ class ResultsPanel(QWidget):
                 mat = "steel"   # steel / custom / zero density all use steel formula
 
             if mat == "concrete":
+                # EC2 §6.1 — rectangular stress block
                 b     = md.b_sec if md else 0.0
                 d     = md.d_eff if md else 0.0
                 As    = md.As_tension if md else 0.0
@@ -1807,10 +1831,23 @@ class ResultsPanel(QWidget):
                     M_Rd = 0.0
                     eta  = None
                     status = "Set b/d/As"
-            else:                         # steel / timber / custom — elastic check
-                M_Rd = fk * W_el
+            else:
+                # EC3 §6.2.5 — plastic (Class 1/2) preferred, elastic (Class 3) fallback
+                # γ_M0 = 1.0 per EN 1993-1-1 §6.1(1)
+                gamma_M0 = 1.0
+                if W_pl > 0:
+                    M_Rd = fk * W_pl / gamma_M0   # plastic moment resistance
+                elif W_el > 0:
+                    M_Rd = fk * W_el / gamma_M0   # elastic moment resistance
+                else:
+                    M_Rd = 0.0
                 eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
-                status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else "N/A — set W_el"
+                if eta is not None:
+                    status = "PASS ✓" if eta <= 100.0 else "FAIL ✗"
+                elif W_pl == 0 and W_el == 0:
+                    status = "N/A — set W_pl"
+                else:
+                    status = "N/A"
 
             self._set_row(self._design_table, row, [
                 str(mid),
