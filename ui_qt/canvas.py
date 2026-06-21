@@ -10,7 +10,7 @@ from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsView,
-    QGraphicsLineItem, QMenu,
+    QGraphicsLineItem, QMenu, QInputDialog,
 )
 from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal, QRect, QPoint
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient, QPixmap, QPainterPath
@@ -70,9 +70,10 @@ class WorkingPlane(Enum):
 class StructCanvas(QGraphicsScene):
     """Interactive 2-D canvas for building structural models."""
 
-    model_changed = pyqtSignal()              # emitted after any structural change
-    view_changed  = pyqtSignal()              # emitted when 3D projection angles change (orbit end)
-    view_preset   = pyqtSignal(float, float)  # emitted when user snaps to a named view (az, el)
+    model_changed        = pyqtSignal()              # emitted after any structural change
+    view_changed         = pyqtSignal()              # emitted when 3D projection angles change (orbit end)
+    view_preset          = pyqtSignal(float, float)  # emitted when user snaps to a named view (az, el)
+    plane_offset_changed = pyqtSignal(float)         # emitted whenever the working-plane offset changes
     _hide_welcome: bool = False    # once user takes action, never show welcome
 
     def __init__(self, parent=None) -> None:
@@ -130,6 +131,7 @@ class StructCanvas(QGraphicsScene):
         """Set the locked coordinate on the active working plane axis."""
         self._plane_offset = offset
         self.update()
+        self.plane_offset_changed.emit(offset)
 
     def set_z_level(self, z: float) -> None:
         """Compatibility alias for set_plane_offset."""
@@ -1782,6 +1784,33 @@ class StructView(QGraphicsView):
                 self.scene().view_changed.emit()
                 self._view_cube.hovered = None
                 self.viewport().update()
+                event.accept()
+                return
+
+        # ── Plane-label click → quick-set dialog for the working-plane offset ───
+        if event.button() == Qt.MouseButton.LeftButton:
+            vp   = self.viewport()
+            w, h = vp.width(), vp.height()
+            vc   = self._view_cube
+            # The label is drawn at (w-215, lbl_y) where lbl_y = MARGIN*2+HALF*2+16
+            lbl_y   = vc.MARGIN * 2 + vc.HALF * 2 + 16
+            lbl_hit = QRect(w - 220, lbl_y - 16, 165, 22)
+            scene   = self.scene()
+            if (lbl_hit.contains(event.pos())
+                    and scene._working_plane is not WorkingPlane.FREE):
+                axis_name = {
+                    WorkingPlane.XY: "Z",
+                    WorkingPlane.XZ: "Y",
+                    WorkingPlane.YZ: "X",
+                }[scene._working_plane]
+                val, ok = QInputDialog.getDouble(
+                    self, "Set plane offset",
+                    f"{axis_name} coordinate (m):",
+                    scene._plane_offset,
+                    -1000.0, 1000.0, 3,
+                )
+                if ok:
+                    scene.set_plane_offset(val)
                 event.accept()
                 return
 
