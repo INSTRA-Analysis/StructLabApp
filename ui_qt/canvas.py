@@ -298,6 +298,18 @@ class StructCanvas(QGraphicsScene):
             el = _proj.ISO_ELEVATION
             ppm = PX_PER_M
             sx, sy = snapped.x(), snapped.y()
+            _az_r = math.radians(az)
+            _el_r = math.radians(el)
+            # Guard: skip placement when the view is edge-on to the working plane.
+            # inverse_isometric* returns (0,0) for degenerate views, which would
+            # silently plant nodes at the origin.
+            _DEGEN = 0.09  # sin/cos threshold ≈ 5°
+            if plane == WorkingPlane.XZ and abs(math.cos(_az_r)) < _DEGEN:
+                return   # right/left view is edge-on to XZ plane
+            if plane == WorkingPlane.YZ and abs(math.sin(_az_r)) < _DEGEN:
+                return   # front/back view is edge-on to YZ plane
+            if plane in (WorkingPlane.XY, WorkingPlane.FREE) and abs(math.sin(_el_r)) < _DEGEN:
+                return   # horizontal view is edge-on to XY plane
             if plane == WorkingPlane.XZ:
                 x, z = inverse_isometric_xz(sx, sy, offset, ppm, az, el)
                 mx = round(x      / 0.25) * 0.25
@@ -1120,7 +1132,7 @@ class StructCanvas(QGraphicsScene):
         new_member_ids: list[int] = []
 
         for nd in nodes:
-            new_node = self.model_state.add_node(nd["x"] + offset_x, nd["y"])
+            new_node = self.model_state.add_node(nd["x"] + offset_x, nd["y"], nd.get("z", 0.0))
             self._add_node_item(new_node)
             id_map[nd["id"]] = new_node.id
             new_node_ids.append(new_node.id)
