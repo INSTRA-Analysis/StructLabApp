@@ -683,7 +683,7 @@ class MainWindow(QMainWindow):
 
         self._mode_buttons[CanvasMode.SELECT].setChecked(True)
         self._scene.set_mode(CanvasMode.SELECT)
-        self._view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
 
         # ── member type selector ───────────────────────────────────────────────
         tb.addWidget(QLabel(" Type:"))
@@ -1108,10 +1108,7 @@ class MainWindow(QMainWindow):
 
     def _set_mode(self, mode: CanvasMode) -> None:
         self._scene.set_mode(mode)
-        self._view.setDragMode(
-            QGraphicsView.DragMode.RubberBandDrag if mode == CanvasMode.SELECT
-            else QGraphicsView.DragMode.NoDrag
-        )
+        self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
         self._sb.showMessage(f"Mode: {mode.name}")
 
     def _on_member_type_changed(self) -> None:

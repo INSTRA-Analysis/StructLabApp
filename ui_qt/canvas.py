@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsView,
     QGraphicsLineItem, QMenu,
 )
-from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient, QPixmap
+from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal, QRect, QPoint
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient, QPixmap, QPainterPath
 from PyQt6.QtCore import QRectF as _QRectF
 
 from ui_qt.model_state import (
@@ -1298,6 +1298,8 @@ class StructView(QGraphicsView):
         self._orbit_center: tuple[float,float,float] | None = None  # world pivot
         self._view_cube = ViewCube()
         self.setMouseTracking(True)  # needed for hover updates
+        self._rb_start: QPoint | None = None   # rubber-band drag start (viewport px)
+        self._rb_end:   QPoint | None = None   # rubber-band drag current end
 
         # Branding watermark — load logo once and cache it
         from pathlib import Path
@@ -1341,60 +1343,95 @@ class StructView(QGraphicsView):
         if self.scene()._util_colour_active:
             self._draw_util_legend(painter, rect)
 
-        self._draw_branding(painter, rect)
+    def drawForeground(self, painter: QPainter, rect) -> None:
+        """Viewport-pinned overlays drawn above all scene content.
 
-    def _draw_branding(self, painter: QPainter, rect) -> None:
-        """Logo + product name badge pinned to the bottom-right of the viewport."""
-        scale  = self.transform().m11()
-        margin = 10 / scale
-        pad_x  = 7  / scale
-        pad_y  = 5  / scale
-        logo_h = 26 / scale
-        line_h = 13 / scale
-        box_h  = logo_h + 2 * pad_y
-        box_w  = 148 / scale
-
-        x0 = rect.right()  - margin - box_w
-        y0 = rect.bottom() - margin - box_h
+        Uses painter.resetTransform() so everything is in stable viewport pixels —
+        no floating-point drift from scene coordinate mapping, and no interaction
+        with the zoom level.  Draw order: rubber band → ViewCube → logo, so the
+        cube and logo always appear on top of the selection rectangle.
+        """
+        scene = self.scene()
+        if not scene._hide_welcome and not scene.model_state.nodes:
+            return  # nothing to overlay in the empty welcome state
 
         painter.save()
+        painter.resetTransform()          # switch to viewport pixel coordinates
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        vp = self.viewport()
+        w, h = vp.width(), vp.height()
 
-        # Semi-transparent dark pill
+        # ── 1. Custom rubber-band selection rectangle ─────────────────────────
+        if self._rb_start is not None and self._rb_end is not None:
+            rb = QRect(self._rb_start, self._rb_end).normalized()
+            if rb.width() > 2 or rb.height() > 2:
+                rb_pen = QPen(QColor(0, 180, 220, 200))
+                rb_pen.setCosmetic(True)
+                painter.setPen(rb_pen)
+                painter.setBrush(QBrush(QColor(0, 140, 180, 35)))
+                painter.drawRect(rb)
+
+        # ── 2. ViewCube (top-right corner) ───────────────────────────────────
+        vc = self._view_cube
+        vc_cx = float(w - (vc.MARGIN + vc.HALF))
+        vc_cy = float(vc.MARGIN + vc.HALF)
+        vc.paint(painter, vc_cx, vc_cy, 1.0)
+
+        # ── 3. Working plane label (just below the ViewCube) ─────────────────
+        plane  = scene._working_plane
+        offset = scene._plane_offset
+        lbl_pen = QPen(QColor("#00cccc"))
+        lbl_pen.setCosmetic(True)
+        painter.setPen(lbl_pen)
+        z_font = painter.font()
+        z_font.setPointSize(8)
+        z_font.setBold(True)
+        painter.setFont(z_font)
+        _axis_map = {
+            WorkingPlane.XY:   f"Z = {offset:.2f} m",
+            WorkingPlane.XZ:   f"Y = {offset:.2f} m",
+            WorkingPlane.YZ:   f"X = {offset:.2f} m",
+            WorkingPlane.FREE: "Free (XY ground)",
+        }
+        plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
+        lbl_y = float(vc.MARGIN * 2 + vc.HALF * 2 + 16)
+        painter.drawText(QPointF(w - 215.0, lbl_y), plane_text)
+        z_font.setBold(False)
+        painter.setFont(z_font)
+
+        # ── 4. Branding badge (bottom-right corner) ───────────────────────────
+        margin = 10.0;  pad_x = 7.0;  pad_y = 5.0
+        logo_h = 26.0;  line_h = 13.0
+        box_h  = logo_h + 2 * pad_y
+        box_w  = 148.0
+        x0 = w - margin - box_w
+        y0 = h - margin - box_h
+
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor(18, 18, 22, 160)))
-        painter.drawRoundedRect(_QRectF(x0, y0, box_w, box_h), 4 / scale, 4 / scale)
+        painter.drawRoundedRect(_QRectF(x0, y0, box_w, box_h), 4.0, 4.0)
 
-        # Logo image
         text_x = x0 + pad_x
         if self._branding_pix and not self._branding_pix.isNull():
             asp    = self._branding_pix.width() / max(self._branding_pix.height(), 1)
             logo_w = asp * logo_h
-            lx     = x0 + pad_x
-            ly     = y0 + pad_y
             painter.drawPixmap(
-                _QRectF(lx, ly, logo_w, logo_h),
+                _QRectF(x0 + pad_x, y0 + pad_y, logo_w, logo_h),
                 self._branding_pix,
                 _QRectF(self._branding_pix.rect()),
             )
-            text_x = lx + logo_w + pad_x
+            text_x = x0 + pad_x + logo_w + pad_x
 
-        # Product name
         font = painter.font()
-        font.setPointSizeF(8.0 / scale)
-        font.setBold(True)
+        font.setPointSize(8);  font.setBold(True)
         painter.setFont(font)
-        name_pen = QPen(QColor(215, 215, 215))
-        name_pen.setCosmetic(True)
+        name_pen = QPen(QColor(215, 215, 215));  name_pen.setCosmetic(True)
         painter.setPen(name_pen)
         painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 0.88), "StructLabPro")
 
-        # Version
-        font.setPointSizeF(7.0 / scale)
-        font.setBold(False)
+        font.setPointSize(7);  font.setBold(False)
         painter.setFont(font)
-        ver_pen = QPen(QColor(130, 130, 130))
-        ver_pen.setCosmetic(True)
+        ver_pen = QPen(QColor(130, 130, 130));  ver_pen.setCosmetic(True)
         painter.setPen(ver_pen)
         painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.1")
 
@@ -1627,31 +1664,6 @@ class StructView(QGraphicsView):
                 painter.setPen(_pen(y_val, pl_minor, pl_major))
                 painter.drawLine(QLineF(*isometric(offset, y_val, z0), *isometric(offset, y_val, extent_m)))
 
-        # ── ViewCube (top-right corner) ──────────────────────────────────────────
-        scale = self.transform().m11()
-        vp_rect = self.mapToScene(self.viewport().rect()).boundingRect()
-        vc_cx, vc_cy = self._view_cube.scene_center(vp_rect, scale)
-        self._view_cube.paint(painter, vc_cx, vc_cy, scale)
-
-        # ── Working plane label (just below the ViewCube) ────────────────────────
-        lbl_pen = QPen(QColor("#00cccc")); lbl_pen.setCosmetic(True)
-        painter.setPen(lbl_pen)
-        z_font = painter.font()
-        z_font.setPointSizeF(8.0 / scale)
-        z_font.setBold(True)
-        painter.setFont(z_font)
-        _axis_map = {
-            WorkingPlane.XY:   f"Z = {offset:.2f} m",
-            WorkingPlane.XZ:   f"Y = {offset:.2f} m",
-            WorkingPlane.YZ:   f"X = {offset:.2f} m",
-            WorkingPlane.FREE: "Free (XY ground)",
-        }
-        plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
-        lbl_y = vp_rect.top() + (self._view_cube.MARGIN * 2 + self._view_cube.HALF * 2 + 16) / scale
-        painter.drawText(QPointF(vp_rect.right() - 215 / scale, lbl_y), plane_text)
-        z_font.setBold(False)
-        painter.setFont(z_font)
-
         # ── World-origin axis indicators (X=red, Y=green, Z=blue) ──────────────
         def _axis3_pen(r: int, g: int, b: int) -> QPen:
             p = QPen(QColor(r, g, b, 220))
@@ -1756,14 +1768,13 @@ class StructView(QGraphicsView):
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
-        # ── ViewCube click (3D mode only) ─────────────────────────────────────
+        # ── ViewCube click — hit-test in stable viewport pixels ───────────────
         if event.button() == Qt.MouseButton.LeftButton:
-            scale = self.transform().m11()
-            vr    = self.mapToScene(self.viewport().rect()).boundingRect()
-            vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
-            sp    = self.mapToScene(event.pos())
+            vc = self._view_cube
+            vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
+            vc_cy = float(vc.MARGIN + vc.HALF)
             result = self._view_cube.hit_test(
-                sp, vc_cx, vc_cy, scale, _proj.ISO_AZIMUTH
+                QPointF(event.pos()), vc_cx, vc_cy, 1.0, _proj.ISO_AZIMUTH
             )
             if result is not None:
                 az, el = result
@@ -1773,6 +1784,16 @@ class StructView(QGraphicsView):
                 self.viewport().update()
                 event.accept()
                 return
+
+        # ── Start custom rubber-band on empty-space left-click in SELECT mode ──
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self.scene()._mode == CanvasMode.SELECT):
+            item_under = self.scene().itemAt(
+                self.mapToScene(event.pos()), self.viewportTransform()
+            )
+            if item_under is None:
+                self._rb_start = event.pos()
+                self._rb_end   = None
 
         # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -1824,12 +1845,20 @@ class StructView(QGraphicsView):
             event.accept()
             return
 
-        # ── ViewCube hover highlight ──────────────────────────────────────────
-        scale = self.transform().m11()
-        vr    = self.mapToScene(self.viewport().rect()).boundingRect()
-        vc_cx, vc_cy = self._view_cube.scene_center(vr, scale)
-        sp = self.mapToScene(event.pos())
-        if self._view_cube.update_hover(sp, vc_cx, vc_cy, scale):
+        # ── Custom rubber-band update ─────────────────────────────────────────
+        if (self._rb_start is not None
+                and event.buttons() & Qt.MouseButton.LeftButton):
+            delta = event.pos() - self._rb_start
+            if abs(delta.x()) > 3 or abs(delta.y()) > 3:
+                self._rb_end = event.pos()
+                self.viewport().update()
+                return  # suppress item hover while dragging
+
+        # ── ViewCube hover highlight — in stable viewport pixels ──────────────
+        vc = self._view_cube
+        vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
+        vc_cy = float(vc.MARGIN + vc.HALF)
+        if self._view_cube.update_hover(QPointF(event.pos()), vc_cx, vc_cy, 1.0):
             self.viewport().update()
 
         super().mouseMoveEvent(event)
@@ -1844,6 +1873,31 @@ class StructView(QGraphicsView):
                 self.scene().view_changed.emit()
             event.accept()
             return
+
+        # ── Finalise rubber-band selection ────────────────────────────────────
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._rb_start is not None and self._rb_end is not None:
+                rb = QRect(self._rb_start, self._rb_end).normalized()
+                if rb.width() > 3 or rb.height() > 3:
+                    path = QPainterPath()
+                    path.addPolygon(self.mapToScene(rb))
+                    path.closeSubpath()
+                    op = (Qt.ItemSelectionOperation.AddToSelection
+                          if event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                          else Qt.ItemSelectionOperation.ReplaceSelection)
+                    self.scene().setSelectionArea(
+                        path, op,
+                        Qt.ItemSelectionMode.IntersectsItemShape,
+                        self.viewportTransform(),
+                    )
+                    self._rb_start = None
+                    self._rb_end   = None
+                    self.viewport().update()
+                    event.accept()
+                    return
+            self._rb_start = None
+            self._rb_end   = None
+
         super().mouseReleaseEvent(event)
 
     # ── right-click context menu ──────────────────────────────────────────────
