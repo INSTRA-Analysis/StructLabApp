@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
         self._scene.model_changed.connect(self._on_model_changed)
         self._scene.view_changed.connect(self._redraw_overlays)
         self._scene.view_preset.connect(self._on_view_preset)
+        self._scene.plane_offset_changed.connect(self._on_scene_plane_offset_changed)
 
     # ── menu bar ─────────────────────────────────────────────────────────────
 
@@ -458,8 +459,14 @@ class MainWindow(QMainWindow):
             self._scene.set_plane_offset(restored)
 
     def _on_plane_offset_changed(self, value: float) -> None:
-        """Spin-box changed: push to scene and remember per plane."""
+        """Spin-box changed: push to scene (signal chain syncs per-plane memory)."""
         self._scene.set_plane_offset(value)
+
+    def _on_scene_plane_offset_changed(self, value: float) -> None:
+        """Scene offset changed from any source: sync spinbox and per-plane memory."""
+        self._plane_spin.blockSignals(True)
+        self._plane_spin.setValue(value)
+        self._plane_spin.blockSignals(False)
         if self._active_plane != WorkingPlane.FREE:
             self._plane_offsets[self._active_plane] = value
 
