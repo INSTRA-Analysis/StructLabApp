@@ -35,6 +35,12 @@ bmd_example.png
 continuous_beam_bmd.png
 portal_frame_bmd.png
 
+# Presentation assets (not part of the project)
+make_presentation.py
+StructLabPro_Presentation.pptx
+BENCHMARK_REPORT.md
+BENCHMARK_REPORT.pdf
+
 # Generated benchmark report outputs
 Benchmark report/benchmarking.txt
 Benchmark report/benchmarking_report.pdf
