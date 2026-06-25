@@ -372,6 +372,7 @@ class MemberData:
     node_i: int
     node_j: int
     element_type: ElementType = ElementType.BEAM
+    group: str = ""    # free descriptive label (e.g. Leg/Diagonal) — display/reporting only
     E: float = DEFAULT_E
     A: float = DEFAULT_A
     I: float = DEFAULT_I        # I_z — strong-axis moment of inertia (m⁴)
@@ -540,7 +541,7 @@ class ModelState:
             ],
             "members": [
                 {"id": m.id, "ni": m.node_i, "nj": m.node_j,
-                 "type": m.element_type.name,
+                 "type": m.element_type.name, "group": m.group,
                  "E": m.E, "A": m.A, "I": m.I,
                  "I_y": m.I_y, "J": m.J, "beta_angle": m.beta_angle,
                  "n_sub": m.n_sub, "density": m.density,
@@ -592,6 +593,7 @@ class ModelState:
             s.members.append(MemberData(
                 id=md["id"], node_i=md["ni"], node_j=md["nj"],
                 element_type=ElementType[md["type"]],
+                group=md.get("group", ""),
                 E=md.get("E", 210e9), A=md.get("A", 0.03),
                 I=md.get("I", 300e-6), n_sub=md.get("n_sub", 20),
                 I_y=md.get("I_y", None), J=md.get("J", 0.0),
