@@ -25,7 +25,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from PyQt6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem
+from PyQt6.QtWidgets import (
+    QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsEllipseItem,
+)
 from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont
 
@@ -549,8 +551,11 @@ def draw_sfd(
         if len(t_arr) == 0:
             continue
 
+        # Plot positive shear ABOVE the baseline (standard SFD): a downward load
+        # steps the diagram down, an upward reaction steps it up. The +perp side
+        # is "below", so negate to put positive V on the -perp ("above") side.
         new_items = _diagram_polygon(
-            t_arr, V_arr,
+            t_arr, -V_arr,
             ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
             scale_px_per_Nm, fill_color, outline_pen, _Z_OVERLAY,
         )
@@ -783,17 +788,18 @@ def draw_labels(
     def_scale: float = 0.0,
     member_ids: "list[int] | None" = None,
 ) -> list[QGraphicsItem]:
-    """Draw value labels for all active diagrams.
+    """Draw a value label at the critical location of each active diagram.
 
-    Per UI member:
+    Per UI member (one label each, at the peak / representative point):
       - BMD: peak |M| offset to diagram edge (kN·m, red)
       - SFD: peak |V| offset to diagram edge (kN, blue)
       - AFD: representative axial N at midpoint (kN)
-      - Deformed: peak transverse deflection at diagram tip (mm, red), when
-        ``displacements`` and ``def_scale`` are provided.
+      - Deformed: peak transverse deflection at the diagram tip (mm, red)
 
-    Labels are skipped when the corresponding value is negligible.
-    When member_ids is given, each produced item is tagged with its UI member ID.
+    Every item is tagged with its diagram type via ``data(1)`` ('BMD' / 'SFD' /
+    'AFD' / 'Deformed') so the canvas shows only the labels of the diagram(s)
+    currently displayed. When member_ids is given, items are also tagged with
+    their UI member ID via ``data(0)`` for per-member isolation.
     """
     label_font = QFont()
     label_font.setPointSize(7)
@@ -801,6 +807,15 @@ def draw_labels(
     res_by_id = {r.element_id: r for r in sub_results}
     el_by_id  = {e.id: e for e in model.elements}
     items: list[QGraphicsItem] = []
+
+    def _peak_label(text, sx, sy, color, diagram):
+        lbl = QGraphicsSimpleTextItem(text)
+        lbl.setFont(label_font)
+        lbl.setBrush(QBrush(QColor(color)))
+        lbl.setPos(sx, sy)
+        lbl.setZValue(_Z_LABEL)
+        lbl.setData(1, diagram)
+        items.append(lbl)
 
     for mi, el_ids in enumerate(member_el_map):
         _member_item_start = len(items)
@@ -821,44 +836,32 @@ def draw_labels(
                 base_sx = ix_s + t_peak * L_px * cos_s
                 base_sy = iy_s + t_peak * L_px * sin_s
                 offset  = M_peak * scale_px_per_Nm
-                lbl = QGraphicsSimpleTextItem(f"{M_peak / 1e3:.2f} kN·m")
-                lbl.setFont(label_font)
-                lbl.setBrush(QBrush(QColor("#990000")))
-                lbl.setPos(base_sx + perp_x * offset, base_sy + perp_y * offset)
-                lbl.setZValue(_Z_LABEL)
-                items.append(lbl)
+                _peak_label(f"{M_peak / 1e3:.2f} kN·m",
+                            base_sx + perp_x * offset, base_sy + perp_y * offset,
+                            "#990000", 'BMD')
 
-        # ── SFD peak-V label ─────────────────────────────────────────────────
+        # ── SFD value labels at the member ends ───────────────────────────────
+        # Shear is constant/linear within a node-loaded member, so the critical
+        # values are at the ends — this also shows the value on each side of a
+        # point-load jump (and the support-reaction values).
         t_arr_v, V_arr = _stitch_V(el_ids, res_by_id, el_by_id, load_map)
         if len(V_arr) > 0:
-            peak_idx_v = int(np.argmax(np.abs(V_arr)))
-            V_peak = float(V_arr[peak_idx_v])
-            if abs(V_peak) >= 1.0:
-                t_peak_v = float(t_arr_v[peak_idx_v])
-                base_sx_v = ix_s + t_peak_v * L_px * cos_s
-                base_sy_v = iy_s + t_peak_v * L_px * sin_s
-                offset_v  = V_peak * scale_px_per_Nm
-                lbl_v = QGraphicsSimpleTextItem(f"{V_peak / 1e3:.2f} kN")
-                lbl_v.setFont(label_font)
-                lbl_v.setBrush(QBrush(QColor("#2255cc")))
-                lbl_v.setPos(base_sx_v + perp_x * offset_v, base_sy_v + perp_y * offset_v)
-                lbl_v.setZValue(_Z_LABEL)
-                items.append(lbl_v)
+            for tt, vv in ((0.0, float(V_arr[0])), (1.0, float(V_arr[-1]))):
+                if abs(vv) < 1.0:
+                    continue
+                bx = ix_s + tt * L_px * cos_s
+                by = iy_s + tt * L_px * sin_s
+                off_v = -vv * scale_px_per_Nm   # positive V plotted above (see draw_sfd)
+                _peak_label(f"{vv / 1e3:.2f} kN",
+                            bx + perp_x * off_v, by + perp_y * off_v, "#2255cc", 'SFD')
 
-        # ── AFD axial-N label (first sub-element N_i, representative for member) ─
+        # ── AFD axial-N label (representative for member) ─────────────────────
         first_res = res_by_id.get(el_ids[0])
-        if first_res is not None:
+        if first_res is not None and abs(first_res.N_i) >= 1.0:
             N = first_res.N_i
-            if abs(N) >= 1.0:
-                color_str = "#cc2222" if N > 0 else "#2255cc"
-                mid_sx = ix_s + 0.5 * L_px * cos_s
-                mid_sy = iy_s + 0.5 * L_px * sin_s
-                lbl = QGraphicsSimpleTextItem(f"{N / 1e3:.2f} kN")
-                lbl.setFont(label_font)
-                lbl.setBrush(QBrush(QColor(color_str)))
-                lbl.setPos(mid_sx, mid_sy)
-                lbl.setZValue(_Z_LABEL)
-                items.append(lbl)
+            _peak_label(f"{N / 1e3:.2f} kN",
+                        ix_s + 0.5 * L_px * cos_s, iy_s + 0.5 * L_px * sin_s,
+                        "#cc2222" if N > 0 else "#2255cc", 'AFD')
 
         # ── Deformed peak-δ label ─────────────────────────────────────────────
         if displacements is not None and def_scale > 0.0:
@@ -872,19 +875,12 @@ def draw_labels(
                     t_peak_d = float(t_arr_d[peak_idx_d])
                     base_sx_d = ix_s + t_peak_d * L_px * cos_s
                     base_sy_d = iy_s + t_peak_d * L_px * sin_s
-                    # local transverse v maps to screen as -v in perp direction
                     offset_d = -def_scale * v_peak * PX_PER_M
-                    lbl_d = QGraphicsSimpleTextItem(f"{v_peak * 1e3:.2f} mm")
-                    lbl_d.setFont(label_font)
-                    lbl_d.setBrush(QBrush(QColor("#cc2222")))
-                    lbl_d.setPos(
-                        base_sx_d + perp_x * offset_d,
-                        base_sy_d + perp_y * offset_d,
-                    )
-                    lbl_d.setZValue(_Z_LABEL)
-                    items.append(lbl_d)
+                    _peak_label(f"{v_peak * 1e3:.2f} mm",
+                                base_sx_d + perp_x * offset_d, base_sy_d + perp_y * offset_d,
+                                "#cc2222", 'Deformed')
 
-        # Tag all items produced during this member's iteration
+        # Tag all items produced during this member's iteration with its UI id
         if member_ids is not None and mi < len(member_ids):
             uid = member_ids[mi]
             for it in items[_member_item_start:]:
@@ -1053,12 +1049,12 @@ def draw_sfd_envelope(
 
         c_max = QColor("#43A047"); c_max.setAlpha(90)
         items.extend(_diagram_polygon(
-            t_ref, V_max, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
+            t_ref, -V_max, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
             scale_px_per_Nm, c_max, QPen(QColor("#2E7D32"), 1), _Z_OVERLAY,
         ))
         c_min = QColor("#AB47BC"); c_min.setAlpha(90)
         items.extend(_diagram_polygon(
-            t_ref, V_min, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
+            t_ref, -V_min, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
             scale_px_per_Nm, c_min, QPen(QColor("#7B1FA2"), 1), _Z_OVERLAY,
         ))
 
@@ -1147,7 +1143,7 @@ def draw_sfd_all_combos(
                 continue
 
             items.extend(_diagram_polygon(
-                t_arr, V_arr, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
+                t_arr, -V_arr, ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
                 scale_px_per_Nm, fill_color, outline, _Z_OVERLAY,
             ))
 
