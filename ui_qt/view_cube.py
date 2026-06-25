@@ -50,6 +50,21 @@ _EDGES: list[tuple[int, int]] = [
     (0, 4), (1, 5), (2, 6), (3, 7),   # verticals
 ]
 
+# Compass cardinals → azimuth to view FROM that direction (elevation kept).
+# +Y = Back = North, -Y = Front = South, +X = Right = East, -X = Left = West.
+_COMPASS_AZ: dict[str, float] = {"N": 180.0, "S": 0.0, "E": 90.0, "W": -90.0}
+
+# Named views for the right-click menu: name → (az, el); az None = keep current.
+NAMED_VIEWS: list[tuple[str, float | None, float]] = [
+    ("Top",       None,   90.0),
+    ("Bottom",    None,  -90.0),
+    ("Front",      0.0,    0.0),
+    ("Back",     180.0,    0.0),
+    ("Right",     90.0,    0.0),
+    ("Left",     -90.0,    0.0),
+    ("Isometric", -45.0,  30.0),
+]
+
 # Corner → isometric view shortcuts  (top 4 above, bottom 4 below horizon)
 # Each entry: corner_index → (target_az_deg, target_el_deg)
 _ISO: dict[int, tuple[float, float]] = {
@@ -86,9 +101,13 @@ class ViewCube:
     HALF:   int = 28   # cube half-radius in screen pixels  (2/3 of original 42)
     MARGIN: int = 29   # corner margin — adjusted so centre stays at same 57 px from corner
     CRAD:   int = 5    # corner-dot radius in screen pixels
+    RING:   int = 47   # compass ring radius in screen pixels
+    HOME:   int = 13   # home (house) icon size in screen pixels
 
     def __init__(self) -> None:
-        self.hovered: str | None = None   # e.g. 'face:Top', 'corner:6', or None
+        self.hovered: str | None = None   # e.g. 'face:Top', 'corner:6', 'compass:N', 'home'
+        self.home_az: float = -45.0       # default SW isometric — editable via menu
+        self.home_el: float = 30.0
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -109,11 +128,20 @@ class ViewCube:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Circular background
-        bg_r = (self.HALF + 14) / scale
+        bg_r = (self.RING + 9) / scale
         bg_p = QPen(QColor(52, 52, 62, 160)); bg_p.setCosmetic(True)
         painter.setPen(bg_p)
         painter.setBrush(QBrush(_CBG))
         painter.drawEllipse(QPointF(cx, cy), bg_r, bg_r)
+
+        # Compass ring (projected ground circle) — drawn behind the cube so the
+        # cube appears to sit inside it.
+        R   = self.RING / scale
+        ring_ry = R * abs(math.sin(math.radians(el)))
+        ring_pen = QPen(QColor(120, 120, 140, 150)); ring_pen.setCosmetic(True)
+        painter.setPen(ring_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(cx, cy), R, max(ring_ry, 0.6 / scale))
 
         # Visible faces — sorted back → front for correct painter's algorithm
         for depth, fi in _sorted_visible(cam):
@@ -155,6 +183,35 @@ class ViewCube:
             painter.setPen(cp)
             painter.drawEllipse(QPointF(*pts[ci]), r, r)
 
+        # Compass cardinal labels (N highlighted like a needle) — on top
+        cf = QFont("Arial"); cf.setPointSizeF(6.5 / scale); cf.setBold(True)
+        painter.setFont(cf)
+        for name, (px, py) in self._compass_points(cx, cy, scale).items():
+            hov = (self.hovered == f"compass:{name}")
+            if hov:
+                col = _CCH
+            elif name == "N":
+                col = QColor(232, 116, 116)          # north — reddish needle
+            else:
+                col = QColor(168, 174, 190)
+            lp = QPen(col); lp.setCosmetic(True)
+            painter.setPen(lp)
+            painter.drawText(QPointF(px - 3.4 / scale, py + 3.3 / scale), name)
+
+        # Home (house) icon — top-left of the widget
+        hx, hy = self._home_center(cx, cy, scale)
+        s = self.HOME / scale
+        hcol = _CCH if self.hovered == "home" else QColor(190, 196, 210)
+        hp = QPen(hcol); hp.setCosmetic(True); hp.setWidthF(1.4)
+        painter.setPen(hp)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(QRectF(hx - s * 0.30, hy - s * 0.04, s * 0.60, s * 0.42))
+        painter.drawPolyline(QPolygonF([
+            QPointF(hx - s * 0.42, hy - s * 0.04),
+            QPointF(hx,            hy - s * 0.46),
+            QPointF(hx + s * 0.42, hy - s * 0.04),
+        ]))
+
         painter.restore()
 
     def update_hover(self, scene_pos: QPointF | None,
@@ -172,8 +229,13 @@ class ViewCube:
         h = self._hit(scene_pos, cx, cy, scale)
         if h is None:
             return None
+        if h == "home":
+            return (self.home_az, self.home_el)
         if h.startswith("corner:"):
             return _ISO[int(h.split(":")[1])]
+        if h.startswith("compass:"):
+            # spin azimuth to look from that cardinal, keeping current elevation
+            return (_COMPASS_AZ[h.split(":")[1]], _proj.ISO_ELEVATION)
         label = h.split(":")[1]
         for (_, _, lbl, faz, fel) in _FACES:
             if lbl == label:
@@ -183,6 +245,34 @@ class ViewCube:
     def bounding_radius_scene(self, scale: float) -> float:
         """Outer radius of the ViewCube widget in scene units (for quick bounds check)."""
         return (self.HALF + self.MARGIN) / scale
+
+    def contains(self, sp: QPointF, cx: float, cy: float, scale: float) -> bool:
+        """True if a point is over the cube/compass widget or the home icon."""
+        if math.hypot(sp.x() - cx, sp.y() - cy) <= (self.RING + 8) / scale:
+            return True
+        hx, hy = self._home_center(cx, cy, scale)
+        hs = (self.HOME + 4) / scale
+        return abs(sp.x() - hx) <= hs and abs(sp.y() - hy) <= hs
+
+    def _compass_points(self, cx: float, cy: float,
+                        scale: float) -> dict[str, tuple[float, float]]:
+        """Screen positions of the N/E/S/W cardinals on the projected ground ring."""
+        R  = self.RING / scale
+        az = math.radians(_proj.ISO_AZIMUTH)
+        el = math.radians(_proj.ISO_ELEVATION)
+        se = math.sin(el)
+        out: dict[str, tuple[float, float]] = {}
+        for name, (wx, wy) in (("E", (1, 0)), ("W", (-1, 0)),
+                               ("N", (0, 1)), ("S", (0, -1))):
+            x1 =  wx * math.cos(az) + wy * math.sin(az)
+            y1 = -wx * math.sin(az) + wy * math.cos(az)
+            out[name] = (cx + x1 * R, cy + y1 * se * R)
+        return out
+
+    def _home_center(self, cx: float, cy: float, scale: float) -> tuple[float, float]:
+        """Screen centre of the home (house) icon — top-left of the widget."""
+        d = self.RING / scale
+        return (cx - d * 0.74, cy - d * 0.74)
 
     # ── internals ─────────────────────────────────────────────────────────────
 
@@ -210,11 +300,23 @@ class ViewCube:
         cam = _cam_dir(az, el)
         cr  = (self.CRAD + 2) / scale
 
+        # Home icon (top-left) — highest priority, sits apart from the cube
+        hx, hy = self._home_center(cx, cy, scale)
+        if (abs(sp.x() - hx) <= (self.HOME * 0.55) / scale
+                and abs(sp.y() - hy) <= (self.HOME * 0.55) / scale):
+            return "home"
+
         # Corner dots take priority — show set matching current viewing side
         corner_set = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
         for ci in corner_set:
             if math.hypot(sp.x() - pts[ci][0], sp.y() - pts[ci][1]) <= cr:
                 return f"corner:{ci}"
+
+        # Compass cardinals — small precise targets, so they win over the faces
+        # (their labels may sit over the cube at isometric angles).
+        for name, (px, py) in self._compass_points(cx, cy, scale).items():
+            if math.hypot(sp.x() - px, sp.y() - py) <= 7.5 / scale:
+                return f"compass:{name}"
 
         # Visible faces, checked front → back
         for _, fi in sorted(_sorted_visible(cam), key=lambda t: -t[0]):
