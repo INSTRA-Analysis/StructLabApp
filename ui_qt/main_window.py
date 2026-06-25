@@ -409,8 +409,32 @@ class MainWindow(QMainWindow):
     def _build_tools_menu(self, mb) -> None:
         from PyQt6.QtGui import QKeySequence
         tools_menu = mb.addMenu("Tools")
+
+        self._show_loads_act = tools_menu.addAction("Show Loads")
+        self._show_loads_act.setCheckable(True)
+        self._show_loads_act.setChecked(True)
+        self._show_loads_act.setShortcut(QKeySequence("L"))
+        self._show_loads_act.setToolTip("Toggle visibility of load arrows and labels (L)")
+        self._show_loads_act.toggled.connect(self._on_show_loads_toggled)
+
+        self._colour_group_act = tools_menu.addAction("Colour by Group")
+        self._colour_group_act.setCheckable(True)
+        self._colour_group_act.setChecked(False)
+        self._colour_group_act.setShortcut(QKeySequence("Ctrl+G"))
+        self._colour_group_act.setToolTip(
+            "Tint members by their group label, with a legend (Ctrl+G)")
+        self._colour_group_act.toggled.connect(self._on_colour_by_group_toggled)
+
+        tools_menu.addSeparator()
+
         act = tools_menu.addAction("Python Console", self._open_console)
         act.setShortcut(QKeySequence("Ctrl+`"))
+
+    def _on_show_loads_toggled(self, checked: bool) -> None:
+        self._scene.set_loads_visible(checked)
+
+    def _on_colour_by_group_toggled(self, checked: bool) -> None:
+        self._scene.set_colour_by_group(checked)
 
     def _open_console(self) -> None:
         from ui_qt.console import ConsoleDialog

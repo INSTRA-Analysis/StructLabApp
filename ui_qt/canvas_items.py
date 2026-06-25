@@ -80,6 +80,47 @@ _LABEL_FONT.setPointSize(7)
 _LABEL_FONT.setBold(True)
 
 
+# ── member group colouring ("Colour by Group" view mode) ──────────────────────
+# Fixed colours for the common structural roles so the same label always renders
+# the same colour regardless of insertion order; everything else cycles through
+# a distinct fallback palette.
+_GROUP_FIXED: dict[str, str] = {
+    "leg":        "#d62728",  # red    — primary load-carrying legs
+    "diagonal":   "#1f77b4",  # blue   — diagonal bracing
+    "horizontal": "#2ca02c",  # green  — horizontal / plan bracing
+    "bracing":    "#9467bd",  # purple
+    "redundant":  "#7f7f7f",  # grey
+    "chord":      "#ff7f0e",  # orange
+    "post":       "#17becf",  # cyan
+}
+_GROUP_PALETTE: list[str] = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f",
+]
+_group_colour_cache: dict[str, QColor] = {}
+
+
+def group_colour(group: str) -> QColor:
+    """Return a stable QColor for a member group label (case-insensitive).
+
+    Known role names get a fixed colour; unknown labels are hashed onto the
+    fallback palette so the mapping is deterministic across runs.
+    """
+    key = (group or "").strip().lower()
+    cached = _group_colour_cache.get(key)
+    if cached is not None:
+        return cached
+    if key in _GROUP_FIXED:
+        col = QColor(_GROUP_FIXED[key])
+    else:
+        h = 0
+        for ch in key:
+            h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        col = QColor(_GROUP_PALETTE[h % len(_GROUP_PALETTE)])
+    _group_colour_cache[key] = col
+    return col
+
+
 def _fmt(value: float, unit: str) -> str:
     """Format a load value compactly: 3 sig-figs, strip trailing zeros."""
     abs_v = abs(value)
@@ -753,11 +794,19 @@ class MemberItem(QGraphicsLineItem):
         elif self._base_pen is not None:
             self.setPen(self._base_pen)
 
+    def _base_colour_pen(self, width: float) -> QPen:
+        """Default member pen: group colour when 'Colour by Group' is on, else
+        the element-type colour (green = bar, blue = beam)."""
+        if getattr(self._scene, "_colour_by_group", False) and self.member.group:
+            pen = QPen(group_colour(self.member.group))
+        else:
+            pen = QPen(_BAR_PEN if self.member.element_type == ElementType.BAR
+                       else _BEAM_PEN)
+        pen.setWidthF(width)
+        return pen
+
     def _update_pen(self) -> None:
-        pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
-        pen_copy = QPen(pen)
-        pen_copy.setWidth(3)
-        self._base_pen = pen_copy
+        self._base_pen = self._base_colour_pen(3)
         self._apply_pen()
 
     def update_visual_scale(self, view_scale: float) -> None:
@@ -765,10 +814,7 @@ class MemberItem(QGraphicsLineItem):
             return
         s = max(0.2, min(5.0, view_scale))
         w = 3.0 / s ** 0.3
-        pen = _BAR_PEN if self.member.element_type == ElementType.BAR else _BEAM_PEN
-        pen_copy = QPen(pen)
-        pen_copy.setWidthF(w)
-        self._base_pen = pen_copy
+        self._base_pen = self._base_colour_pen(w)
         self._apply_pen()
 
     def set_force_colour(self, N: float, max_N: float) -> None:

@@ -24,7 +24,7 @@ from ui_qt.model_state import (
 from ui_qt.canvas_items import (
     PX_PER_M, GRID_STEP, SNAP_PX,
     _GHOST_PEN, m_to_px, px_to_m,
-    NodeItem, MemberItem, _node_pos,
+    NodeItem, MemberItem, _node_pos, group_colour,
 )
 import ui_qt.projection as _proj
 from ui_qt.projection import (
@@ -104,8 +104,16 @@ class StructCanvas(QGraphicsScene):
         # ── util colour overlay flag ──────────────────────────────────────────
         self._util_colour_active: bool = False
 
+        # ── "colour by group" view flag ───────────────────────────────────────
+        self._colour_by_group: bool = False
+
+        # ── load graphics visibility ──────────────────────────────────────────
+        self._show_loads: bool = True
+
         # ── overlay state ─────────────────────────────────────────────────────
         self._overlay_items: dict[str, list] = {}
+        # member_id → all overlay items (all layers) for that member — used by isolation
+        self._member_overlay_items: dict[int, list] = {}
         self._overlay_visible: dict[str, bool] = {
             'BMD':      True,
             'SFD':      False,
@@ -1017,6 +1025,25 @@ class StructCanvas(QGraphicsScene):
         for mitem in self._member_items.values():
             mitem._update_pen()
 
+    def set_colour_by_group(self, enabled: bool) -> None:
+        """Toggle the 'Colour by Group' view: members are tinted by their group
+        label instead of by element type. Result colouring (force/util) still
+        overrides this until cleared."""
+        self._colour_by_group = bool(enabled)
+        scale = self._current_view_scale()
+        for mitem in self._member_items.values():
+            mitem.update_visual_scale(scale)
+        self.update()
+
+    def active_groups(self) -> list[str]:
+        """Distinct non-empty member group labels, in first-seen order."""
+        seen: list[str] = []
+        for m in self.model_state.members:
+            g = (m.group or "").strip()
+            if g and g not in seen:
+                seen.append(g)
+        return seen
+
     def update_member_util_colours(self, member_results: list,
                                    members: list) -> None:
         """Colour members by EC3 utilization ratio η (combined N + M)."""
@@ -1356,6 +1383,8 @@ class StructView(QGraphicsView):
 
         if self.scene()._util_colour_active:
             self._draw_util_legend(painter, rect)
+        elif self.scene()._colour_by_group:
+            self._draw_group_legend(painter, rect)
 
     def drawForeground(self, painter: QPainter, rect) -> None:
         """Viewport-pinned overlays drawn above all scene content.
@@ -1524,6 +1553,51 @@ class StructView(QGraphicsView):
         title_pen.setCosmetic(True)
         painter.setPen(title_pen)
         painter.drawText(QPointF(x0, y0 - 5 / scale), "Utilization η  (N/Npl + M/Mpl)")
+        painter.restore()
+
+    def _draw_group_legend(self, painter: QPainter, rect) -> None:
+        """Draw a swatch legend of member groups in the bottom-right corner."""
+        from PyQt6.QtCore import QRectF as _QRF
+        groups = self.scene().active_groups()
+        if not groups:
+            return
+        scale = self.transform().m11()
+
+        sw = 12 / scale          # swatch size
+        gap = 6 / scale          # swatch → label gap
+        row_h = 18 / scale
+        margin = 12 / scale
+        font_px = 8
+        # widen the box to the longest label so text never clips
+        label_w = max(len(g) for g in groups) * 6.5 / scale
+        box_w = sw + gap + label_w + 16 / scale
+        box_h = row_h * len(groups) + 22 / scale
+        x0 = rect.right()  - margin - box_w
+        y0 = rect.bottom() - margin - box_h
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        panel = QColor(30, 30, 36, 210)
+        painter.setPen(QPen(QColor(180, 180, 180, 200)))
+        painter.setBrush(QBrush(panel))
+        painter.drawRect(_QRF(x0, y0, box_w, box_h))
+
+        font = painter.font()
+        font.setPointSize(font_px)
+        painter.setFont(font)
+        title_pen = QPen(QColor(210, 210, 210)); title_pen.setCosmetic(True)
+        painter.setPen(title_pen)
+        painter.drawText(QPointF(x0 + 8 / scale, y0 + 14 / scale), "Member groups")
+
+        sx = x0 + 8 / scale
+        for i, g in enumerate(groups):
+            ry = y0 + 20 / scale + i * row_h
+            painter.setPen(QPen(QColor(120, 120, 120, 200)))
+            painter.setBrush(QBrush(group_colour(g)))
+            painter.drawRect(_QRF(sx, ry, sw, sw))
+            lbl_pen = QPen(QColor(225, 225, 225)); lbl_pen.setCosmetic(True)
+            painter.setPen(lbl_pen)
+            painter.drawText(QPointF(sx + sw + gap, ry + sw - 1 / scale), g)
         painter.restore()
 
     def _draw_flat_grid(self, painter: QPainter, rect) -> None:
