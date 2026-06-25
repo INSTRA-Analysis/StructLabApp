@@ -408,7 +408,10 @@ class ModelState:
     combinations: list[LoadCombination] = field(default_factory=list)
     active_case_id: int = field(default=0)
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
-    mode_3d: bool = field(default=True)
+    # "3D" = 6-DOF space model (Z up). "2D" = planar 3-DOF model in the XZ plane
+    # (X horizontal, Z vertical/up, y == 0 for all nodes). The legacy boolean
+    # `mode_3d` is kept as a property over this field for back-compat.
+    analysis_mode: str = field(default="3D")
     _next_node_id: int = field(default=0, repr=False)
     _next_member_id: int = field(default=0, repr=False)
     _next_case_id: int = field(default=1, repr=False)
@@ -417,6 +420,43 @@ class ModelState:
     def __post_init__(self) -> None:
         if not self.load_cases:
             self.load_cases.append(LoadCase(id=0, name="Dead load", category="G"))
+
+    # ── analysis-mode accessors ───────────────────────────────────────────────
+
+    @property
+    def mode_3d(self) -> bool:
+        """Back-compat boolean view over analysis_mode (True = 3D)."""
+        return self.analysis_mode == "3D"
+
+    @mode_3d.setter
+    def mode_3d(self, value: bool) -> None:
+        self.analysis_mode = "3D" if value else "2D"
+
+    @property
+    def is_2d(self) -> bool:
+        return self.analysis_mode == "2D"
+
+    def swap_yz(self) -> None:
+        """Swap the Y and Z axes of all geometry and loads.
+
+        Used at the 2D⇄3D mode boundary: 2D is the native XY plane (Y vertical,
+        z=0); 3D is Z-up (height in Z). Swapping Y↔Z lets a planar model keep
+        "standing" through a mode change. It is its own inverse (involution).
+        """
+        for n in self.nodes:
+            n.y, n.z = n.z, n.y
+            n.spring_ky, n.spring_kz = n.spring_kz, n.spring_ky
+            n.spring_ktheta, n.spring_kry = n.spring_kry, n.spring_ktheta
+        for lc in self.load_cases:
+            for nl in lc.node_loads.values():
+                nl.fy, nl.fz = nl.fz, nl.fy
+                nl.moment, nl.moment_y = nl.moment_y, nl.moment
+            for ml in lc.member_loads.values():
+                for dl in ml.dist_loads:
+                    if dl.direction == "qy":
+                        dl.direction = "qz"
+                    elif dl.direction == "qz":
+                        dl.direction = "qy"
 
     # ── load case accessors ───────────────────────────────────────────────────
 
@@ -559,6 +599,7 @@ class ModelState:
                  "is_auto": c.is_auto}
                 for c in self.combinations
             ],
+            "analysis_mode": self.analysis_mode,
             "mode_3d": self.mode_3d,
             "_next_node_id": self._next_node_id,
             "_next_member_id": self._next_member_id,
@@ -631,6 +672,10 @@ class ModelState:
             s._next_combo_id = d.get("_next_combo_id", len(s.combinations))
         s._next_node_id = d.get("_next_node_id", len(s.nodes))
         s._next_member_id = d.get("_next_member_id", len(s.members))
-        # Auto-detect 3D from z≠0 for old files that predate mode_3d field
-        s.mode_3d = d.get("mode_3d", any(n.z != 0.0 for n in s.nodes))
+        # Prefer explicit analysis_mode (v4+); else fall back to the legacy
+        # mode_3d boolean, or auto-detect 3D from z≠0 for the oldest files.
+        if "analysis_mode" in d:
+            s.analysis_mode = d["analysis_mode"]
+        else:
+            s.mode_3d = d.get("mode_3d", any(n.z != 0.0 for n in s.nodes))
         return s

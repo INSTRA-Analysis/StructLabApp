@@ -70,8 +70,8 @@ class WelcomeDialog(QDialog):
     """Startup dialog: choose structure type, recent file, or blank canvas.
 
     After exec(), read:
-      ``self.choice`` — "beam" | "frame" | "truss" | "blank" | "open" | "file:<path>"
-      ``self.is_3d``  — always True (3D-only app)
+      ``self.choice``     — "beam" | "frame" | "truss" | "blank" | "open" | "file:<path>"
+      ``self.start_mode`` — "2D" (flat XZ) or "3D"; applies to a blank new model
     """
 
     def __init__(self, parent=None, recent_files: list[str] | None = None) -> None:
@@ -80,6 +80,7 @@ class WelcomeDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(600)
         self.choice: str = "blank"
+        self.start_mode: str = "3D"
         self._build_ui(recent_files or [])
 
     def _build_ui(self, recent_files: list[str]) -> None:
@@ -103,9 +104,29 @@ class WelcomeDialog(QDialog):
         root.addWidget(self._hline())
 
         # ── Structure type cards ───────────────────────────────────────────────
+        head_row = QHBoxLayout()
         section_lbl = QLabel("Start a new model")
         section_lbl.setStyleSheet("font-weight:bold; font-size:12px; color:#bbb;")
-        root.addWidget(section_lbl)
+        head_row.addWidget(section_lbl)
+        head_row.addStretch()
+
+        # 2D / 3D mode selector (applies to a blank new model)
+        self._mode_btns: dict[str, QPushButton] = {}
+        for m in ("2D", "3D"):
+            b = QPushButton(m)
+            b.setCheckable(True)
+            b.setFixedSize(46, 24)
+            b.setChecked(m == self.start_mode)
+            b.setStyleSheet(
+                "QPushButton { background:#1a1a22; border:1px solid #444; color:#aaa;"
+                "  border-radius:4px; font-weight:bold; }"
+                "QPushButton:checked { border-color:#00ACC1; color:#00ACC1;"
+                "  background:#252530; }"
+            )
+            b.clicked.connect(lambda _=False, mm=m: self._set_mode(mm))
+            head_row.addWidget(b)
+            self._mode_btns[m] = b
+        root.addLayout(head_row)
 
         CARDS = [
             ("beam",  "Beam",   "━━━━",
@@ -176,6 +197,11 @@ class WelcomeDialog(QDialog):
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("color:#2a2a34;")
         return line
+
+    def _set_mode(self, mode: str) -> None:
+        self.start_mode = mode
+        for m, btn in self._mode_btns.items():
+            btn.setChecked(m == mode)
 
     def _choose(self, choice: str) -> None:
         self.choice = choice

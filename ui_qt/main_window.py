@@ -489,11 +489,61 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
+        self._mode_2d_act = tools_menu.addAction("2D Mode (XY plane)")
+        self._mode_2d_act.setCheckable(True)
+        self._mode_2d_act.setChecked(self._scene.model_state.analysis_mode == "2D")
+        self._mode_2d_act.setShortcut(QKeySequence("F2"))
+        self._mode_2d_act.setToolTip(
+            "Switch between flat 2D (XY plane, Y up) and 3D analysis (Z up) (F2)")
+        self._mode_2d_act.toggled.connect(self._on_mode_2d_toggled)
+
+        tools_menu.addSeparator()
+
         act = tools_menu.addAction("Python Console", self._open_console)
         act.setShortcut(QKeySequence("Ctrl+`"))
 
+    def _sync_mode_action(self) -> None:
+        """Reflect the loaded model's analysis mode on the 2D toggle."""
+        act = getattr(self, "_mode_2d_act", None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(self._scene.model_state.analysis_mode == "2D")
+            act.blockSignals(False)
+
     def _on_show_loads_toggled(self, checked: bool) -> None:
         self._scene.set_loads_visible(checked)
+
+    def _on_mode_2d_toggled(self, to_2d: bool) -> None:
+        """Switch analysis mode live (2D XZ ⇄ 3D), guarding non-planar 3D→2D."""
+        from PyQt6.QtWidgets import QMessageBox
+        target = "2D" if to_2d else "3D"
+        ms = self._scene.model_state
+        if target == "2D":
+            offplane = [n for n in ms.nodes if abs(n.y) > 1e-6]
+            if offplane:
+                r = QMessageBox.question(
+                    self, "Switch to 2D",
+                    f"{len(offplane)} node(s) lie off the XZ plane (Y ≠ 0).\n"
+                    "Project them onto the XZ plane (set Y = 0) to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                )
+                if r != QMessageBox.StandardButton.Yes:
+                    self._mode_2d_act.blockSignals(True)
+                    self._mode_2d_act.setChecked(False)   # revert toggle
+                    self._mode_2d_act.blockSignals(False)
+                    return
+                self._scene.save_snapshot()
+                for n in offplane:
+                    n.y = 0.0
+        self._scene.set_analysis_mode(target)
+        self._view.zoom_to_fit()
+        self._props_panel.set_model_state(ms)
+        self._results_panel.clear()
+        self._scene.clear_overlays()
+        self._solve_cache = None
+        self._set_overlay_controls_enabled(False)
+        self._update_status_stats()
+        self._sb.showMessage(f"Switched to {target} mode.")
 
     def _on_colour_by_group_toggled(self, checked: bool) -> None:
         self._scene.set_colour_by_group(checked)
@@ -621,7 +671,9 @@ class MainWindow(QMainWindow):
             self._apply_model_state(P.demo_space_truss(), "Space Truss")
         elif choice == "blank":
             from ui_qt.model_state import ModelState
-            self._apply_model_state(ModelState(), "Blank")
+            blank = ModelState()
+            blank.analysis_mode = dlg.start_mode      # 2D (XZ) or 3D
+            self._apply_model_state(blank, f"Blank ({dlg.start_mode})")
         elif choice.startswith("file:"):
             self._open_file(choice[5:])
         elif choice == "open":
@@ -674,6 +726,7 @@ class MainWindow(QMainWindow):
         """Load a ModelState onto the canvas, clearing any prior results."""
         self._scene.load_state(state)
         self._scene._hide_welcome = True
+        self._sync_mode_action()
         self._props_panel.set_model_state(self._scene.model_state)
         self._refresh_lc_combo()
         self._results_panel.clear()
