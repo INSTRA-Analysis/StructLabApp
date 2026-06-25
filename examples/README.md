@@ -4,8 +4,12 @@ Import a structure from a single **sectioned CSV** file via **File ▸ Import �
 
 ## Files here
 - `truss_template.csv` — a minimal, commented skeleton to copy and edit.
-- `transmission_tower_3d.csv` — a worked example: an 85-node / 318-member pin-jointed
-  steel transmission tower (converted from the "3D Truss Toolbox" example data).
+- `transmission_tower_3d.csv` — 85-node / 318-member pin-jointed steel transmission tower
+  (converted from the "3D Truss Toolbox" example data).
+- `pratt_truss_2d.csv` — a 2D Pratt truss bridge (bars), grouped by role.
+- `space_frame_roof_3d.csv` — a 3D double-layer space-frame roof (bars).
+- `portal_frame_3d.csv` — a 3D portal frame using **beam** elements (`I`, `Iy`, `J`).
+- `multibay_frame_2d.csv` — a 2D 2-bay × 2-storey moment frame using **beam** elements.
 
 ## Format
 
@@ -17,7 +21,8 @@ columns are matched by name.
 #NODES
 id,x,y,z
 #MEMBERS
-id,node_i,node_j,etype,group,E,A,fy,density
+id,node_i,node_j,etype,group,E,A,fy,density        # truss (bars)
+id,node_i,node_j,etype,group,E,A,I,Iy,J,fy,density  # beams add I, Iy, J
 #SUPPORTS
 node,rx,ry,rz
 #FORCES
@@ -27,16 +32,23 @@ node,Fx,Fy,Fz
 ## Conventions
 
 - **Units are SI**: metres, newtons, pascals, kg/m³.
-- **Z is the vertical (up) axis.** Author coordinates in StructLab's native frame — the
-  importer does **no** axis rotation. A downward load is `Fz < 0`.
+- **3D models — Z is the vertical (up) axis.** Author coordinates in StructLab's native
+  frame — the importer does **no** axis rotation. A downward load is `Fz < 0`.
+- **2D models — keep every node at `z = 0`.** The engine then analyses the structure in
+  2D mode, where **Y is vertical**; a downward load is `Fy < 0` (see `pratt_truss_2d.csv`
+  and `multibay_frame_2d.csv`). Mixing non-zero `z` makes it a 3D model.
 - **Ids are arbitrary labels.** Node/member ids are remapped internally, so number them
   however you like; members and supports just have to reference existing node ids.
 
 ### Members
 - `etype` — analysis element type (case-insensitive):
   - `bar` — pin-pin, axial only (the truss member). Only `E` and `A` matter.
-  - `beam` — full bending element.
+  - `beam` — full bending element. Add the `I` (strong-axis), `Iy` (weak-axis, 3D) and
+    `J` (torsion, 3D) columns to give it realistic stiffness; omitted columns fall back to
+    defaults (`Iy` defaults to `I`).
   - `pin_i` / `pin_j` — single-end moment release.
+- `I`, `Iy`, `J` — **optional** columns, only needed for `beam`/`pin_*` members. Pure
+  trusses omit them entirely.
 - `group` — a free descriptive label (e.g. `Leg`, `Diagonal`, `Horizontal`) used only for
   display and reporting; it has no effect on the analysis.
 - `density` is stored on the member but only contributes load when a self-weight load case

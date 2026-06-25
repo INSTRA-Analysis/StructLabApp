@@ -1,0 +1,36 @@
+# StructLab CSV - 3D portal frame (beam elements)
+# Units: SI. 3D: Z = UP, downward load = Fz<0.
+# Beam members carry I, Iy, J (bending + torsion). HEB220 columns, IPE360 beams.
+#NODES
+id,x,y,z
+1,0,0,0
+2,6,0,0
+3,6,4,0
+4,0,4,0
+5,0,0,4
+6,6,0,4
+7,6,4,4
+8,0,4,4
+#MEMBERS
+id,node_i,node_j,etype,group,E,A,I,Iy,J,fy,density
+1,1,5,beam,Column,2.1e+11,0.009104,8.091e-05,2.843e-05,9.1e-07,3.55e+08,7850
+2,2,6,beam,Column,2.1e+11,0.009104,8.091e-05,2.843e-05,9.1e-07,3.55e+08,7850
+3,3,7,beam,Column,2.1e+11,0.009104,8.091e-05,2.843e-05,9.1e-07,3.55e+08,7850
+4,4,8,beam,Column,2.1e+11,0.009104,8.091e-05,2.843e-05,9.1e-07,3.55e+08,7850
+5,5,6,beam,Roof beam,2.1e+11,0.007273,0.0001627,1.043e-05,1.21e-07,3.55e+08,7850
+6,6,7,beam,Roof beam,2.1e+11,0.007273,0.0001627,1.043e-05,1.21e-07,3.55e+08,7850
+7,7,8,beam,Roof beam,2.1e+11,0.007273,0.0001627,1.043e-05,1.21e-07,3.55e+08,7850
+8,8,5,beam,Roof beam,2.1e+11,0.007273,0.0001627,1.043e-05,1.21e-07,3.55e+08,7850
+#SUPPORTS
+node,rx,ry,rz
+1,1,1,1
+2,1,1,1
+3,1,1,1
+4,1,1,1
+#FORCES
+node,Fx,Fy,Fz
+5,0,0,-30000
+6,0,0,-30000
+7,0,0,-30000
+8,0,0,-30000
+5,10000,0,0

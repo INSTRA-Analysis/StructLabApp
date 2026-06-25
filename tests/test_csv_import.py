@@ -132,3 +132,63 @@ node,Fx,Fy,Fz
     assert len(state.members) == 2
     assert sum(1 for n in state.nodes if n.support_type is SupportType.FIXED) == 2
     assert len(state.active_case.node_loads) == 1
+
+
+# ── optional beam columns (I / Iy / J) ────────────────────────────────────────
+
+def test_beam_bending_columns_are_read(tmp_path):
+    csv = _write(tmp_path, """\
+#NODES
+id,x,y,z
+1,0,0,0
+2,6,0,0
+#MEMBERS
+id,node_i,node_j,etype,group,E,A,I,Iy,J,fy,density
+1,1,2,beam,Beam,2.1e11,0.009104,8.091e-5,2.843e-5,9.1e-7,355e6,7850
+""")
+    state, warnings = parse_structlab_csv(csv)
+    assert warnings == []
+    m = state.members[0]
+    assert m.element_type is ElementType.BEAM
+    assert m.I == pytest.approx(8.091e-5)
+    assert m.I_y == pytest.approx(2.843e-5)
+    assert m.J == pytest.approx(9.1e-7)
+
+
+def test_truss_without_bending_columns_keeps_defaults(tmp_path):
+    """A pure-truss CSV (no I/Iy/J columns) must still parse without error."""
+    csv = _write(tmp_path, """\
+#NODES
+id,x,y,z
+1,0,0,0
+2,2,0,0
+#MEMBERS
+id,node_i,node_j,etype,group,E,A,fy,density
+1,1,2,bar,Chord,2.1e11,0.005,355e6,7850
+""")
+    state, warnings = parse_structlab_csv(csv)
+    assert warnings == []
+    assert state.members[0].element_type is ElementType.BAR
+
+
+# ── every shipped example parses cleanly and solves ───────────────────────────
+
+@pytest.mark.parametrize("filename", [
+    "transmission_tower_3d.csv",
+    "pratt_truss_2d.csv",
+    "space_frame_roof_3d.csv",
+    "portal_frame_3d.csv",
+    "multibay_frame_2d.csv",
+])
+def test_example_parses_and_solves(filename):
+    import numpy as np
+    from ui_qt.model_builder import build_model
+    from ui_qt.solve_actions import solve_engine, validate_model
+
+    state, warnings = parse_structlab_csv(EXAMPLES / filename)
+    assert warnings == [], f"{filename}: {warnings}"
+    errors, _ = validate_model(state)
+    assert errors == [], f"{filename}: {errors}"
+    model, member_el_map = build_model(state, state.active_case)
+    cache = solve_engine(model, member_el_map, state)
+    assert np.all(np.isfinite(cache["displacements"])), f"{filename}: singular"

@@ -195,6 +195,13 @@ def parse_structlab_csv(path: str | Path) -> tuple[ModelState, list[str]]:
         member.A = _to_float(row.get("a", ""), member.A)
         member.fy = _to_float(row.get("fy", ""), member.fy)
         member.density = _to_float(row.get("density", ""), member.density)
+        # Optional bending properties for beam/frame members (ignored by bars,
+        # which are axial-only). Omit these columns for pure trusses.
+        member.I = _to_float(row.get("i", ""), member.I)
+        member.J = _to_float(row.get("j", ""), member.J)
+        iy = (row.get("iy", "") or "").strip()
+        if iy:                       # explicit weak-axis I; else defaults to I
+            member.I_y = _to_float(iy, member.I)
 
     # ── SUPPORTS ───────────────────────────────────────────────────────────────
     for row in _rows_as_dicts(sections.get("SUPPORTS", [])):
