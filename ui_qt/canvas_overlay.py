@@ -473,12 +473,15 @@ def draw_bmd(
     load_map: dict[int, list],
     scale_px_per_Nm: float,
     member_el_map: list[list[int]],
+    member_ids: "list[int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw one smooth filled BMD polygon per UI member.
 
     Positive M (sagging) plots in the +perp direction (below a horizontal beam).
     Using member_el_map to stitch sub-element results into one continuous curve
     gives visually correct parabolas regardless of n_sub.
+    When member_ids is given, each produced item is tagged with its UI member ID
+    via setData(0, uid) for per-member visibility control.
     """
     fill_color = QColor("#cc4444")
     fill_color.setAlpha(55)
@@ -488,7 +491,7 @@ def draw_bmd(
     el_by_id  = {e.id: e for e in model.elements}
     items: list[QGraphicsItem] = []
 
-    for el_ids in member_el_map:
+    for mi, el_ids in enumerate(member_el_map):
         if not el_ids:
             continue
         geom = _member_scene_geometry(model, el_ids, el_by_id)
@@ -500,11 +503,15 @@ def draw_bmd(
         if len(t_arr) == 0:
             continue
 
-        items.extend(_diagram_polygon(
+        new_items = _diagram_polygon(
             t_arr, M_arr,
             ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
             scale_px_per_Nm, fill_color, outline_pen, _Z_OVERLAY,
-        ))
+        )
+        if member_ids is not None and mi < len(member_ids):
+            for it in new_items:
+                it.setData(0, member_ids[mi])
+        items.extend(new_items)
 
     return items
 
@@ -519,6 +526,7 @@ def draw_sfd(
     load_map: dict[int, list],
     scale_px_per_Nm: float,
     member_el_map: list[list[int]],
+    member_ids: "list[int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw one smooth filled SFD polygon per UI member. V(x) = V_i − w·x for UDL."""
     fill_color = QColor("#2255cc")
@@ -529,7 +537,7 @@ def draw_sfd(
     el_by_id  = {e.id: e for e in model.elements}
     items: list[QGraphicsItem] = []
 
-    for el_ids in member_el_map:
+    for mi, el_ids in enumerate(member_el_map):
         if not el_ids:
             continue
         geom = _member_scene_geometry(model, el_ids, el_by_id)
@@ -541,11 +549,15 @@ def draw_sfd(
         if len(t_arr) == 0:
             continue
 
-        items.extend(_diagram_polygon(
+        new_items = _diagram_polygon(
             t_arr, V_arr,
             ix_s, iy_s, L_px, cos_s, sin_s, perp_x, perp_y,
             scale_px_per_Nm, fill_color, outline_pen, _Z_OVERLAY,
-        ))
+        )
+        if member_ids is not None and mi < len(member_ids):
+            for it in new_items:
+                it.setData(0, member_ids[mi])
+        items.extend(new_items)
 
     return items
 
@@ -557,12 +569,14 @@ def draw_sfd(
 def draw_afd(
     model: "Model",
     sub_results: "list[ElementResult]",
+    el_id_to_member_id: "dict[int, int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw colored thick member lines for AFD.
 
     Red  = compression (N_i > 0 in StructLab sign convention).
     Blue = tension     (N_i < 0).
     Skips elements where |N_i| < 1 N.
+    When el_id_to_member_id is given, each item is tagged with its UI member ID.
     """
     items: list[QGraphicsItem] = []
 
@@ -591,6 +605,10 @@ def draw_afd(
         line_item = QGraphicsPathItem(line_path)
         line_item.setPen(pen)
         line_item.setZValue(_Z_OVERLAY)
+        if el_id_to_member_id is not None:
+            uid = el_id_to_member_id.get(res.element_id)
+            if uid is not None:
+                line_item.setData(0, uid)
         items.append(line_item)
 
     return items
@@ -604,6 +622,7 @@ def draw_deformed(
     model: "Model",
     displacements: np.ndarray,
     def_scale: float,
+    el_id_to_member_id: "dict[int, int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw original grey lines and Hermite-cubic deformed curves for all elements.
 
@@ -618,6 +637,7 @@ def draw_deformed(
 
     where (u_x, w_x) are the local axial and transverse displacements in
     metres obtained from Hermite interpolation.
+    When el_id_to_member_id is given, each item is tagged with its UI member ID.
     """
     grey_pen    = QPen(QColor(160, 160, 160), 1)
     deform_pen  = QPen(QColor("#cc2222"), 2, Qt.PenStyle.DashLine)
@@ -739,6 +759,11 @@ def draw_deformed(
         def_item = QGraphicsPathItem(def_path)
         def_item.setPen(deform_pen)
         def_item.setZValue(_Z_OVERLAY)
+        if el_id_to_member_id is not None:
+            uid = el_id_to_member_id.get(el.id)
+            if uid is not None:
+                orig_item.setData(0, uid)
+                def_item.setData(0, uid)
         items.append(def_item)
 
     return items
@@ -756,6 +781,7 @@ def draw_labels(
     member_el_map: list[list[int]],
     displacements: np.ndarray | None = None,
     def_scale: float = 0.0,
+    member_ids: "list[int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw value labels for all active diagrams.
 
@@ -767,6 +793,7 @@ def draw_labels(
         ``displacements`` and ``def_scale`` are provided.
 
     Labels are skipped when the corresponding value is negligible.
+    When member_ids is given, each produced item is tagged with its UI member ID.
     """
     label_font = QFont()
     label_font.setPointSize(7)
@@ -775,7 +802,8 @@ def draw_labels(
     el_by_id  = {e.id: e for e in model.elements}
     items: list[QGraphicsItem] = []
 
-    for el_ids in member_el_map:
+    for mi, el_ids in enumerate(member_el_map):
+        _member_item_start = len(items)
         if not el_ids:
             continue
         geom = _member_scene_geometry(model, el_ids, el_by_id)
@@ -855,6 +883,12 @@ def draw_labels(
                     )
                     lbl_d.setZValue(_Z_LABEL)
                     items.append(lbl_d)
+
+        # Tag all items produced during this member's iteration
+        if member_ids is not None and mi < len(member_ids):
+            uid = member_ids[mi]
+            for it in items[_member_item_start:]:
+                it.setData(0, uid)
 
     return items
 

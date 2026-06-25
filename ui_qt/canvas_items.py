@@ -311,23 +311,22 @@ class NodeItem(QGraphicsEllipseItem):
 
         def _path_item(path: QPainterPath, fill: str, pen: str = "#ffffff",
                        pw: float = 1.5, z: float = 1.0) -> None:
-            it = QGraphicsPathItem(path)
+            # Parent=self so Qt auto-hides this item when NodeItem is hidden.
+            # Position is relative to NodeItem's origin (= the node centre in scene).
+            it = QGraphicsPathItem(path, self)
             it.setBrush(QBrush(QColor(fill)))
             it.setPen(QPen(QColor(pen), pw))
-            it.setPos(node_pos)
             it.setZValue(z)
-            self._scene.addItem(it)
             self._support_items.append(it)
 
         def _oval_item(cx: float, cy: float, rw: float, rh: float,
                        angle_deg: float, fill: str, z: float = 0.8) -> None:
-            it = QGraphicsEllipseItem(-rw, -rh, 2 * rw, 2 * rh)
+            it = QGraphicsEllipseItem(-rw, -rh, 2 * rw, 2 * rh, self)
             it.setBrush(QBrush(QColor(fill)))
             it.setPen(QPen(Qt.PenStyle.NoPen))
-            it.setPos(node_pos + QPointF(cx, cy))
+            it.setPos(QPointF(cx, cy))   # relative to NodeItem's origin
             it.setRotation(angle_deg)
             it.setZValue(z)
-            self._scene.addItem(it)
             self._support_items.append(it)
 
         if in_3d:
@@ -663,7 +662,7 @@ class NodeItem(QGraphicsEllipseItem):
 
     def remove_extra_items(self) -> None:
         for it in self._support_items:
-            self._scene.removeItem(it)
+            it.setParentItem(None)   # children — detach from NodeItem, Qt removes from scene
         self._support_items.clear()
         if self._hinge_item:
             self._scene.removeItem(self._hinge_item)
@@ -675,9 +674,28 @@ class NodeItem(QGraphicsEllipseItem):
             self._scene.removeItem(lbl)
         self._load_label_items.clear()
 
+    def set_visible_all(self, visible: bool) -> None:
+        """Show or hide this node and all its decorators (supports, hinges, loads)."""
+        self.setVisible(visible)
+        for it in self._support_items:
+            it.setVisible(visible)
+        if self._hinge_item:
+            self._hinge_item.setVisible(visible)
+        for it in self._load_items:
+            it.setVisible(visible)
+        for it in self._load_label_items:
+            it.setVisible(visible)
+
+    def set_loads_visible(self, visible: bool) -> None:
+        """Show or hide only nodal load arrows/labels (leaves supports/hinges untouched)."""
+        for it in self._load_items:
+            it.setVisible(visible)
+        for it in self._load_label_items:
+            it.setVisible(visible)
+
     def remove_support_symbol(self) -> None:
         for it in self._support_items:
-            self._scene.removeItem(it)
+            it.setParentItem(None)   # children — detach, Qt removes from scene
         self._support_items.clear()
 
 
@@ -1348,3 +1366,24 @@ class MemberItem(QGraphicsLineItem):
         for item in self._partial_items:
             self._scene.removeItem(item)
         self._partial_items.clear()
+
+    def set_visible_all(self, visible: bool) -> None:
+        """Show or hide this member and all its load decorators."""
+        self.setVisible(visible)
+        for lst in (self._udl_items, self._udl_label_items,
+                    self._qx_items, self._qx_label_items,
+                    self._qy_items, self._qy_label_items,
+                    self._qz_items, self._qz_label_items,
+                    self._point_load_items, self._partial_items):
+            for it in lst:
+                it.setVisible(visible)
+
+    def set_loads_visible(self, visible: bool) -> None:
+        """Show or hide only member load arrows/labels (leaves the member line untouched)."""
+        for lst in (self._udl_items, self._udl_label_items,
+                    self._qx_items, self._qx_label_items,
+                    self._qy_items, self._qy_label_items,
+                    self._qz_items, self._qz_label_items,
+                    self._point_load_items, self._partial_items):
+            for it in lst:
+                it.setVisible(visible)
