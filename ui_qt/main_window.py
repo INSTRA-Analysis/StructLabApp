@@ -176,6 +176,8 @@ class MainWindow(QMainWindow):
         self._recent_menu = file_menu.addMenu("Recent Files")
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         file_menu.addSeparator()
+        import_menu = file_menu.addMenu("Import")
+        import_menu.addAction("From CSV…", self._on_import_csv)
         export_menu = file_menu.addMenu("Export")
         export_menu.addAction("PNG Image…",  self._on_export_png)
         export_menu.addAction("SVG Vector…", self._on_export_svg)
@@ -2284,6 +2286,36 @@ class MainWindow(QMainWindow):
         )
         if path:
             self._open_file(path)
+
+    def _on_import_csv(self) -> None:
+        """Import a sectioned StructLab CSV (nodes/members/supports/forces)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import structure from CSV", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        from ui_qt.csv_import import parse_structlab_csv
+        try:
+            state, warnings = parse_structlab_csv(path)
+        except Exception as exc:  # malformed file, encoding error, etc.
+            QMessageBox.critical(self, "CSV import error", str(exc))
+            return
+        if not state.nodes:
+            QMessageBox.warning(
+                self, "CSV import",
+                "No nodes were read — check the file uses the #NODES / #MEMBERS / "
+                "#SUPPORTS / #FORCES section format.",
+            )
+            return
+        self._apply_model_state(state, f"CSV Import: {Path(path).name}")
+        if warnings:
+            shown = "\n".join(warnings[:20])
+            if len(warnings) > 20:
+                shown += f"\n… and {len(warnings) - 20} more."
+            QMessageBox.warning(
+                self, "CSV import — completed with warnings",
+                f"Imported with {len(warnings)} warning(s):\n\n{shown}",
+            )
 
     def _on_save(self) -> None:
         """Save to current file, or prompt for a path if none is set yet."""
