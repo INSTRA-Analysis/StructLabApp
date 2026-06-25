@@ -13,8 +13,12 @@ from solver.fem_loads import fixed_end_forces
 class ElementResult:
     """Internal end-forces for one element in local coordinates.
 
-    Sign convention: positive N = tension, positive V = upward on left face,
-    positive M = sagging (bottom fiber in tension).
+    Sign convention (N is the nodal axial force at node i):
+      positive N = compression, negative N = tension
+      positive V = upward on left face
+      positive M = sagging (bottom fibre in tension)
+    This compression-positive N convention is used consistently across the
+    solver, the displays (AFD: red = compression, blue = tension) and the tests.
 
     2D (6 entries):  [N_i, V_i, M_i, N_j, V_j, M_j]
     3D (12 entries): [N_i, V_y_i, V_z_i, T_i, M_y_i, M_z_i,

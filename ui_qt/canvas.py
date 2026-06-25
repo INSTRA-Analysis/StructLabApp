@@ -1160,6 +1160,7 @@ class StructCanvas(QGraphicsScene):
                 if uid is not None:
                     self._member_overlay_items.setdefault(uid, []).append(item)
             self._overlay_items[layer] = items
+        self._apply_labels_visibility()
 
     def update_overlays_single_combo(
         self,
@@ -1436,6 +1437,21 @@ class StructCanvas(QGraphicsScene):
         else:
             for item in self._overlay_items.get(layer, []):
                 item.setVisible(visible)
+        # Diagram value labels are gated by both the Labels toggle and their own
+        # diagram type, so re-evaluate them whenever any relevant layer changes.
+        self._apply_labels_visibility()
+
+    def _apply_labels_visibility(self) -> None:
+        """A Labels item is visible only when the Labels layer is on AND the
+        diagram it belongs to (tagged via data(1)) is currently shown."""
+        labels_on = self._overlay_visible.get('Labels', False)
+        for item in self._overlay_items.get('Labels', []):
+            diagram = item.data(1)
+            diag_on = self._overlay_visible.get(diagram, False) if diagram else True
+            vis = labels_on and diag_on
+            if vis and self._isolated:
+                vis = item.data(0) in self._isolated_member_ids
+            item.setVisible(vis)
 
     # ── public API ────────────────────────────────────────────────────────────
 
