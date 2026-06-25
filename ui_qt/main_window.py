@@ -284,6 +284,10 @@ class MainWindow(QMainWindow):
         self._select_profile_menu = edit_menu.addMenu("Select by Profile")
         self._select_profile_menu.aboutToShow.connect(self._rebuild_select_profile_menu)
 
+        # ── Select by Group submenu (built lazily on aboutToShow) ─────────
+        self._select_group_menu = edit_menu.addMenu("Select by Group")
+        self._select_group_menu.aboutToShow.connect(self._rebuild_select_group_menu)
+
     def _on_select_all(self) -> None:
         """Select all nodes and members on the canvas."""
         def _do():
@@ -360,6 +364,30 @@ class MainWindow(QMainWindow):
             count = len(member_ids)
             action_label = f"{label}   [{count} member{'s' if count != 1 else ''}]"
             menu.addAction(action_label, lambda *args, mids=member_ids: self._on_select_by_member_ids(mids))
+
+    def _rebuild_select_group_menu(self) -> None:
+        """Dynamically rebuild the 'Select by Group' submenu from current members."""
+        menu = self._select_group_menu
+        menu.clear()
+
+        ms = self._scene.model_state
+        # Collect member IDs per group label, preserving first-seen order
+        group_ids: dict[str, list[int]] = {}
+        for member in ms.members:
+            label = (member.group or "").strip()
+            if label:
+                group_ids.setdefault(label, []).append(member.id)
+
+        if not group_ids:
+            a = menu.addAction("(no groups defined)")
+            a.setEnabled(False)
+            return
+
+        for label, member_ids in group_ids.items():
+            count = len(member_ids)
+            action_label = f"{label}   [{count} member{'s' if count != 1 else ''}]"
+            menu.addAction(action_label,
+                           lambda *args, mids=member_ids: self._on_select_by_member_ids(mids))
 
     def _on_select_by_member_ids(self, member_ids: list[int]) -> None:
         """Select all members whose IDs are in the given list."""
