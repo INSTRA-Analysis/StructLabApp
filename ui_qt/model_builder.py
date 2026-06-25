@@ -21,7 +21,7 @@ from elements.frame_element import FrameElement
 from elements.bar_element import BarElement
 
 from ui_qt.model_state import (
-    ModelState, SupportType, ElementType,
+    ModelState, NodeData, SupportType, ElementType,
     LoadCase, NodeLoad, MemberLoad, PointLoadData, PartialDistLoad, DistLoad, LoadCombination,
 )
 
@@ -58,6 +58,8 @@ def build_model(state: ModelState,
         *i*, from node_i end to node_j end.
     """
     lc = load_case if load_case is not None else state.active_case
+    # 2D models are native to the engine: all nodes have z == 0 → it builds a
+    # 3-DOF (XY, Y-vertical) model automatically. No remap needed.
     model = Model(ui_is_3d=state.mode_3d)
 
     # ── 3D consistency: if any UI node has z≠0, force all z=0 → 1e-12 ─────

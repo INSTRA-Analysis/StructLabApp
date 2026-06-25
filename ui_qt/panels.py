@@ -143,7 +143,8 @@ class PropertiesPanel(QWidget):
         self._replace(None)
 
     def show_node(self, node: NodeData) -> None:
-        self._replace(_NodeForm(node, self._active_case(), self._on_apply))
+        is_2d = bool(self._model_state and self._model_state.is_2d)
+        self._replace(_NodeForm(node, self._active_case(), self._on_apply, is_2d=is_2d))
 
     def show_member(self, member: MemberData) -> None:
         self._replace(_MemberForm(member, self._model_state, self._on_apply,
@@ -191,11 +192,12 @@ _DL_DIRS = [
 
 class _NodeForm(QWidget):
     def __init__(self, node: NodeData, load_case: LoadCase | None,
-                 on_apply) -> None:
+                 on_apply, is_2d: bool = False) -> None:
         super().__init__()
         self._node      = node
         self._load_case = load_case
         self._on_apply  = on_apply
+        self._is_2d     = is_2d
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -208,8 +210,9 @@ class _NodeForm(QWidget):
         self._y = _spin(node.y, -1000, 1000, 0.25)
         self._z = _spin(node.z, -1000, 1000, 0.25)
         form.addRow("x (m):", self._x)
-        form.addRow("y (m):", self._y)
-        form.addRow("z (m):", self._z)
+        form.addRow("y (m) ↑:" if is_2d else "y (m):", self._y)
+        if not is_2d:
+            form.addRow("z (m):", self._z)
         layout.addWidget(coord_box)
 
         # ── support ──────────────────────────────────────────────────────────
@@ -252,12 +255,18 @@ class _NodeForm(QWidget):
         self._m  = _spin(nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(nl.moment_y / 1e3, -1e6, 1e6, 1)
-        lf.addRow("Fx (kN):",   self._fx)
-        lf.addRow("Fy (kN):",   self._fy)
-        lf.addRow("Fz (kN):",   self._fz)
-        lf.addRow("Mz (kN·m):", self._m)
-        lf.addRow("Mx (kN·m):", self._mx)
-        lf.addRow("My (kN·m):", self._my)
+        if is_2d:
+            # 2D-XY: in-plane only — horizontal Fx, vertical Fy (Y up), moment.
+            lf.addRow("Fx (kN) →:", self._fx)
+            lf.addRow("Fy (kN) ↓:", self._fy)
+            lf.addRow("M (kN·m):",  self._m)
+        else:
+            lf.addRow("Fx (kN):",   self._fx)
+            lf.addRow("Fy (kN):",   self._fy)
+            lf.addRow("Fz (kN):",   self._fz)
+            lf.addRow("Mz (kN·m):", self._m)
+            lf.addRow("Mx (kN·m):", self._mx)
+            lf.addRow("My (kN·m):", self._my)
         layout.addWidget(load_box)
 
         btn = QPushButton("Apply")

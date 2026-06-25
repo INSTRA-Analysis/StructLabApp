@@ -396,6 +396,14 @@ class StructCanvas(QGraphicsScene):
 
         if self._mode == CanvasMode.ADD_NODE:
             snapped = self._snap(pos)
+            # 2D mode: flat placement on the XY plane (Y up, z=0).
+            if not self._is_3d_mode():
+                mx = round(snapped.x() / PX_PER_M / 0.25) * 0.25
+                my = round(-snapped.y() / PX_PER_M / 0.25) * 0.25
+                if not self.model_state.node_at(mx, my, 0.0, tol=0.05):
+                    self.save_snapshot()
+                    self._add_node_item(self.model_state.add_node(mx, my, 0.0))
+                return
             ms = self.model_state
             plane  = self._working_plane
             offset = self._plane_offset
@@ -660,7 +668,7 @@ class StructCanvas(QGraphicsScene):
                     )
                     dx, dy, dz = cx - ox, cy - oy, 0.0
         else:
-            # 2D mode
+            # 2D mode (XY plane): screen-vertical → world Y
             if axis == 'X':
                 dx, dy, dz = dsx / ppm, 0.0, 0.0
             elif axis == 'Y':
@@ -982,7 +990,7 @@ class StructCanvas(QGraphicsScene):
             self._grab_typed += '.'
 
     def _is_3d_mode(self) -> bool:
-        return True
+        return self.model_state.analysis_mode == "3D"
 
     def _handle_view_key(self, key: int, ctrl: bool) -> bool:
         """Handle numpad-style view shortcuts (3D mode only).
@@ -1314,6 +1322,22 @@ class StructCanvas(QGraphicsScene):
     def reset_view(self) -> None:
         """Reset orbit to the default isometric view (↙ SW)."""
         self.set_view()
+
+    def set_analysis_mode(self, mode: str) -> bool:
+        """Switch between 2D (flat XY) and 3D (Z-up) live. Swaps Y↔Z so a planar
+        model keeps standing, flips the flag, and reprojects. The 3D→2D planarity
+        guard is handled by the caller. Returns True if it changed."""
+        if mode not in ("2D", "3D") or mode == self.model_state.analysis_mode:
+            return False
+        self.model_state.swap_yz()       # height moves Y↔Z so it stays upright
+        self.model_state.analysis_mode = mode
+        self.clear_overlays()
+        if mode == "3D":
+            self.set_view(-45.0, 30.0)   # restore isometric (also reprojects)
+        else:
+            self.reproject()             # flat XY reposition
+        self.model_changed.emit()
+        return True
 
     def update_depth_order(self) -> None:
         """Update member Z-values so nearer members render on top."""
@@ -1714,7 +1738,10 @@ class StructView(QGraphicsView):
                              "Press N to add a node  |  Ctrl+O to open  |  Presets menu to start")
             return
 
-        self._draw_iso_grid(painter, rect)
+        if self.scene()._is_3d_mode():
+            self._draw_iso_grid(painter, rect)
+        else:
+            self._draw_flat_grid(painter, rect)
 
         if self.scene()._grab_active:
             self._draw_grab_status(painter, rect)
@@ -1764,33 +1791,39 @@ class StructView(QGraphicsView):
                     painter.setBrush(QBrush(QColor(0, 120, 200, 28)))
                 painter.drawRect(rb)
 
-        # ── 2. ViewCube (top-right corner) ───────────────────────────────────
+        # ── 2. ViewCube (top-right corner) — 3D only; 2D shows an axis badge ──
         vc = self._view_cube
         vc_cx = float(w - (vc.MARGIN + vc.HALF))
         vc_cy = float(vc.MARGIN + vc.HALF)
-        vc.paint(painter, vc_cx, vc_cy, 1.0)
+        if scene._is_3d_mode():
+            vc.paint(painter, vc_cx, vc_cy, 1.0)
+        else:
+            self._draw_2d_axis_badge(painter, vc_cx, vc_cy)
 
-        # ── 3. Working plane label (just below the ViewCube) ─────────────────
-        plane  = scene._working_plane
-        offset = scene._plane_offset
-        lbl_pen = QPen(QColor("#00cccc"))
-        lbl_pen.setCosmetic(True)
-        painter.setPen(lbl_pen)
-        z_font = painter.font()
-        z_font.setPointSize(8)
-        z_font.setBold(True)
-        painter.setFont(z_font)
-        _axis_map = {
-            WorkingPlane.XY:   f"Z = {offset:.2f} m",
-            WorkingPlane.XZ:   f"Y = {offset:.2f} m",
-            WorkingPlane.YZ:   f"X = {offset:.2f} m",
-            WorkingPlane.FREE: "Free (XY ground)",
-        }
-        plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
-        lbl_y = float(vc.MARGIN * 2 + vc.HALF * 2 + 16)
-        painter.drawText(QPointF(w - 215.0, lbl_y), plane_text)
-        z_font.setBold(False)
-        painter.setFont(z_font)
+        # ── 3. Working plane label (just below the ViewCube) — 3D only ────────
+        # The working-plane selector is a 3D drawing aid; in 2D the model lives
+        # in a single plane (XZ), so the label would just contradict the badge.
+        if scene._is_3d_mode():
+            plane  = scene._working_plane
+            offset = scene._plane_offset
+            lbl_pen = QPen(QColor("#00cccc"))
+            lbl_pen.setCosmetic(True)
+            painter.setPen(lbl_pen)
+            z_font = painter.font()
+            z_font.setPointSize(8)
+            z_font.setBold(True)
+            painter.setFont(z_font)
+            _axis_map = {
+                WorkingPlane.XY:   f"Z = {offset:.2f} m",
+                WorkingPlane.XZ:   f"Y = {offset:.2f} m",
+                WorkingPlane.YZ:   f"X = {offset:.2f} m",
+                WorkingPlane.FREE: "Free (XY ground)",
+            }
+            plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
+            lbl_y = float(vc.MARGIN * 2 + vc.HALF * 2 + 16)
+            painter.drawText(QPointF(w - 215.0, lbl_y), plane_text)
+            z_font.setBold(False)
+            painter.setFont(z_font)
 
         # ── 4. Branding badge (bottom-right corner) ───────────────────────────
         margin = 10.0;  pad_x = 7.0;  pad_y = 5.0
@@ -2339,11 +2372,29 @@ class StructView(QGraphicsView):
         self._view_cube.home_az = _proj.ISO_AZIMUTH
         self._view_cube.home_el = _proj.ISO_ELEVATION
 
+    def _draw_2d_axis_badge(self, painter, cx: float, cy: float) -> None:
+        """X→ / Y↑ orientation badge shown in 2D mode (replaces the ViewCube)."""
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ox, oy, L = cx - 6.0, cy + 10.0, 22.0
+        xpen = QPen(QColor("#FF4444")); xpen.setCosmetic(True); xpen.setWidthF(2.0)
+        painter.setPen(xpen)
+        painter.drawLine(QPointF(ox, oy), QPointF(ox + L, oy))      # X → right
+        ypen = QPen(QColor("#44EE44")); ypen.setCosmetic(True); ypen.setWidthF(2.0)
+        painter.setPen(ypen)
+        painter.drawLine(QPointF(ox, oy), QPointF(ox, oy - L))      # Y ↑ up
+        f = painter.font(); f.setPointSize(8); f.setBold(True); painter.setFont(f)
+        painter.setPen(QPen(QColor("#FF4444"))); painter.drawText(QPointF(ox + L + 2, oy + 4), "X")
+        painter.setPen(QPen(QColor("#44EE44"))); painter.drawText(QPointF(ox - 4, oy - L - 3), "Y")
+        painter.setPen(QPen(QColor("#00cccc"))); painter.drawText(QPointF(cx - 20, cy - 24), "2D")
+        painter.restore()
+
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
+        cube_live = self.scene()._is_3d_mode()   # cube hidden/inert in 2D
         # ── ViewCube right-click → context menu ───────────────────────────────
-        if event.button() == Qt.MouseButton.RightButton:
+        if cube_live and event.button() == Qt.MouseButton.RightButton:
             vc = self._view_cube
             vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
             vc_cy = float(vc.MARGIN + vc.HALF)
@@ -2353,7 +2404,7 @@ class StructView(QGraphicsView):
                 return
 
         # ── ViewCube click — hit-test in stable viewport pixels ───────────────
-        if event.button() == Qt.MouseButton.LeftButton:
+        if cube_live and event.button() == Qt.MouseButton.LeftButton:
             vc = self._view_cube
             vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
             vc_cy = float(vc.MARGIN + vc.HALF)
@@ -2370,7 +2421,7 @@ class StructView(QGraphicsView):
                 return
 
         # ── Plane-label click → quick-set dialog for the working-plane offset ───
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self.scene()._is_3d_mode():
             vp   = self.viewport()
             w, h = vp.width(), vp.height()
             vc   = self._view_cube
@@ -2409,7 +2460,7 @@ class StructView(QGraphicsView):
         # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
             shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            if shift:
+            if shift and self.scene()._is_3d_mode():   # orbit disabled in 2D
                 self._orbit_last = event.pos()
                 self._orbit_center = self._selected_centroid()
                 self.scene().clear_overlays()

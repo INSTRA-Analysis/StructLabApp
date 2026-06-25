@@ -151,11 +151,23 @@ def px_to_m(px: float) -> float:
     return px / PX_PER_M
 
 
+def _display_3d(ms) -> bool:
+    """True when the model should be drawn with the 3D isometric projection.
+
+    2D models are always drawn flat, even though their XZ geometry has z != 0.
+    """
+    if getattr(ms, "is_2d", False):
+        return False
+    return ms.mode_3d or is_3d_model(ms.nodes)
+
+
 def _node_pos(node: NodeData, scene=None) -> tuple[float, float]:
-    """Return (scene_x, scene_y) for a node, using isometric if 3D model."""
+    """Return (scene_x, scene_y) for a node.
+
+    3D → isometric; 2D → flat (X right, Y up). 2D is the native XY plane.
+    """
     if scene is not None and scene.model_state is not None:
-        ms = scene.model_state
-        if ms.mode_3d or is_3d_model(ms.nodes):
+        if _display_3d(scene.model_state):
             return isometric(node.x, node.y, node.z)
     return (m_to_px(node.x), -m_to_px(node.y))
 
@@ -244,7 +256,7 @@ class NodeItem(QGraphicsEllipseItem):
 
     def itemChange(self, change, value):
         ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
 
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if not in_3d:
@@ -256,7 +268,7 @@ class NodeItem(QGraphicsEllipseItem):
 
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             if not in_3d:
-                # Sync NodeData coordinates from 2D scene position
+                # Sync NodeData coordinates from 2D scene position (XY plane).
                 self.node.x = px_to_m(self.pos().x())
                 self.node.y = -px_to_m(self.pos().y())
                 # Redraw symbols at new position
@@ -295,7 +307,7 @@ class NodeItem(QGraphicsEllipseItem):
 
         s = 14
         ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
 
         _COL = {
             SupportType.FIXED:    ("#c0392b", "#7b241c"),
@@ -538,7 +550,7 @@ class NodeItem(QGraphicsEllipseItem):
         sx, sy = self.pos().x(), self.pos().y()
 
         ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
 
         # Scale arrow length relative to the largest nodal force in this load case
         # so different magnitudes are visually distinguishable.
@@ -907,7 +919,7 @@ class MemberItem(QGraphicsLineItem):
         px_n_m, py_n_m = -uy, ux
         # Arrow direction: gravity (screen-down) in 3D, member-perpendicular in 2D
         ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
         if in_3d:
             px_n, py_n = 0.0, 1.0
         else:
@@ -996,7 +1008,7 @@ class MemberItem(QGraphicsLineItem):
 
         ml = self._scene.model_state.active_case.get_member_load(self.member.id)
         ms = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
 
         # Pre-compute model-wide maxima per direction so arrows on different
         # members scale proportionally to each other (same logic as w_global_max).
@@ -1234,7 +1246,7 @@ class MemberItem(QGraphicsLineItem):
 
         ux, uy = dx / L_px, dy / L_px
         ms    = self._scene.model_state
-        in_3d = ms.mode_3d or is_3d_model(ms.nodes)
+        in_3d = _display_3d(ms)
 
         if in_3d:
             px_n, py_n = 0.0, 1.0
