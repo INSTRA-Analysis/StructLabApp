@@ -2311,9 +2311,47 @@ class StructView(QGraphicsView):
             return None
         return (sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs))
 
+    # ── ViewCube context menu ────────────────────────────────────────────────
+
+    def _show_cube_menu(self, global_pt) -> None:
+        """Right-click menu on the ViewCube: home, named views, set-as-home."""
+        from PyQt6.QtWidgets import QMenu
+        from ui_qt.view_cube import NAMED_VIEWS
+        vc = self._view_cube
+        menu = QMenu(self)
+        menu.addAction("Home View",
+                       lambda *a: self._set_cube_view(vc.home_az, vc.home_el))
+        menu.addSeparator()
+        for name, az, el in NAMED_VIEWS:
+            a_az = _proj.ISO_AZIMUTH if az is None else az
+            menu.addAction(name,
+                           lambda *a, x=a_az, y=el: self._set_cube_view(x, y))
+        menu.addSeparator()
+        menu.addAction("Set Current View as Home", lambda *a: self._set_view_as_home())
+        menu.exec(global_pt)
+
+    def _set_cube_view(self, az: float, el: float) -> None:
+        self.scene().set_view_preset(az, el)
+        self.scene().view_changed.emit()
+        self.viewport().update()
+
+    def _set_view_as_home(self) -> None:
+        self._view_cube.home_az = _proj.ISO_AZIMUTH
+        self._view_cube.home_el = _proj.ISO_ELEVATION
+
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
+        # ── ViewCube right-click → context menu ───────────────────────────────
+        if event.button() == Qt.MouseButton.RightButton:
+            vc = self._view_cube
+            vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
+            vc_cy = float(vc.MARGIN + vc.HALF)
+            if vc.contains(QPointF(event.pos()), vc_cx, vc_cy, 1.0):
+                self._show_cube_menu(event.globalPosition().toPoint())
+                event.accept()
+                return
+
         # ── ViewCube click — hit-test in stable viewport pixels ───────────────
         if event.button() == Qt.MouseButton.LeftButton:
             vc = self._view_cube
