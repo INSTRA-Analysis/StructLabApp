@@ -287,6 +287,11 @@ class MainWindow(QMainWindow):
         self._select_group_menu = edit_menu.addMenu("Select by Group")
         self._select_group_menu.aboutToShow.connect(self._rebuild_select_group_menu)
 
+        edit_menu.addSeparator()
+        edit_menu.addAction("Scale Selection…", self._on_scale_selection)
+        edit_menu.addAction("  (or press S on the canvas for interactive scale)") \
+            .setEnabled(False)
+
     def _on_select_all(self) -> None:
         """Select all nodes and members on the canvas."""
         def _do():
@@ -386,6 +391,65 @@ class MainWindow(QMainWindow):
             action_label = f"{label}   [{count} member{'s' if count != 1 else ''}]"
             menu.addAction(action_label,
                            lambda *args, mids=member_ids: self._on_select_by_member_ids(mids))
+
+    def _on_scale_selection(self) -> None:
+        """Scale the selected nodes about their centroid (precise dialog path)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QFormLayout, QDoubleSpinBox, QCheckBox,
+            QDialogButtonBox, QVBoxLayout, QLabel,
+        )
+        nodes = self._scene.selected_node_set()
+        if not nodes:
+            self._sb.showMessage("Select nodes (or members) to scale first.")
+            return
+        cx, cy, cz = self._scene.selection_centroid(nodes)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Scale Selection")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(
+            f"<b>{len(nodes)} node(s)</b> — scaling about centroid "
+            f"({cx:.3g}, {cy:.3g}, {cz:.3g}) m"))
+        form = QFormLayout()
+
+        def _spin(val=1.0):
+            w = QDoubleSpinBox(); w.setRange(0.01, 100.0)
+            w.setSingleStep(0.1); w.setDecimals(3); w.setValue(val)
+            return w
+
+        uniform = _spin()
+        form.addRow("Uniform factor:", uniform)
+        per_axis = QCheckBox("Independent per-axis factors")
+        form.addRow("", per_axis)
+        sx, sy, sz = _spin(), _spin(), _spin()
+        for w in (sx, sy, sz):
+            w.setEnabled(False)
+        form.addRow("X factor:", sx)
+        form.addRow("Y factor:", sy)
+        form.addRow("Z factor:", sz)
+        layout.addLayout(form)
+
+        def _toggle(checked: bool) -> None:
+            uniform.setEnabled(not checked)
+            for w in (sx, sy, sz):
+                w.setEnabled(checked)
+        per_axis.toggled.connect(_toggle)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        if per_axis.isChecked():
+            fx, fy, fz = sx.value(), sy.value(), sz.value()
+        else:
+            fx = fy = fz = uniform.value()
+        if self._scene.scale_selection(fx, fy, fz):
+            self._sb.showMessage(
+                f"Scaled {len(nodes)} node(s) by ({fx:g}, {fy:g}, {fz:g}).")
 
     def _on_select_by_member_ids(self, member_ids: list[int]) -> None:
         """Select all members whose IDs are in the given list."""
