@@ -1,46 +1,34 @@
-# ════════════════════════════════════════════════════════════════════════════
-#  StructLab CSV Import Template
-#  Replace the example rows below with your own model, then:
-#  File ▸ Import ▸ From CSV…
-#  Blank lines and any line starting with '#' are ignored on import.
-# ════════════════════════════════════════════════════════════════════════════
+# StructLab CSV import template
+# Units: SI throughout -> metres, newtons, pascals, kg/m3.
+# Axes: X and Y are horizontal; Z = UP (vertical). A downward load is Fz < 0.
+# Blank lines and '#' comment lines are ignored. Each block starts with a #SECTION
+# header; the row right after it names the columns (order is tolerant - matched by name).
+#
+# Replace the example rows below with your own model, then File > Import > From CSV.
 
-# ────────────────────────────────────────────────────────────────────────────
-#  NODES  —  joint coordinates in metres
-#  x, y are horizontal · z is vertical (UP)
-# ────────────────────────────────────────────────────────────────────────────
 #NODES
-id,      x,      y,      z
- 1, 0.0000, 0.0000, 0.0000
- 2, 2.0000, 0.0000, 0.0000
- 3, 1.0000, 0.0000, 2.0000
+# id = your node label (any integers); x,y,z = coordinates in metres.
+id,x,y,z
+1,0,0,0
+2,2,0,0
+3,1,0,2
 
-# ────────────────────────────────────────────────────────────────────────────
-#  MEMBERS  —  connectivity & section
-#  etype : bar = pin-jointed truss · beam · pin_i · pin_j
-#  group : free label for display only (Leg / Diagonal / Horizontal)
-#  E [Pa]  A [m²]  fy [Pa]  density [kg/m³]
-# ────────────────────────────────────────────────────────────────────────────
 #MEMBERS
-id, node_i, node_j, etype, group     ,    E,     A,     fy, density
- 1,      1,      3, bar  , Diagonal  , 2e11, 0.005, 2.75e8,    7850
- 2,      3,      2, bar  , Diagonal  , 2e11, 0.005, 2.75e8,    7850
- 3,      1,      2, bar  , Horizontal, 2e11, 0.005, 2.75e8,    7850
+# etype = analysis element type: bar (pin-pin truss), beam (full), pin_i, pin_j.
+# group = free label for display/reporting (e.g. Leg / Diagonal / Horizontal).
+# E [Pa], A [m2], fy [Pa], density [kg/m3] (density only used if a self-weight case is on).
+id,node_i,node_j,etype,group,E,A,fy,density
+1,1,3,bar,Diagonal,2e11,0.005,2.75e8,7850
+2,3,2,bar,Diagonal,2e11,0.005,2.75e8,7850
+3,1,2,bar,Horizontal,2e11,0.005,2.75e8,7850
 
-# ────────────────────────────────────────────────────────────────────────────
-#  SUPPORTS  —  restrained translations (1 = fixed, 0 = free)
-#  rx, ry, rz act along global X, Y, Z
-# ────────────────────────────────────────────────────────────────────────────
 #SUPPORTS
-node, rx, ry, rz
-   1,  1,  1,  1
-   2,  1,  1,  1
+# rx,ry,rz = translational restraints (1 = fixed, 0 = free) in X,Y,Z.
+node,rx,ry,rz
+1,1,1,1
+2,1,1,1
 
-# ────────────────────────────────────────────────────────────────────────────
-#  FORCES  —  nodal point loads in newtons
-#  global axes · a downward load is Fz < 0
-# ────────────────────────────────────────────────────────────────────────────
 #FORCES
-node, Fx, Fy,    Fz
-   3,  0,  0, -5000
-
+# Nodal point loads in newtons, global axes. Downward = Fz < 0.
+node,Fx,Fy,Fz
+3,0,0,-5000
