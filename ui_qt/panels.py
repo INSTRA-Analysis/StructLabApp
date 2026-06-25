@@ -42,6 +42,70 @@ def _label_value(text: str) -> QLabel:
     return lbl
 
 
+# ── selection summary helpers (read-only "current properties" read-out) ───────
+
+_ETYPE_LABELS = {
+    ElementType.BEAM:      "Beam — rigid (full bending)",
+    ElementType.BAR:       "Bar — pin–pin (axial only)",
+    ElementType.PIN_LEFT:  "Pin at I end",
+    ElementType.PIN_RIGHT: "Pin at J end",
+}
+
+
+def _profile_name(E: float, A: float, I: float) -> str:
+    """Reverse-lookup a steel section name from (A, I); 'Custom' if no match."""
+    name = _build_section_lookup().get((round(A, 8), round(I, 12)))
+    return name if name else "Custom"
+
+
+def _summary_table(rows: list[tuple[str, str]]) -> str:
+    """Render (key, value) rows as a compact two-column HTML table."""
+    cells = "".join(
+        f"<tr><td style='color:#8a93a6;padding-right:10px'>{k}</td>"
+        f"<td><b>{v}</b></td></tr>"
+        for k, v in rows
+    )
+    return f"<table cellspacing='2'>{cells}</table>"
+
+
+def _member_summary_html(m: MemberData) -> str:
+    """Read-only summary of a member's *current saved* properties."""
+    rows: list[tuple[str, str]] = [
+        ("Element type", _ETYPE_LABELS.get(m.element_type, m.element_type.name)),
+    ]
+    if (m.group or "").strip():
+        rows.append(("Group", m.group.strip()))
+    rows.append(("Profile", _profile_name(m.E, m.A, m.I)))
+    rows.append(("A", f"{m.A:.4g} m²"))
+    rows.append(("E", f"{m.E / 1e9:.0f} GPa"))
+    if m.element_type != ElementType.BAR:
+        rows.append(("I_z", f"{m.I * 1e6:.4g} ×10⁻⁶ m⁴"))
+    rows.append(("f_y", f"{m.fy / 1e6:.0f} MPa"))
+    return _summary_table(rows)
+
+
+def _multi_member_summary_html(members: list) -> str:
+    """Read-only summary across a multi-member selection ('mixed' if not uniform)."""
+    def uniform(key):
+        vals = {key(m) for m in members}
+        return vals.pop() if len(vals) == 1 else None
+
+    et = uniform(lambda m: m.element_type)
+    et_str = _ETYPE_LABELS.get(et, et.name) if et is not None else "mixed"
+    prof_uniform = uniform(lambda m: (round(m.A, 8), round(m.I, 12)))
+    prof_str = (_profile_name(members[0].E, members[0].A, members[0].I)
+                if prof_uniform is not None else "mixed")
+    distinct_groups = sorted({(m.group or "").strip() for m in members
+                              if (m.group or "").strip()})
+    grp_str = ", ".join(distinct_groups) if distinct_groups else "—"
+    return _summary_table([
+        ("Count", f"{len(members)} members"),
+        ("Element type", et_str),
+        ("Profile", prof_str),
+        ("Groups", grp_str),
+    ])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PropertiesPanel
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +127,7 @@ class PropertiesPanel(QWidget):
         self._layout.addWidget(self._placeholder)
         self._content: QWidget | None = None
         self.refresh_callback = None      # set by MainWindow
+        self.divide_callback = None       # set by MainWindow: (member_id, n_div) -> None
         self._model_state = None          # set by MainWindow via set_model_state()
 
     def set_model_state(self, state) -> None:
@@ -81,7 +146,8 @@ class PropertiesPanel(QWidget):
         self._replace(_NodeForm(node, self._active_case(), self._on_apply))
 
     def show_member(self, member: MemberData) -> None:
-        self._replace(_MemberForm(member, self._model_state, self._on_apply))
+        self._replace(_MemberForm(member, self._model_state, self._on_apply,
+                                  self.divide_callback))
 
     def show_nodes(self, nodes: list) -> None:
         self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply))
@@ -276,16 +342,25 @@ _MAT_TYPE_LABELS = {"steel": "fy (MPa):", "concrete": "fck (MPa):", "timber": "f
 
 class _MemberForm(QWidget):
     def __init__(self, member: MemberData, model_state,
-                 on_apply) -> None:
+                 on_apply, divide_callback=None) -> None:
         super().__init__()
-        self._member      = member
-        self._model_state = model_state
-        self._load_case   = model_state.active_case if model_state else None
-        self._on_apply    = on_apply
+        self._member          = member
+        self._model_state     = model_state
+        self._load_case       = model_state.active_case if model_state else None
+        self._on_apply        = on_apply
+        self._divide_callback = divide_callback
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         layout.addWidget(QLabel(f"<b>Member {member.id}</b> (nodes {member.node_i}→{member.node_j})"))
+
+        # ── current-properties read-out (reflects the saved state) ─────────────
+        summary_box = QGroupBox("Current properties")
+        _sm = QVBoxLayout(summary_box)
+        self._summary_lbl = QLabel(_member_summary_html(member))
+        self._summary_lbl.setTextFormat(Qt.TextFormat.RichText)
+        _sm.addWidget(self._summary_lbl)
+        layout.addWidget(summary_box)
 
         tabs = QTabWidget()
 
@@ -502,9 +577,39 @@ class _MemberForm(QWidget):
 
         layout.addWidget(tabs)
 
+        # ── Divide — split this member into multiple real elements ───────────
+        if self._divide_callback is not None:
+            div_box = QGroupBox("Divide into elements")
+            div_layout = QHBoxLayout(div_box)
+            div_layout.setSpacing(4)
+            # label, n_divisions (= intermediate nodes + 1)
+            for _lbl, _ndiv in [("Halve", 2), ("5 nodes", 6), ("10 nodes", 11)]:
+                _b = QPushButton(_lbl)
+                _b.setFixedHeight(28)
+                _b.setToolTip(f"Split into {_ndiv} elements")
+                _b.clicked.connect(
+                    lambda _c=False, n=_ndiv: self._divide_callback(self._member.id, n)
+                )
+                div_layout.addWidget(_b)
+            _bc = QPushButton("Custom…")
+            _bc.setFixedHeight(28)
+            _bc.clicked.connect(self._divide_custom)
+            div_layout.addWidget(_bc)
+            layout.addWidget(div_box)
+
         btn = QPushButton("Apply")
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
+
+    def _divide_custom(self) -> None:
+        """Prompt for an element count, then divide the member into that many."""
+        from PyQt6.QtWidgets import QInputDialog
+        n, ok = QInputDialog.getInt(
+            self, "Divide Member", "Number of elements:",
+            value=4, min=2, max=100,
+        )
+        if ok and self._divide_callback is not None:
+            self._divide_callback(self._member.id, n)
 
     def _update_design_visibility(self, mat_type: str) -> None:
         """Show concrete section fields or steel/timber W_pl/W_el based on material type."""
@@ -764,6 +869,9 @@ class _MemberForm(QWidget):
                         point_loads=old_ml.point_loads,
                         partial_loads=old_ml.partial_loads,
                     ))
+        # Refresh the read-out so it reflects the just-saved values (confirms
+        # the change landed, even when "Colour by Group" masks the line colour).
+        self._summary_lbl.setText(_member_summary_html(m))
         self._on_apply()
 
 
@@ -913,6 +1021,13 @@ class _MultiMemberForm(QWidget):
                      "<small style='color:#888'>— edits apply to all</small>")
         hdr.setWordWrap(True)
         root.addWidget(hdr)
+
+        summary_box = QGroupBox("Current selection")
+        _sm = QVBoxLayout(summary_box)
+        self._summary_lbl = QLabel(_multi_member_summary_html(members))
+        self._summary_lbl.setTextFormat(Qt.TextFormat.RichText)
+        _sm.addWidget(self._summary_lbl)
+        root.addWidget(summary_box)
 
         tabs = QTabWidget()
         root.addWidget(tabs)
@@ -1227,6 +1342,7 @@ class _MultiMemberForm(QWidget):
                         point_loads=old_ml.point_loads,
                         partial_loads=old_ml.partial_loads,
                     ))
+        self._summary_lbl.setText(_multi_member_summary_html(self._members))
         self._on_apply()
 
 
