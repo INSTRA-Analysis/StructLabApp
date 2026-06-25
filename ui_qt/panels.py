@@ -879,18 +879,30 @@ class _MemberForm(QWidget):
 # _MixedFilterForm
 # ─────────────────────────────────────────────────────────────────────────────
 
+_SECTION_LOOKUP_CACHE: dict[tuple[float, float], str] | None = None
+
+
 def _build_section_lookup() -> dict[tuple[float, float], str]:
-    """Return {(rounded_A, rounded_I): profile_name} from the section library."""
+    """Return {(rounded_A, rounded_I): profile_name} from the section library.
+
+    The section library is static, so the lookup is built once and cached.
+    Robust to STEEL_PROFILES entries carrying extra columns (e.g. W_pl, W_el):
+    only the first three (name, A, I) are read.
+    """
+    global _SECTION_LOOKUP_CACHE
+    if _SECTION_LOOKUP_CACHE is not None:
+        return _SECTION_LOOKUP_CACHE
+    lookup: dict[tuple[float, float], str] = {}
     try:
         from ui_qt.section_library import STEEL_PROFILES
-        lookup: dict[tuple[float, float], str] = {}
         for _series, profiles in STEEL_PROFILES.items():
             for entry in profiles:
                 name, A, I = entry[0], entry[1], entry[2]
                 lookup[(round(A, 8), round(I, 12))] = name
-        return lookup
     except Exception:
-        return {}
+        lookup = {}
+    _SECTION_LOOKUP_CACHE = lookup
+    return lookup
 
 
 class _MixedFilterForm(QWidget):
