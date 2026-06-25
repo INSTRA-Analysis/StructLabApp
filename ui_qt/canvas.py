@@ -92,6 +92,8 @@ class StructCanvas(QGraphicsScene):
         self._undo_stack: list[dict] = []
         self._redo_stack: list[dict] = []
         self._drag_snapshot_saved: bool = False  # avoid duplicate snapshots per drag
+        self._isolated: bool = False             # isolate-selection mode
+        self._isolated_member_ids: set[int] = set()
 
         # ── G-grab state ──────────────────────────────────────────────────────
         self._grab_active: bool = False
@@ -131,6 +133,85 @@ class StructCanvas(QGraphicsScene):
             item.set_movable(movable)
         if mode != CanvasMode.ADD_MEMBER:
             self._cancel_member_drag()
+
+    def toggle_isolate(self) -> None:
+        """Toggle isolate-selection mode: hide everything outside the current selection.
+
+        If already isolated, restore all items. Endpoint nodes of selected members
+        are automatically included so no member is orphaned visually.
+        Overlay diagrams (BMD/SFD/AFD/Deformed/Labels) are also filtered to the
+        isolated member set when items carry a UI member ID tag (set by update_overlays).
+        """
+        from ui_qt.canvas_items import NodeItem, MemberItem
+        if self._isolated:
+            for item in self._node_items.values():
+                item.set_visible_all(True)
+            for item in self._member_items.values():
+                item.set_visible_all(True)
+            # Restore overlay items according to their layer's current visibility setting
+            for layer, items in self._overlay_items.items():
+                layer_vis = self._overlay_visible.get(layer, True)
+                for it in items:
+                    it.setVisible(layer_vis)
+            self._isolated = False
+            self._isolated_member_ids.clear()
+            # Re-apply load toggle so any previously hidden loads stay hidden
+            if not self._show_loads:
+                self.set_loads_visible(False)
+            self.invalidate(self.sceneRect())
+            return
+
+        selected = self.selectedItems()
+        sel_node_ids    = {it.node.id   for it in selected if isinstance(it, NodeItem)}
+        sel_member_ids  = {it.member.id for it in selected if isinstance(it, MemberItem)}
+        if not sel_node_ids and not sel_member_ids:
+            return   # nothing selected — nothing to isolate
+
+        # Include endpoint nodes of selected members so they remain visible
+        for mid in sel_member_ids:
+            m = self.model_state.get_member(mid)
+            if m:
+                sel_node_ids.add(m.node_i)
+                sel_node_ids.add(m.node_j)
+
+        for nid, item in self._node_items.items():
+            item.set_visible_all(nid in sel_node_ids)
+        for mid, item in self._member_items.items():
+            item.set_visible_all(mid in sel_member_ids)
+
+        # Filter overlay items via the per-member dict (no reliance on data() tags).
+        # Build a set of items in currently-visible layers for fast lookup.
+        visible_layer_items: set = set()
+        for layer, layer_items_list in self._overlay_items.items():
+            if self._overlay_visible.get(layer, True):
+                visible_layer_items.update(layer_items_list)
+        # Hide all overlays, then show only those for isolated members in visible layers.
+        for items in self._overlay_items.values():
+            for it in items:
+                it.setVisible(False)
+        for mid, items in self._member_overlay_items.items():
+            if mid in sel_member_ids:
+                for it in items:
+                    if it in visible_layer_items:
+                        it.setVisible(True)
+
+        self._isolated = True
+        self._isolated_member_ids = sel_member_ids
+        self.invalidate(self.sceneRect())
+
+    def set_loads_visible(self, visible: bool) -> None:
+        """Toggle visibility of all load graphics (arrows, labels) without affecting
+        supports, hinges, or structural geometry.  Isolation mode is respected —
+        items hidden by isolation are not unintentionally revealed.
+        """
+        from ui_qt.canvas_items import NodeItem, MemberItem
+        self._show_loads = visible
+        for item in self._node_items.values():
+            if item.isVisible():   # skip items hidden by isolation
+                item.set_loads_visible(visible)
+        for item in self._member_items.values():
+            if item.isVisible():
+                item.set_loads_visible(visible)
 
     def set_next_member_type(self, element_type: ElementType) -> None:
         self._next_member_type = element_type
@@ -408,6 +489,8 @@ class StructCanvas(QGraphicsScene):
             self.undo()
         elif key == Qt.Key.Key_Y and ctrl:
             self.redo()
+        elif key == Qt.Key.Key_I and not ctrl and not shift:
+            self.toggle_isolate()
         elif key == Qt.Key.Key_G and not ctrl and not shift:
             self._start_grab()
         elif key == Qt.Key.Key_E and not ctrl and not shift:
@@ -813,20 +896,40 @@ class StructCanvas(QGraphicsScene):
         diag_scale = diag_auto * diag_scale_mult
         def_scale  = def_auto  * def_scale_mult
 
+        # Build member ID arrays for overlay tagging (enables per-member isolation).
+        # member_el_map[i] corresponds to model_state.members[i].
+        member_ids = [m.id for m in self.model_state.members]
+        el_id_to_member_id: dict[int, int] = {}
+        for mi, el_ids in enumerate(member_el_map):
+            if mi < len(member_ids):
+                for eid in el_ids:
+                    el_id_to_member_id[eid] = member_ids[mi]
+
         layer_items: dict[str, list] = {
-            'BMD':      draw_bmd(model, sub_results, load_map, diag_scale, member_el_map),
-            'SFD':      draw_sfd(model, sub_results, load_map, diag_scale, member_el_map),
-            'AFD':      draw_afd(model, sub_results),
-            'Deformed': draw_deformed(model, displacements, def_scale),
+            'BMD':      draw_bmd(model, sub_results, load_map, diag_scale, member_el_map,
+                                 member_ids=member_ids),
+            'SFD':      draw_sfd(model, sub_results, load_map, diag_scale, member_el_map,
+                                 member_ids=member_ids),
+            'AFD':      draw_afd(model, sub_results,
+                                 el_id_to_member_id=el_id_to_member_id),
+            'Deformed': draw_deformed(model, displacements, def_scale,
+                                      el_id_to_member_id=el_id_to_member_id),
             'Labels':   draw_labels(model, sub_results, load_map, diag_scale, member_el_map,
-                                    displacements=displacements, def_scale=def_scale),
+                                    displacements=displacements, def_scale=def_scale,
+                                    member_ids=member_ids),
         }
 
+        # Build per-member item groups for isolation support.
+        # Use data(0) tags set by draw_* functions; fall back to scanning all items.
+        self._member_overlay_items.clear()
         for layer, items in layer_items.items():
             visible = self._overlay_visible.get(layer, True)
             for item in items:
                 self.addItem(item)
                 item.setVisible(visible)
+                uid = item.data(0)
+                if uid is not None:
+                    self._member_overlay_items.setdefault(uid, []).append(item)
             self._overlay_items[layer] = items
 
     def update_overlays_single_combo(
@@ -967,6 +1070,7 @@ class StructCanvas(QGraphicsScene):
             for item in items:
                 self.removeItem(item)
         self._overlay_items.clear()
+        self._member_overlay_items.clear()
 
     def reproject(self) -> None:
         """Reposition all items after the isometric projection angles change."""
@@ -1074,10 +1178,19 @@ class StructCanvas(QGraphicsScene):
         self.update()
 
     def set_overlay_visible(self, layer: str, visible: bool) -> None:
-        """Toggle visibility of a named overlay layer."""
+        """Toggle visibility of a named overlay layer, respecting isolation mode."""
         self._overlay_visible[layer] = visible
-        for item in self._overlay_items.get(layer, []):
-            item.setVisible(visible)
+        if self._isolated:
+            # In isolation mode: only show items for visible isolated members
+            isolated_items: set = set()
+            for mid, items in self._member_overlay_items.items():
+                if mid in self._isolated_member_ids:
+                    isolated_items.update(items)
+            for item in self._overlay_items.get(layer, []):
+                item.setVisible(visible and item in isolated_items)
+        else:
+            for item in self._overlay_items.get(layer, []):
+                item.setVisible(visible)
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -1119,6 +1232,7 @@ class StructCanvas(QGraphicsScene):
         self._node_items.clear()
         self._member_items.clear()
         self.model_state.clear()
+        self._isolated = False
 
     def load_state(self, state: ModelState) -> None:
         self.clear_model()
@@ -1349,6 +1463,9 @@ class StructView(QGraphicsView):
             QPixmap(str(_logo)) if _logo.exists() else None
         )
 
+        # Refresh the foreground (HUD) whenever selection changes
+        scene.selectionChanged.connect(lambda: self.viewport().update())
+
     # ── grid drawn here so it always fills the visible viewport ──────────────
 
     # Available sub-grid spacings in metres — the renderer picks the one
@@ -1408,10 +1525,20 @@ class StructView(QGraphicsView):
         if self._rb_start is not None and self._rb_end is not None:
             rb = QRect(self._rb_start, self._rb_end).normalized()
             if rb.width() > 2 or rb.height() > 2:
-                rb_pen = QPen(QColor(0, 180, 220, 200))
-                rb_pen.setCosmetic(True)
-                painter.setPen(rb_pen)
-                painter.setBrush(QBrush(QColor(0, 140, 180, 35)))
+                crossing = self._rb_end.x() < self._rb_start.x()
+                if crossing:
+                    # Right-to-left: crossing selection — green dashed
+                    rb_pen = QPen(QColor(60, 210, 90, 220))
+                    rb_pen.setCosmetic(True)
+                    rb_pen.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(rb_pen)
+                    painter.setBrush(QBrush(QColor(40, 180, 70, 28)))
+                else:
+                    # Left-to-right: window selection — blue solid
+                    rb_pen = QPen(QColor(0, 150, 220, 220))
+                    rb_pen.setCosmetic(True)
+                    painter.setPen(rb_pen)
+                    painter.setBrush(QBrush(QColor(0, 120, 200, 28)))
                 painter.drawRect(rb)
 
         # ── 2. ViewCube (top-right corner) ───────────────────────────────────
@@ -1477,6 +1604,86 @@ class StructView(QGraphicsView):
         ver_pen = QPen(QColor(130, 130, 130));  ver_pen.setCosmetic(True)
         painter.setPen(ver_pen)
         painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.1")
+
+        # ── 5. Selection shortcut HUD (bottom-left, when items are selected) ────
+        from ui_qt.canvas_items import NodeItem, MemberItem
+        selected = scene.selectedItems()
+        if selected and scene._mode == CanvasMode.SELECT:
+            _ROWS = [
+                ("G",       "Move (grab)"),
+                ("E",       "Extrude"),
+                ("I",       "Isolate / Restore all"),
+                ("Ctrl+D",  "Duplicate array"),
+                ("Ctrl+I",  "Invert selection"),
+                ("Del",     "Delete"),
+            ]
+            _hud_pad_x, _hud_pad_y = 9.0, 7.0
+            _hud_row_h  = 16.0
+            _hud_key_w  = 52.0
+            _hud_desc_w = 132.0
+            _hud_w = _hud_key_w + _hud_desc_w + _hud_pad_x * 3
+            _hud_h = _hud_pad_y * 2 + 18.0 + len(_ROWS) * _hud_row_h
+            _hud_x = 12.0
+            _hud_y = float(h) - 12.0 - _hud_h
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(18, 18, 24, 185)))
+            painter.drawRoundedRect(_QRectF(_hud_x, _hud_y, _hud_w, _hud_h), 5.0, 5.0)
+
+            hf = painter.font()
+            hf.setPointSize(8); hf.setBold(True)
+            painter.setFont(hf)
+            painter.setPen(QPen(QColor("#00cccc")))
+            painter.drawText(QPointF(_hud_x + _hud_pad_x, _hud_y + _hud_pad_y + 12.0),
+                             "Selection shortcuts")
+
+            hf.setBold(False); hf.setPointSize(8)
+            painter.setFont(hf)
+            sep_pen = QPen(QColor(60, 60, 80)); sep_pen.setCosmetic(True)
+            painter.setPen(sep_pen)
+            painter.drawLine(
+                QPointF(_hud_x + 6, _hud_y + _hud_pad_y + 17.0),
+                QPointF(_hud_x + _hud_w - 6, _hud_y + _hud_pad_y + 17.0),
+            )
+
+            for ri, (key_txt, desc_txt) in enumerate(_ROWS):
+                ry = _hud_y + _hud_pad_y + 17.0 + (ri + 1) * _hud_row_h
+                # Key chip background
+                chip_x = _hud_x + _hud_pad_x
+                chip_w = _hud_key_w
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(38, 38, 52, 220)))
+                painter.drawRoundedRect(_QRectF(chip_x, ry - 11.0, chip_w, 14.0), 3.0, 3.0)
+                # Key label
+                painter.setPen(QPen(QColor(200, 200, 220)))
+                painter.drawText(
+                    _QRectF(chip_x, ry - 11.0, chip_w, 14.0),
+                    Qt.AlignmentFlag.AlignCenter, key_txt,
+                )
+                # Description
+                painter.setPen(QPen(QColor(160, 160, 175)))
+                painter.drawText(
+                    QPointF(_hud_x + _hud_pad_x * 2 + _hud_key_w, ry), desc_txt,
+                )
+
+        # ── 6. "ISOLATED" badge (bottom-left above HUD when in isolation mode) ──
+        if scene._isolated:
+            _iso_font = painter.font()
+            _iso_font.setPointSize(9); _iso_font.setBold(True)
+            painter.setFont(_iso_font)
+            _iso_txt = "  ISOLATED — press I to restore  "
+            _iso_metrics = painter.fontMetrics()
+            _iso_w = float(_iso_metrics.horizontalAdvance(_iso_txt)) + 4.0
+            _iso_h = 22.0
+            _iso_x = 12.0
+            _iso_y = float(h) - 12.0 - _iso_h - (
+                (_hud_h + 6.0) if (selected and scene._mode == CanvasMode.SELECT) else 0.0
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(80, 30, 0, 210)))
+            painter.drawRoundedRect(_QRectF(_iso_x, _iso_y, _iso_w, _iso_h), 4.0, 4.0)
+            painter.setPen(QPen(QColor("#ff9944")))
+            painter.drawText(QPointF(_iso_x + 2.0, _iso_y + 15.0), _iso_txt)
 
         painter.restore()
 
@@ -1992,6 +2199,10 @@ class StructView(QGraphicsView):
         # ── Finalise rubber-band selection ────────────────────────────────────
         if event.button() == Qt.MouseButton.LeftButton:
             if self._rb_start is not None and self._rb_end is not None:
+                # Determine mode BEFORE normalizing (direction carries semantic meaning)
+                crossing = self._rb_end.x() < self._rb_start.x()
+                sel_mode = (Qt.ItemSelectionMode.IntersectsItemShape if crossing
+                            else Qt.ItemSelectionMode.ContainsItemShape)
                 rb = QRect(self._rb_start, self._rb_end).normalized()
                 if rb.width() > 3 or rb.height() > 3:
                     path = QPainterPath()
@@ -2002,7 +2213,7 @@ class StructView(QGraphicsView):
                           else Qt.ItemSelectionOperation.ReplaceSelection)
                     self.scene().setSelectionArea(
                         path, op,
-                        Qt.ItemSelectionMode.IntersectsItemShape,
+                        sel_mode,
                         self.viewportTransform(),
                     )
                     self._rb_start = None
@@ -2020,6 +2231,21 @@ class StructView(QGraphicsView):
     def contextMenuEvent(self, event) -> None:
         scene = self.scene()
         sel   = scene.selectedItems()
+
+        # Right-click does not auto-select in Qt. If nothing is selected, select
+        # the structural item under the cursor so the menu has something to act on.
+        if not sel:
+            for it in self.items(event.pos()):
+                target = it
+                while (target is not None
+                       and not isinstance(target, (NodeItem, MemberItem))):
+                    target = target.parentItem()
+                if target is not None:
+                    scene.clearSelection()
+                    target.setSelected(True)
+                    sel = [target]
+                    break
+
         nodes   = [it.node   for it in sel if isinstance(it, NodeItem)]
         members = [it.member for it in sel if isinstance(it, MemberItem)]
 
@@ -2057,6 +2283,26 @@ class StructView(QGraphicsView):
 
         # ── Modeling tools (members selected) ────────────────────────────────
         if members:
+            # Divide — split into multiple real elements (full new nodes + sub-members)
+            div_menu = menu.addMenu("Divide")
+            _DIVIDE_PRESETS = [
+                ("Split in half  (1 node, 2 elements)", 2),
+                ("Add 5 nodes  (6 elements)",           6),
+                ("Add 10 nodes  (11 elements)",         11),
+            ]
+            for label, n_div in _DIVIDE_PRESETS:
+                a = div_menu.addAction(label)
+                a.triggered.connect(
+                    lambda _checked=False, ms=members, n=n_div:
+                        self._divide_quick(ms, n)
+                )
+            div_menu.addSeparator()
+            act_div_custom = div_menu.addAction("Custom…")
+            act_div_custom.triggered.connect(
+                lambda _checked=False, ms=members: self._on_divide_custom(ms)
+            )
+
+            # Subdivide — existing analysis-mesh / nodes-only tool (unchanged)
             act_sub = menu.addAction("Subdivide…")
             act_sub.triggered.connect(
                 lambda _checked=False, ms=members: self._on_subdivide(ms)
@@ -2089,6 +2335,25 @@ class StructView(QGraphicsView):
             if item:
                 item._draw_support_symbol()
         scene.model_changed.emit()
+
+    def _divide_quick(self, members: list, n_divisions: int) -> None:
+        """Subdivide each selected member into n_divisions segments (quick preset).
+
+        Keeps the sub-member segments (nodes_only=False) so the divided member
+        stays a connected chain of elements.
+        """
+        scene = self.scene()
+        for m in members:
+            scene.subdivide_member(m.id, n_divisions, nodes_only=False)
+
+    def _on_divide_custom(self, members: list) -> None:
+        """Prompt for an element count, then divide each member into that many."""
+        n, ok = QInputDialog.getInt(
+            self, "Divide Member",
+            "Number of elements:", value=4, min=2, max=100,
+        )
+        if ok:
+            self._divide_quick(members, n)
 
     def _on_subdivide(self, members: list) -> None:
         from ui_qt.dialogs import SubdivideDialog

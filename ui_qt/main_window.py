@@ -1048,6 +1048,7 @@ class MainWindow(QMainWindow):
     def _build_docks(self) -> None:
         self._props_panel = PropertiesPanel()
         self._props_panel.refresh_callback = self._on_properties_applied
+        self._props_panel.divide_callback = self._on_panel_divide
         self._props_panel.set_model_state(self._scene.model_state)
         self._results_panel = ResultsPanel()
 
@@ -1856,6 +1857,16 @@ class MainWindow(QMainWindow):
         # member's arrow length is rescaled relative to the updated values.
         self._scene.refresh_all_loads()
         self._sb.showMessage("Properties updated.")
+
+    def _on_panel_divide(self, member_id: int, n_divisions: int) -> None:
+        """Divide a member into n_divisions real elements (from Properties panel).
+
+        The original member is replaced by a chain of sub-members, so the old
+        selection no longer exists — clear it and reset the inspector.
+        """
+        self._scene.subdivide_member(member_id, n_divisions, nodes_only=False)
+        self._scene.clearSelection()
+        self._sb.showMessage(f"Member {member_id} divided into {n_divisions} elements.")
 
     # ── autosave ──────────────────────────────────────────────────────────────
 
