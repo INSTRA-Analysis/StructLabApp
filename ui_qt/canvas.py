@@ -103,6 +103,15 @@ class StructCanvas(QGraphicsScene):
         self._grab_node_origins: dict[int, tuple[float, float, float]] = {}
         self._grab_typed: str = ""                  # accumulated numeric input
 
+        # ── S-scale state (scale selection about its centroid) ────────────────
+        self._scale_active: bool = False
+        self._scale_axis: str | None = None         # None, 'X', 'Y', or 'Z'
+        self._scale_centroid: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._scale_centroid_screen: QPointF | None = None
+        self._scale_start_dist: float = 1.0
+        self._scale_node_origins: dict[int, tuple[float, float, float]] = {}
+        self._scale_typed: str = ""                 # accumulated numeric factor
+
         # ── util colour overlay flag ──────────────────────────────────────────
         self._util_colour_active: bool = False
 
@@ -372,6 +381,13 @@ class StructCanvas(QGraphicsScene):
                 self._cancel_grab()
             return
 
+        if self._scale_active:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._confirm_scale()
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._cancel_scale()
+            return
+
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
@@ -438,6 +454,8 @@ class StructCanvas(QGraphicsScene):
     def mouseMoveEvent(self, event) -> None:
         if self._grab_active and not self._grab_typed:
             self._apply_grab(event.scenePos())
+        if self._scale_active and not self._scale_typed:
+            self._apply_scale(event.scenePos())
         if self._mode == CanvasMode.ADD_MEMBER and self._ghost_line and self._member_start_node:
             pos = event.scenePos()
             sx = m_to_px(self._member_start_node.x)
@@ -474,6 +492,9 @@ class StructCanvas(QGraphicsScene):
         if self._grab_active:
             self._handle_grab_key(key, event.text())
             return
+        if self._scale_active:
+            self._handle_scale_key(key, event.text())
+            return
         if key == Qt.Key.Key_Delete:
             self.save_snapshot()
             self._delete_selected()
@@ -495,6 +516,8 @@ class StructCanvas(QGraphicsScene):
             self._start_grab()
         elif key == Qt.Key.Key_E and not ctrl and not shift:
             self._start_extrude()
+        elif key == Qt.Key.Key_S and not ctrl and not shift:
+            self._start_scale()
         elif self._is_3d_mode():
             self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
         else:
@@ -755,6 +778,204 @@ class StructCanvas(QGraphicsScene):
         elif text in '0123456789':
             self._grab_typed += text
             self._apply_grab_typed_value()
+
+    # ── S-scale ─────────────────────────────────────────────────────────────────
+
+    def selected_node_set(self) -> list[NodeData]:
+        """NodeData for selected nodes, plus the endpoints of selected members."""
+        nodes: dict[int, NodeData] = {}
+        for it in self.selectedItems():
+            if isinstance(it, NodeItem):
+                nodes[it.node.id] = it.node
+            elif isinstance(it, MemberItem):
+                for nid in (it.member.node_i, it.member.node_j):
+                    nd = self.model_state.get_node(nid)
+                    if nd is not None:
+                        nodes[nid] = nd
+        return list(nodes.values())
+
+    @staticmethod
+    def selection_centroid(nodes: list[NodeData]) -> tuple[float, float, float]:
+        """Mean (x, y, z) of the given nodes — the scale/transform pivot."""
+        n = len(nodes)
+        if n == 0:
+            return (0.0, 0.0, 0.0)
+        return (sum(nd.x for nd in nodes) / n,
+                sum(nd.y for nd in nodes) / n,
+                sum(nd.z for nd in nodes) / n)
+
+    def scale_selection(self, fx: float, fy: float, fz: float) -> bool:
+        """Scale the selected nodes about their centroid (dialog path).
+
+        Members follow their nodes automatically. Returns False if nothing is
+        selected. The change is snapshotted for undo.
+        """
+        nodes = self.selected_node_set()
+        if not nodes:
+            return False
+        cx, cy, cz = self.selection_centroid(nodes)
+        self.save_snapshot()
+        self._suppress_changed = True
+        try:
+            for nd in nodes:
+                nd.x = cx + (nd.x - cx) * fx
+                nd.y = cy + (nd.y - cy) * fy
+                nd.z = cz + (nd.z - cz) * fz
+                item = self._node_items.get(nd.id)
+                if item:
+                    item.refresh()
+        finally:
+            self._suppress_changed = False
+        self.update_depth_order()
+        self.invalidate(self.sceneRect())
+        self.model_changed.emit()
+        return True
+
+    def _start_scale(self) -> None:
+        """Enter interactive S-scale: scale the selection about its centroid."""
+        nodes = self.selected_node_set()
+        if not nodes:
+            return
+        views = self.views()
+        if not views:
+            return
+        from PyQt6.QtGui import QCursor
+        view = views[0]
+        scene_pos = view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+
+        # Screen centroid = mean of node-item scene positions (projection is
+        # linear, so this equals the projection of the world centroid).
+        pts = [self._node_items[nd.id].pos() for nd in nodes
+               if nd.id in self._node_items]
+        if not pts:
+            return
+        csx = sum(p.x() for p in pts) / len(pts)
+        csy = sum(p.y() for p in pts) / len(pts)
+
+        self.save_snapshot()
+        self._scale_active = True
+        self._scale_axis = None
+        self._scale_centroid = self.selection_centroid(nodes)
+        self._scale_centroid_screen = QPointF(csx, csy)
+        self._scale_start_dist = max(
+            math.hypot(scene_pos.x() - csx, scene_pos.y() - csy), 1.0)
+        self._scale_node_origins = {nd.id: (nd.x, nd.y, nd.z) for nd in nodes}
+        self._scale_typed = ""
+        self.invalidate(self.sceneRect())
+
+    def _apply_scale(self, current_pos: QPointF) -> None:
+        """Scale by the mouse-to-centroid distance ratio (mouse-driven)."""
+        if not self._scale_active or self._scale_centroid_screen is None:
+            return
+        csx = self._scale_centroid_screen.x()
+        csy = self._scale_centroid_screen.y()
+        d = math.hypot(current_pos.x() - csx, current_pos.y() - csy)
+        self._apply_scale_factor(d / self._scale_start_dist)
+
+    def _apply_scale_factor(self, factor: float) -> None:
+        """Apply a scale factor about the centroid, respecting the axis lock."""
+        axis = self._scale_axis
+        if axis == 'X':
+            fx, fy, fz = factor, 1.0, 1.0
+        elif axis == 'Y':
+            fx, fy, fz = 1.0, factor, 1.0
+        elif axis == 'Z':
+            fx, fy, fz = 1.0, 1.0, factor
+        else:
+            fx = fy = fz = factor
+        cx, cy, cz = self._scale_centroid
+        ms = self.model_state
+        self._suppress_changed = True
+        try:
+            for nid, (ox, oy, oz) in self._scale_node_origins.items():
+                node = ms.get_node(nid)
+                if node:
+                    node.x = cx + (ox - cx) * fx
+                    node.y = cy + (oy - cy) * fy
+                    node.z = cz + (oz - cz) * fz
+                    item = self._node_items.get(nid)
+                    if item:
+                        item.refresh()
+        finally:
+            self._suppress_changed = False
+        self.update_depth_order()
+        self.invalidate(self.sceneRect())
+
+    def _apply_scale_typed_value(self) -> None:
+        try:
+            factor = float(self._scale_typed)
+        except ValueError:
+            return
+        self._apply_scale_factor(factor)
+
+    def _confirm_scale(self) -> None:
+        """Commit the scale: snap to the 0.25 m grid and emit model_changed."""
+        if not self._scale_active:
+            return
+        self._scale_active = False
+        ms = self.model_state
+        for nid in self._scale_node_origins:
+            node = ms.get_node(nid)
+            if node:
+                node.x = round(node.x / 0.25) * 0.25
+                node.y = round(node.y / 0.25) * 0.25
+                node.z = round(node.z / 0.25) * 0.25
+                item = self._node_items.get(nid)
+                if item:
+                    item.refresh()
+        self._scale_node_origins = {}
+        self._scale_centroid_screen = None
+        self._scale_axis = None
+        self._scale_typed = ""
+        self.update_depth_order()
+        self.invalidate(self.sceneRect())
+        self.model_changed.emit()
+
+    def _cancel_scale(self) -> None:
+        """Cancel the scale: restore original positions via undo."""
+        if not self._scale_active:
+            return
+        self._scale_active = False
+        self._scale_node_origins = {}
+        self._scale_centroid_screen = None
+        self._scale_axis = None
+        self._scale_typed = ""
+        self.undo()
+
+    def _handle_scale_key(self, key: int, text: str) -> None:
+        """Dispatch key events while interactive scale is active."""
+        K = Qt.Key
+        if key in (K.Key_Return, K.Key_Enter):
+            if self._scale_typed:
+                self._apply_scale_typed_value()
+            self._confirm_scale()
+        elif key == K.Key_Escape:
+            self._cancel_scale()
+        elif key in (K.Key_X, K.Key_Y, K.Key_Z):
+            new_axis = text.upper()
+            self._scale_axis = None if self._scale_axis == new_axis else new_axis
+            self._scale_typed = ""
+            views = self.views()
+            if views:
+                from PyQt6.QtGui import QCursor
+                scene_pos = views[0].mapToScene(
+                    views[0].mapFromGlobal(QCursor.pos()))
+                self._apply_scale(scene_pos)
+            self.invalidate(self.sceneRect())
+        elif key == K.Key_Backspace:
+            self._scale_typed = self._scale_typed[:-1]
+            if self._scale_typed:
+                self._apply_scale_typed_value()
+            else:
+                views = self.views()
+                if views:
+                    from PyQt6.QtGui import QCursor
+                    scene_pos = views[0].mapToScene(
+                        views[0].mapFromGlobal(QCursor.pos()))
+                    self._apply_scale(scene_pos)
+        elif text and text in '0123456789.':
+            self._scale_typed += text
+            self._apply_scale_typed_value()
         elif text == '-' and not self._grab_typed:
             self._grab_typed = '-'
         elif text == '.' and '.' not in self._grab_typed:
@@ -1497,6 +1718,8 @@ class StructView(QGraphicsView):
 
         if self.scene()._grab_active:
             self._draw_grab_status(painter, rect)
+        if self.scene()._scale_active:
+            self._draw_scale_status(painter, rect)
 
         if self.scene()._util_colour_active:
             self._draw_util_legend(painter, rect)
@@ -1712,6 +1935,34 @@ class StructView(QGraphicsView):
             status = f"{verb}  {axis}  (move mouse or type distance)"
         else:
             status = f"{verb}  (X/Y/Z to constrain · Enter/LMB confirm · Esc cancel)"
+
+        lbl_x = rect.left()  + 12 / scale
+        lbl_y = rect.bottom() - 14 / scale
+        painter.drawText(QPointF(lbl_x, lbl_y), status)
+
+    def _draw_scale_status(self, painter: QPainter, rect) -> None:
+        """Draw interactive-scale status bar at the bottom-left of the viewport."""
+        scene = self.scene()
+        axis  = scene._scale_axis
+        typed = scene._scale_typed
+        scale = self.transform().m11()
+
+        _axis_color = {'X': "#FF4444", 'Y': "#44EE44", 'Z': "#4488FF", None: "#FFAA00"}
+        pen = QPen(QColor(_axis_color.get(axis, "#FFAA00")))
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        if typed:
+            status = f"SCALE  {axis or ''}  ×{typed}_"
+        elif axis:
+            status = f"SCALE  {axis}  (move mouse or type factor)"
+        else:
+            status = "SCALE  (X/Y/Z to constrain · type factor · Enter/LMB confirm · Esc cancel)"
 
         lbl_x = rect.left()  + 12 / scale
         lbl_y = rect.bottom() - 14 / scale
