@@ -86,7 +86,8 @@ _CE   = QColor(112, 112, 126)        # edge
 _CEH  = QColor(  0, 218, 238)        # edge hovered (unused for now)
 _CL   = QColor(192, 192, 208)        # face label
 _CLH  = QColor(255, 255, 255)        # face label hovered
-_CCP  = QColor(  0, 170, 198, 200)   # corner dot
+_CCP  = QColor(  0, 170, 198, 200)   # corner dot (near set)
+_CCF  = QColor(  0, 150, 175,  95)   # corner dot (far set — dimmer)
 _CCH  = QColor(  0, 232, 255, 255)   # corner dot hovered
 _CBG  = QColor( 26,  26,  33, 195)   # background circle fill
 
@@ -98,8 +99,8 @@ class ViewCube:
     view scale to compensate so the widget stays at a fixed screen size.
     """
 
-    HALF:   int = 28   # cube half-radius in screen pixels  (2/3 of original 42)
-    MARGIN: int = 29   # corner margin — adjusted so centre stays at same 57 px from corner
+    HALF:   int = 24   # cube half-radius in screen pixels
+    MARGIN: int = 33   # corner margin (MARGIN + HALF kept at 57 → centre unchanged)
     CRAD:   int = 5    # corner-dot radius in screen pixels
     RING:   int = 47   # compass ring radius in screen pixels
     HOME:   int = 13   # home (house) icon size in screen pixels
@@ -172,12 +173,19 @@ class ViewCube:
         for a, b in _EDGES:
             painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
 
-        # Iso corner dots — top set above horizon, bottom set below
-        corner_set = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
-        for ci in corner_set:
+        # Iso corner dots — all 8 always available; the near set (toward the
+        # camera) is prominent, the far set dimmer & smaller so it still reads
+        # as a cube. Draw far first so near dots sit on top.
+        near = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
+        for ci in (*[c for c in range(8) if c not in near], *near):
+            is_near = ci in near
             hov = (self.hovered == f"corner:{ci}")
-            cc  = _CCH if hov else _CCP
-            r   = (self.CRAD + 2 if hov else self.CRAD) / scale
+            if hov:
+                cc, r = _CCH, (self.CRAD + 2) / scale
+            elif is_near:
+                cc, r = _CCP, self.CRAD / scale
+            else:
+                cc, r = _CCF, (self.CRAD - 1) / scale
             painter.setBrush(QBrush(cc))
             cp  = QPen(cc); cp.setCosmetic(True)
             painter.setPen(cp)
@@ -306,9 +314,10 @@ class ViewCube:
                 and abs(sp.y() - hy) <= (self.HOME * 0.55) / scale):
             return "home"
 
-        # Corner dots take priority — show set matching current viewing side
-        corner_set = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
-        for ci in corner_set:
+        # Corner dots take priority. All 8 are clickable; check the near set
+        # first so it wins where near/far dots overlap (e.g. near top/bottom view).
+        near = (4, 5, 6, 7) if el >= 0 else (0, 1, 2, 3)
+        for ci in (*near, *[c for c in range(8) if c not in near]):
             if math.hypot(sp.x() - pts[ci][0], sp.y() - pts[ci][1]) <= cr:
                 return f"corner:{ci}"
 
