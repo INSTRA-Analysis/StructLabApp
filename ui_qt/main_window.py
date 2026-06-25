@@ -322,18 +322,17 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _resolve_profile_name(E: float, A: float, I: float) -> str:
-        """Try to reverse-lookup a section library name from (E, A, I).
-        Returns a display string like 'IPE 400' or 'Custom (E=210 GPa, A=0.00845 m²)'.
+        """Reverse-lookup a section library name from (A, I).
+        Returns 'IPE 400' on a match, else 'Custom (E=210 GPa, A=0.00845 m²)'.
+
+        Uses the shared, cached section lookup, which reads only (name, A, I)
+        and so tolerates STEEL_PROFILES entries with extra columns (W_pl/W_el).
         """
-        from ui_qt.section_library import STEEL_PROFILES
-        EPS = 1e-8  # tolerance for floating-point equality
-        for series, profiles in STEEL_PROFILES.items():
-            for name, pA, pI in profiles:
-                if abs(A - pA) < EPS * max(A, 1.0) and abs(I - pI) < EPS * max(I, 1.0):
-                    return name
-        # No exact match — build a descriptive label
-        E_gpa = E / 1e9
-        return f"Custom  (E={E_gpa:.0f} GPa,  A={A:.4g} m²,  I={I:.4g} m⁴)"
+        from ui_qt.panels import _build_section_lookup
+        name = _build_section_lookup().get((round(A, 8), round(I, 12)))
+        if name:
+            return name
+        return f"Custom  (E={E / 1e9:.0f} GPa,  A={A:.4g} m²,  I={I:.4g} m⁴)"
 
     def _rebuild_select_profile_menu(self) -> None:
         """Dynamically rebuild the 'Select by Profile' submenu from current members."""
