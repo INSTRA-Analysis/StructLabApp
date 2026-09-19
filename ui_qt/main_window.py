@@ -162,7 +162,6 @@ class MainWindow(QMainWindow):
     # ── menu bar ─────────────────────────────────────────────────────────────
 
     def _build_menu(self) -> None:
-        from ui_qt import presets as P
         mb = self.menuBar()
 
         file_menu = mb.addMenu("File")
@@ -189,50 +188,6 @@ class MainWindow(QMainWindow):
         self._build_help_menu(mb)
 
         preset_menu = mb.addMenu("Presets")
-
-        def _section(title: str) -> None:
-            a = preset_menu.addAction(f"  {title}")
-            a.setEnabled(False)
-            f = a.font(); f.setBold(True); a.setFont(f)
-
-        def _add(label: str, fn) -> None:
-            preset_menu.addAction(label, lambda _=None, f=fn: self._load_preset(f))
-
-        _section("── Academic (2D) ───────────")
-        _add("Simply-Supported Beam — IPE 300, UDL + point", P.simple_beam)
-        _add("Propped Cantilever — IPE 360, UDL",            P.propped_cantilever)
-        _add("Gerber Beam (internal hinge) — IPE 400",       P.gerber_beam)
-        _add("Continuous Beam — IPE 400, 3 × 6 m",           P.continuous_beam)
-
-        preset_menu.addSeparator()
-        _section("── Beams (design-ready) ────")
-        _add("Steel Beam — IPE 400 (S355), G + Q",           P.demo_beam_steel)
-        _add("RC Continuous Beam — 300×600 (C30/37)",        P.demo_beam_rc)
-        _add("Steel Beam — IPE 360 EC3 design check",        P.design_steel_beam)
-        _add("RC Beam — 300×500 EC2 design check",           P.design_rc_beam)
-
-        preset_menu.addSeparator()
-        _section("── Frames (2D) ─────────────")
-        _add("Steel Portal Frame — HEB 220 + IPE 360, G+Q+W", P.demo_frame_steel)
-        _add("RC Moment Frame — C30/37, 2-bay × 2-storey",    P.rc_moment_frame)
-
-        preset_menu.addSeparator()
-        _section("── Trusses ─────────────────")
-        _add("Pratt Roof Truss — 2D, SHS, grouped",          P.demo_truss_pratt)
-        _add("Space-Truss Tower — 3D, SHS, grouped",         P.demo_space_truss)
-
-        preset_menu.addSeparator()
-        _section("── 3D Structures ───────────")
-        _add("3D Portal Frame — HEB 220 + IPE 360",          P.demo_3d_portal)
-        _add("3D Floor Grid — HEB 260 + IPE 300, 2×2 bays",  P.demo_3d_floor_grid)
-
-        preset_menu.addSeparator()
-        _section("── Special ─────────────────")
-        _add("Spring-Supported Beam — IPE 300, k = 1 MN/m",  P.demo_spring_beam)
-        _add("Beam + Bar Strut — mixed IPE 360 + SHS",       P.demo_mixed)
-
-        preset_menu.addSeparator()
-        _section("── Wizards ─────────────────")
         preset_menu.addAction("Beam Wizard…",         self._on_beam_wizard)
         preset_menu.addAction("Portal Frame Wizard…", self._on_portal_wizard)
         preset_menu.addAction("Truss Wizard…",        self._on_truss_wizard)
@@ -489,59 +444,11 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
-        self._mode_2d_act = tools_menu.addAction("2D Mode (XY plane)")
-        self._mode_2d_act.setCheckable(True)
-        self._mode_2d_act.setChecked(self._scene.model_state.analysis_mode == "2D")
-        self._mode_2d_act.setShortcut(QKeySequence("F2"))
-        self._mode_2d_act.setToolTip(
-            "Switch between flat 2D (XY plane, Y up) and 3D analysis (Z up) (F2)")
-        self._mode_2d_act.toggled.connect(self._on_mode_2d_toggled)
-
-        tools_menu.addSeparator()
-
         act = tools_menu.addAction("Python Console", self._open_console)
         act.setShortcut(QKeySequence("Ctrl+`"))
 
-    def _sync_mode_action(self) -> None:
-        """Reflect the loaded model's analysis mode on the 2D toggle."""
-        act = getattr(self, "_mode_2d_act", None)
-        if act is not None:
-            act.blockSignals(True)
-            act.setChecked(self._scene.model_state.analysis_mode == "2D")
-            act.blockSignals(False)
-
     def _on_show_loads_toggled(self, checked: bool) -> None:
         self._scene.set_loads_visible(checked)
-
-    def _on_mode_2d_toggled(self, to_2d: bool) -> None:
-        """Switch analysis mode live (2D XZ ⇄ 3D), guarding non-planar 3D→2D."""
-        from PyQt6.QtWidgets import QMessageBox
-        target = "2D" if to_2d else "3D"
-        ms = self._scene.model_state
-        if target == "2D":
-            offplane = [n for n in ms.nodes if abs(n.y) > 1e-6]
-            if offplane:
-                r = QMessageBox.question(
-                    self, "Switch to 2D",
-                    f"{len(offplane)} node(s) lie off the XZ plane (Y ≠ 0).\n"
-                    "Project them onto the XZ plane (set Y = 0) to continue?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                )
-                if r != QMessageBox.StandardButton.Yes:
-                    self._mode_2d_act.blockSignals(True)
-                    self._mode_2d_act.setChecked(False)   # revert toggle
-                    self._mode_2d_act.blockSignals(False)
-                    return
-                self._scene.save_snapshot()
-                for n in offplane:
-                    n.y = 0.0
-        self._scene.set_analysis_mode(target)
-        self._view.zoom_to_fit()
-        self._props_panel.set_model_state(ms)
-        self._results_panel.clear()
-        self._scene.clear_overlays()
-        self._solve_cache = None
-        self._set_overlay_controls_enabled(False)
         self._update_status_stats()
         self._sb.showMessage(f"Switched to {target} mode.")
 
@@ -662,18 +569,14 @@ class MainWindow(QMainWindow):
             return  # closed without choosing → blank canvas
 
         choice = dlg.choice
-        from ui_qt import presets as P
-        if choice == "beam":
-            self._apply_model_state(P.demo_beam_steel(), "Steel Beam")
-        elif choice == "frame":
-            self._apply_model_state(P.demo_3d_portal(), "3D Portal Frame")
-        elif choice == "truss":
-            self._apply_model_state(P.demo_space_truss(), "Space Truss")
-        elif choice == "blank":
+        if choice in ("beam", "frame", "truss", "blank"):
+            # TODO: link "beam"/"frame"/"truss" to a matching preset/wizard once
+            # one is defined — for now all four start an empty canvas.
             from ui_qt.model_state import ModelState
             blank = ModelState()
             blank.analysis_mode = dlg.start_mode      # 2D (XZ) or 3D
-            self._apply_model_state(blank, f"Blank ({dlg.start_mode})")
+            label = "Blank" if choice == "blank" else choice.title()
+            self._apply_model_state(blank, f"{label} ({dlg.start_mode})")
         elif choice.startswith("file:"):
             self._open_file(choice[5:])
         elif choice == "open":
@@ -719,14 +622,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Open error", str(exc))
 
-    def _load_preset(self, fn) -> None:
-        self._apply_model_state(fn(), fn.__name__.replace("_", " ").title())
-
     def _apply_model_state(self, state, label: str = "") -> None:
         """Load a ModelState onto the canvas, clearing any prior results."""
         self._scene.load_state(state)
         self._scene._hide_welcome = True
-        self._sync_mode_action()
         self._props_panel.set_model_state(self._scene.model_state)
         self._refresh_lc_combo()
         self._results_panel.clear()
@@ -742,40 +641,11 @@ class MainWindow(QMainWindow):
         self._update_status_stats()
 
     def _on_frame_wizard(self) -> None:
-        from PyQt6.QtWidgets import (
-            QDialog, QFormLayout, QSpinBox, QDoubleSpinBox,
-            QDialogButtonBox, QVBoxLayout,
-        )
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Frame Wizard")
-        layout = QVBoxLayout(dlg)
-        form = QFormLayout()
-
-        bays_sb   = QSpinBox(); bays_sb.setRange(1, 20);  bays_sb.setValue(2)
-        stories_sb = QSpinBox(); stories_sb.setRange(1, 30); stories_sb.setValue(3)
-        width_sb  = QDoubleSpinBox(); width_sb.setRange(1, 50);  width_sb.setValue(6.0); width_sb.setSuffix(" m")
-        height_sb = QDoubleSpinBox(); height_sb.setRange(1, 20); height_sb.setValue(3.0); height_sb.setSuffix(" m")
-
-        form.addRow("Number of bays:",   bays_sb)
-        form.addRow("Number of stories:", stories_sb)
-        form.addRow("Bay width:",         width_sb)
-        form.addRow("Story height:",      height_sb)
-        layout.addLayout(form)
-
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
-                                QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            from ui_qt.presets import frame_wizard
-            state = frame_wizard(bays_sb.value(), stories_sb.value(),
-                                 width_sb.value(), height_sb.value())
-            self._apply_model_state(
-                state,
-                f"Frame Wizard — {bays_sb.value()} bays × {stories_sb.value()} stories",
-            )
+        from PyQt6.QtWidgets import QDialog
+        from ui_qt.wizards import FrameWizardDialog
+        dlg = FrameWizardDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result():
+            self._apply_model_state(dlg.result(), "Frame Wizard")
 
     def _on_beam_wizard(self) -> None:
         from PyQt6.QtWidgets import QDialog
@@ -2438,11 +2308,14 @@ class MainWindow(QMainWindow):
         # Only prompt to save if there's actually a model to lose
         if self._scene.model_state.nodes and not self._maybe_save_before_close():
             return
-        self._do_clear_model()
-        self._sb.showMessage("New model — ready")
+        # Route through the same start dialog as first launch, so the 2D/3D
+        # project type is always a deliberate, explicit choice — never
+        # silently inherited from whatever the previous model happened to be.
+        self._show_welcome()
 
     def _do_clear_model(self) -> None:
-        """Clear canvas and return to welcome screen (no save prompt)."""
+        """Clear canvas and return to welcome screen (no save prompt, no mode
+        prompt — used by 'Close Model', which just wants a blank slate)."""
         self._scene.clear_model()
         self._scene._hide_welcome = True   # dismiss first-launch welcome
         self._props_panel.set_model_state(self._scene.model_state)
