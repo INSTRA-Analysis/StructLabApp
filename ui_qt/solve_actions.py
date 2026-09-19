@@ -68,6 +68,41 @@ def validate_model(state) -> tuple[list[str], list[str]]:
     if not has_node_loads and not has_member_loads:
         warnings.append("No loads applied in the active case — all results will be zero")
 
+    # Out-of-plane loads on an effectively-2D (planar) model.
+    # core.model.Model.dofs_per_node uses 6 DOF/node ONLY if some node has z != 0
+    # (the mode_3d flag does not force it). If every node lies at z == 0 the model
+    # is solved in 2D (3 DOF/node) and out-of-plane actions — nodal Fz/Mx/My and
+    # 'qz' member loads — are dropped by the assembler. Warn (don't block) so the
+    # user is told the loads are being ignored rather than getting silently-wrong
+    # numbers with no notice.
+    if state.nodes and not any(n.z != 0.0 for n in state.nodes):
+        oop_nodes: list[int] = []
+        for n in state.nodes:
+            nl = lc.get_node_load(n.id)
+            if nl.fz != 0.0 or nl.moment_x != 0.0 or nl.moment_y != 0.0:
+                oop_nodes.append(n.id)
+        oop_members = [
+            mid for mid, ml in lc.member_loads.items()
+            if any(v != 0.0 for v in ml.net("qz"))
+        ]
+        if oop_nodes or oop_members:
+            detail: list[str] = []
+            if oop_nodes:
+                detail.append("nodal Fz/Mx/My at node(s) "
+                              + ", ".join(str(i) for i in oop_nodes))
+            if oop_members:
+                detail.append("out-of-plane 'qz' load on member(s) "
+                              + ", ".join(str(i) for i in oop_members))
+            warnings.append(
+                "Out-of-plane load on a planar (2D) model: " + "; ".join(detail) + ".\n"
+                "All nodes lie at z = 0, so the model is solved in 2D (3 DOF/node) and "
+                "these out-of-plane actions are IGNORED — the results omit them and the "
+                "out-of-plane response is zero.\n"
+                "To include them, give the structure genuine 3D geometry (at least one "
+                "node with z ≠ 0). Note: a flat grillage in the X-Y plane is not "
+                "supported — model it with real 3D geometry."
+            )
+
     return errors, warnings
 
 

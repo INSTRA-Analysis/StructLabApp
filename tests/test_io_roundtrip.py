@@ -278,3 +278,28 @@ def test_validate_model_detects_zero_length():
 
     errors, _warnings = validate_model(s)
     assert any("zero length" in e for e in errors)
+
+
+@pytest.mark.parametrize("mode", ["2D", "3D"])
+def test_analysis_mode_roundtrips_through_save_load(mode):
+    """The 2D/3D project type must survive a save/load cycle exactly — it's
+    now a sticky, one-time choice (no in-session toggle), so opening a file
+    must always reproduce the mode it was saved in, never silently default."""
+    s = ModelState()
+    s.analysis_mode = mode
+    n0 = s.add_node(0.0, 0.0, 0.0)
+    n0.support_type = SupportType.PIN
+    n1 = s.add_node(4.0, 0.0, 0.0)
+    n1.support_type = SupportType.ROLLER
+    m = s.add_member(n0.id, n1.id)
+    m.element_type = ElementType.BEAM
+    m.E, m.A, m.I = 210e9, 0.01, 1e-4
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "roundtrip.slab"
+        save_model(s, path)
+        loaded = load_model(path)
+
+    assert loaded.analysis_mode == mode
+    assert loaded.mode_3d == (mode == "3D")
+    assert loaded.is_2d == (mode == "2D")
