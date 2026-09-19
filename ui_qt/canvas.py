@@ -1998,7 +1998,7 @@ class StructView(QGraphicsView):
         painter.setFont(font)
         ver_pen = QPen(QColor(130, 130, 130));  ver_pen.setCosmetic(True)
         painter.setPen(ver_pen)
-        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.1")
+        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.2")
 
         # ── 5. Selection shortcut HUD (bottom-left, when items are selected) ────
         from ui_qt.canvas_items import NodeItem, MemberItem
