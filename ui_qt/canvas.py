@@ -51,6 +51,10 @@ class CanvasMode(Enum):
     SELECT     = auto()
     ADD_NODE   = auto()
     ADD_MEMBER = auto()
+    MEASURE    = auto()
+
+
+_MEASURE_PEN = QPen(QColor("#00cccc"), 1.5, Qt.PenStyle.DashLine)
 
 
 class WorkingPlane(Enum):
@@ -84,6 +88,12 @@ class StructCanvas(QGraphicsScene):
         self._next_member_type = ElementType.BEAM
         self._member_start_node: NodeData | None = None
         self._ghost_line: QGraphicsLineItem | None = None
+
+        # ── Measure tool state ────────────────────────────────────────────────
+        self._measure_start_node: NodeData | None = None
+        self._measure_line: QGraphicsLineItem | None = None
+        self._measure_label = None   # QGraphicsSimpleTextItem
+
         self._working_plane: WorkingPlane = WorkingPlane.XY
         self._plane_offset: float = 0.0   # fixed coordinate on the locked axis
         self._node_items: dict[int, NodeItem] = {}
@@ -142,6 +152,8 @@ class StructCanvas(QGraphicsScene):
             item.set_movable(movable)
         if mode != CanvasMode.ADD_MEMBER:
             self._cancel_member_drag()
+        if mode != CanvasMode.MEASURE:
+            self._clear_measurement()
 
     def toggle_isolate(self) -> None:
         """Toggle isolate-selection mode: hide everything outside the current selection.
@@ -451,6 +463,18 @@ class StructCanvas(QGraphicsScene):
                 sx, sy = _node_pos(start_node, self)
                 self._ghost_line = self.addLine(sx, sy, sx, sy, _GHOST_PEN)
 
+        elif self._mode == CanvasMode.MEASURE:
+            self._clear_measurement()   # drop any previous result before starting a new one
+            start_node = self._nearest_node(pos)
+            if start_node:
+                self._measure_start_node = start_node
+                sx, sy = _node_pos(start_node, self)
+                self._measure_line = self.addLine(sx, sy, sx, sy, _MEASURE_PEN)
+                self._measure_line.setZValue(50)
+                self._measure_label = self.addSimpleText("")
+                self._measure_label.setBrush(QBrush(QColor("#00cccc")))
+                self._measure_label.setZValue(51)
+
         elif self._mode == CanvasMode.SELECT:
             # Save snapshot before potential node drag
             item = self.itemAt(pos, QTransform())
@@ -469,6 +493,8 @@ class StructCanvas(QGraphicsScene):
             sx = m_to_px(self._member_start_node.x)
             sy = -m_to_px(self._member_start_node.y)
             self._ghost_line.setLine(sx, sy, pos.x(), pos.y())
+        if self._mode == CanvasMode.MEASURE and self._measure_line and self._measure_start_node:
+            self._update_measure_preview(event.scenePos())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
@@ -487,6 +513,13 @@ class StructCanvas(QGraphicsScene):
                     member.element_type = self._next_member_type
                     self._add_member_item(member)
             self._cancel_member_drag()
+        elif self._mode == CanvasMode.MEASURE and self._measure_start_node:
+            end_node = self._nearest_node(event.scenePos())
+            if end_node and end_node.id != self._measure_start_node.id:
+                self._finalize_measurement(end_node)
+            else:
+                self._clear_measurement()   # released on empty space — nothing to show
+            self._measure_start_node = None   # drag finished; result (if any) stays visible
         else:
             self._drag_snapshot_saved = False
 
@@ -503,7 +536,9 @@ class StructCanvas(QGraphicsScene):
         if self._scale_active:
             self._handle_scale_key(key, event.text())
             return
-        if key == Qt.Key.Key_Delete:
+        if key == Qt.Key.Key_Escape and self._mode == CanvasMode.MEASURE:
+            self._clear_measurement()
+        elif key == Qt.Key.Key_Delete:
             self.save_snapshot()
             self._delete_selected()
         elif key == Qt.Key.Key_A and ctrl and shift:
@@ -1106,6 +1141,53 @@ class StructCanvas(QGraphicsScene):
         if self._ghost_line:
             self.removeItem(self._ghost_line)
             self._ghost_line = None
+
+    # ── Measure tool ──────────────────────────────────────────────────────────
+
+    def _update_measure_preview(self, scene_pos: QPointF) -> None:
+        """Live-update the ghost line + distance label while dragging.
+
+        Snaps to the nearest node the same way Add Member does. Real-world
+        (x, y, z) distance is only meaningful — and only shown — once a
+        valid second node is within snap range; otherwise the line just
+        follows the cursor with no number, since there's nothing to measure
+        to yet (see the plan: node-to-node only, no free points in v1).
+        """
+        start = self._measure_start_node
+        assert start is not None and self._measure_line is not None and self._measure_label is not None
+        hover_node = self._nearest_node(scene_pos)
+        sx, sy = _node_pos(start, self)
+        if hover_node and hover_node.id != start.id:
+            ex, ey = _node_pos(hover_node, self)
+            dist = math.dist((start.x, start.y, start.z), (hover_node.x, hover_node.y, hover_node.z))
+            self._measure_label.setText(f"L = {dist:.3f} m")
+        else:
+            ex, ey = scene_pos.x(), scene_pos.y()
+            self._measure_label.setText("")
+        self._measure_line.setLine(sx, sy, ex, ey)
+        self._measure_label.setPos((sx + ex) / 2 + 8, (sy + ey) / 2 - 8)
+
+    def _finalize_measurement(self, end_node: NodeData) -> None:
+        """Snap the line/label exactly onto both nodes and leave them showing
+        as the result — cleared by the next measurement, Escape, or a mode
+        switch (see set_mode()), not automatically on release."""
+        start = self._measure_start_node
+        assert start is not None and self._measure_line is not None and self._measure_label is not None
+        sx, sy = _node_pos(start, self)
+        ex, ey = _node_pos(end_node, self)
+        dist = math.dist((start.x, start.y, start.z), (end_node.x, end_node.y, end_node.z))
+        self._measure_line.setLine(sx, sy, ex, ey)
+        self._measure_label.setText(f"L = {dist:.3f} m")
+        self._measure_label.setPos((sx + ex) / 2 + 8, (sy + ey) / 2 - 8)
+
+    def _clear_measurement(self) -> None:
+        if self._measure_line is not None:
+            self.removeItem(self._measure_line)
+            self._measure_line = None
+        if self._measure_label is not None:
+            self.removeItem(self._measure_label)
+            self._measure_label = None
+        self._measure_start_node = None
 
     # ── overlay API ───────────────────────────────────────────────────────────
 

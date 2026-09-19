@@ -752,6 +752,7 @@ class MainWindow(QMainWindow):
             (CanvasMode.SELECT,     "Select",    "S"),
             (CanvasMode.ADD_NODE,   "Add Node",  "N"),
             (CanvasMode.ADD_MEMBER, "Add Member","M"),
+            (CanvasMode.MEASURE,    "Measure",   "R"),
         ]
         for mode, label, shortcut in mode_defs:
             btn = QPushButton(label)
@@ -1102,7 +1103,7 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         self._sb = QStatusBar()
-        self._sb.showMessage("Ready  |  S=Select  N=Add Node  M=Add Member")
+        self._sb.showMessage("Ready  |  S=Select  N=Add Node  M=Add Member  R=Measure")
         self._sb_stats = QLabel("")
         self._sb_stats.setStyleSheet("color: #888888; padding-right: 8px;")
         self._sb.addPermanentWidget(self._sb_stats)
