@@ -303,3 +303,27 @@ def test_analysis_mode_roundtrips_through_save_load(mode):
     assert loaded.analysis_mode == mode
     assert loaded.mode_3d == (mode == "3D")
     assert loaded.is_2d == (mode == "2D")
+
+
+def test_reinforcement_estimated_flag_roundtrips_through_save_load():
+    """A wizard-placed 'estimated minimum reinforcement' flag must survive
+    save/load — otherwise reopening a file silently loses the warning that
+    the Design tab is showing a placeholder, not a reviewed design."""
+    s = ModelState()
+    n0 = s.add_node(0.0, 0.0, 0.0)
+    n0.support_type = SupportType.PIN
+    n1 = s.add_node(6.0, 0.0, 0.0)
+    n1.support_type = SupportType.ROLLER
+    m = s.add_member(n0.id, n1.id)
+    m.E, m.A, m.I = 32e9, 0.15, 0.003125
+    m.b_sec, m.h_sec, m.d_eff = 0.3, 0.5, 0.45
+    m.As_tension = 900e-6
+    m.reinforcement_estimated = True
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "reinf.slab"
+        save_model(s, path)
+        loaded = load_model(path)
+
+    assert loaded.members[0].reinforcement_estimated is True
+    assert loaded.members[0].As_tension == pytest.approx(900e-6)
