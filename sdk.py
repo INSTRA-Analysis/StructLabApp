@@ -156,7 +156,7 @@ class Model:
         Mx: float = 0.0,
         My: float = 0.0,
         Mz: float = 0.0,
-        lc: str = "default",
+        lc: str | None = None,
     ) -> None:
         """Apply a nodal force/moment (N, N·m) in global axes."""
         load_case = self._load_case(lc)
@@ -178,7 +178,7 @@ class Model:
         member_id: int,
         w: float,
         direction: str = "w",
-        lc: str = "default",
+        lc: str | None = None,
     ) -> None:
         """Apply a uniform distributed load (N/m) along a member.
 
@@ -196,7 +196,7 @@ class Model:
         w_start: float,
         w_end: float,
         direction: str = "w",
-        lc: str = "default",
+        lc: str | None = None,
     ) -> None:
         """Apply a linearly varying distributed load (N/m) along a member."""
         load_case = self._load_case(lc)
@@ -210,7 +210,7 @@ class Model:
         w: float,
         start: float,
         end: float,
-        lc: str = "default",
+        lc: str | None = None,
     ) -> None:
         """Apply a UDL over a fraction of member span.
 
@@ -226,7 +226,7 @@ class Model:
         member_id: int,
         magnitude: float,
         position: float,
-        lc: str = "default",
+        lc: str | None = None,
     ) -> None:
         """Apply a concentrated transverse force on a member.
 
@@ -240,17 +240,28 @@ class Model:
 
     # ── Solve ─────────────────────────────────────────────────────────────────
 
-    def solve(self, lc: str = "default") -> "SolveResult":
+    def solve(self, lc: str | None = None) -> "SolveResult":
         """Run the FEM solver for the named load case and return results.
+
+        With no `lc`, solves whichever case is currently active — for a
+        fresh Model() that's its single "default" case; for Model.from_state()
+        (e.g. the console's live `model`) that's whatever the app's own
+        Case: dropdown has selected, matching what its Solve button would run.
 
         Raises RuntimeError if the model fails validation.
         """
-        lc_id = self._lc_name_to_id.get(lc)
-        if lc_id is None:
-            raise ValueError(f"Load case '{lc}' not found. "
-                             f"Available: {list(self._lc_name_to_id)}")
+        if lc is None:
+            lc_id = self._state.active_case_id
+            load_case = self._state.get_load_case(lc_id)
+            if load_case is None:
+                raise ValueError(f"No active load case (id {lc_id} not found).")
+        else:
+            lc_id = self._lc_name_to_id.get(lc)
+            if lc_id is None:
+                raise ValueError(f"Load case '{lc}' not found. "
+                                 f"Available: {list(self._lc_name_to_id)}")
+            load_case = self._state.get_load_case(lc_id)
         self._state.active_case_id = lc_id
-        load_case = self._state.get_load_case(lc_id)
 
         errors, warns = validate_model(self._state)
         if errors:
@@ -270,7 +281,17 @@ class Model:
             raise ValueError(f"Node {node_id} not found")
         return nd
 
-    def _load_case(self, name: str) -> LoadCase:
+    def _load_case(self, name: str | None) -> LoadCase:
+        """Resolve a load case by name. None resolves to the model's
+        currently active case (its single case for a fresh Model(); whatever
+        the app's Case: dropdown has selected for Model.from_state()) rather
+        than a literal "default" — creating a same-named case would be right
+        for a fresh Model() but would silently fork off an orphan case that
+        never gets solved for a canvas-wrapped one."""
+        if name is None:
+            lc = self._state.get_load_case(self._state.active_case_id)
+            assert lc is not None
+            return lc
         if name not in self._lc_name_to_id:
             self.add_load_case(name)
         lc = self._state.get_load_case(self._lc_name_to_id[name])
