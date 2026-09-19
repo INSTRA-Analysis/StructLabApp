@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtGui import QBrush, QColor, QFont, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QPushButton,
+    QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QPushButton, QLineEdit,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QGroupBox, QScrollArea, QSizePolicy, QFrame, QSplitter, QMenu,
 )
@@ -345,6 +346,286 @@ def _infer_mat_type(E: float) -> str:
 
 _MAT_TYPE_LABELS = {"steel": "fy (MPa):", "concrete": "fck (MPa):", "timber": "fk (MPa):"}
 
+_GAMMA_M0 = 1.0   # EN 1993-1-1 §6.1(1)
+# Below this |N_Ed|, a BEAM-family member's axial force is treated as solver
+# noise, not a real column-style combined action, and only the bending check
+# is shown.
+_DESIGN_N_THRESHOLD_N = 50.0   # ~0.05 kN
+
+
+def _design_bending_row(mat: str, fk: float, W_pl: float, W_el: float,
+                        b: float, d: float, As: float, fyk_v: float, M_Ed: float) -> dict:
+    """One 'Bending M' capacity-check row (EC2 §6.1 for concrete, EC3 §6.2.5
+    plastic/elastic for steel & timber — same formulas the member-properties
+    Design tab's live M_Rd preview uses)."""
+    if mat == "concrete":
+        if b > 0 and d > 0 and As > 0 and fk > 0:
+            fcd = fk / 1.5
+            fyd = fyk_v / 1.15
+            x   = min(As * fyd / (0.8 * b * fcd), d)
+            M_Rd = As * fyd * (d - 0.4 * x)
+            eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
+            status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else "N/A"
+        else:
+            M_Rd, eta, status = 0.0, None, "Set b/d/As"
+    else:
+        if W_pl > 0:
+            M_Rd = fk * W_pl / _GAMMA_M0
+        elif W_el > 0:
+            M_Rd = fk * W_el / _GAMMA_M0
+        else:
+            M_Rd = 0.0
+        eta = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
+        if eta is not None:
+            status = "PASS ✓" if eta <= 100.0 else "FAIL ✗"
+        elif W_pl == 0 and W_el == 0:
+            status = "N/A — set W_pl"
+        else:
+            status = "N/A"
+    return {"check": "Bending M", "demand": M_Ed, "capacity": M_Rd if M_Rd > 0 else None,
+            "eta": eta, "status": status, "unit": "kN·m"}
+
+
+def _design_axial_row(mat: str, fk: float, A: float, As: float, fyk_v: float,
+                      N_Ed: float) -> dict:
+    """One 'Axial N' capacity-check row. N_Ed sign follows the solver's own
+    convention (postprocessor.py): positive = compression, negative = tension.
+
+    Steel — EC3 §6.2.3 cross-section yield (no buckling — same no-buckling
+    scope as the bending check above), same capacity either direction.
+
+    Concrete — EC2 §6.1: compression is resisted by the concrete *and* the
+    reinforcement together (N_Rd = Ac·fcd + As·fyd); tension is resisted by
+    the reinforcement alone (concrete is assumed cracked, N_Rd = As·fyd).
+    `As` here is the member's single reinforcement-area field, treated as
+    the *total* longitudinal steel for this check (not just one face) — a
+    simplification worth knowing about, not a full column interaction check.
+
+    Timber: not implemented, explicit N/A.
+    """
+    if mat == "timber":
+        return {"check": "Axial N", "demand": N_Ed, "capacity": None, "eta": None,
+                "status": "N/A — axial check not implemented for timber", "unit": "kN"}
+
+    if mat == "steel":
+        label = "Axial N"
+        N_Rd = A * fk / _GAMMA_M0 if A > 0 and fk > 0 else 0.0
+        not_set_status = "N/A — set A"
+    else:   # concrete
+        fcd = fk / 1.5 if fk > 0 else 0.0
+        fyd = fyk_v / 1.15 if fyk_v > 0 else 0.0
+        if N_Ed >= 0.0:
+            label = "Axial N (compression)"
+            N_Rd = A * fcd + As * fyd
+        else:
+            label = "Axial N (tension)"
+            N_Rd = As * fyd
+        not_set_status = "N/A — set As" if As <= 0.0 else "N/A — set A/fck"
+
+    eta = (abs(N_Ed) / N_Rd * 100) if N_Rd > 0 else None
+    status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else not_set_status
+    return {"check": label, "demand": N_Ed, "capacity": N_Rd if N_Rd > 0 else None,
+            "eta": eta, "status": status, "unit": "kN"}
+
+
+def _compute_member_design_rows(
+    element_type: ElementType, mat: str, fk: float, A: float,
+    W_pl: float, W_el: float, b: float, d: float, As: float, fyk_v: float,
+    M_Ed: float, N_Ed: float,
+) -> list[dict]:
+    """Capacity-check row(s) for one member, chosen by element_type:
+      BAR                        -> axial only (a truss bar has no bending stiffness)
+      BEAM/PIN_LEFT/PIN_RIGHT,
+        negligible axial         -> bending only (today's behaviour)
+      BEAM/PIN_LEFT/PIN_RIGHT,
+        real combined axial      -> axial + bending, shown as two separate
+                                     checks (no combined N+M interaction row —
+                                     that would need a buckling-aware EC3 §6.3
+                                     check to be meaningful, not just implemented).
+    Each dict: {check, demand, capacity, eta (%), status, unit}.
+    """
+    if element_type == ElementType.BAR:
+        return [_design_axial_row(mat, fk, A, As, fyk_v, N_Ed)]
+
+    if abs(N_Ed) <= _DESIGN_N_THRESHOLD_N:
+        return [_design_bending_row(mat, fk, W_pl, W_el, b, d, As, fyk_v, M_Ed)]
+
+    return [_design_axial_row(mat, fk, A, As, fyk_v, N_Ed),
+           _design_bending_row(mat, fk, W_pl, W_el, b, d, As, fyk_v, M_Ed)]
+
+
+# ── Shared Design-tab logic (used by _MemberForm & _MultiMemberForm) ──────────
+# Bundles the widgets so the M_Rd / visibility logic is written once instead
+# of twice with an "_m" suffix — the two forms only differ in which spinboxes
+# they wire into the bundle.
+
+@dataclass
+class _DesignWidgets:
+    form: QFormLayout
+    fy: QDoubleSpinBox
+    Wpl: QDoubleSpinBox
+    Wel: QDoubleSpinBox
+    melrd_lbl: QLabel
+    b_sec: QDoubleSpinBox
+    h_sec: QDoubleSpinBox
+    cover: QDoubleSpinBox
+    d_lbl: QLabel
+    As_t: QDoubleSpinBox
+    fyk: QDoubleSpinBox
+    mrd_lbl: QLabel
+
+
+def _design_update_visibility(dw: _DesignWidgets, mat_type: str) -> None:
+    """Show concrete section fields or steel/timber W_pl/W_el based on material type."""
+    is_conc = (mat_type == "concrete")
+    dw.form.setRowVisible(dw.Wpl,       not is_conc)
+    dw.form.setRowVisible(dw.Wel,       not is_conc)
+    dw.form.setRowVisible(dw.melrd_lbl, not is_conc)
+    dw.form.setRowVisible(dw.b_sec,   is_conc)
+    dw.form.setRowVisible(dw.h_sec,   is_conc)
+    dw.form.setRowVisible(dw.cover,   is_conc)
+    dw.form.setRowVisible(dw.d_lbl,   is_conc)
+    dw.form.setRowVisible(dw.As_t,    is_conc)
+    dw.form.setRowVisible(dw.fyk,     is_conc)
+    dw.form.setRowVisible(dw.mrd_lbl, is_conc)
+
+
+def _design_update_mrd(dw: _DesignWidgets) -> None:
+    """Recompute and display M_Rd live from concrete section inputs (EN 1992-1-1 §6.1)."""
+    fck = dw.fy.value() * 1e6
+    b   = dw.b_sec.value() / 1000
+    h   = dw.h_sec.value() / 1000
+    c   = dw.cover.value() / 1000
+    d   = h - c
+    As  = dw.As_t.value() / 1e6
+    fyk = dw.fyk.value()  * 1e6
+    dw.d_lbl.setText(f"{d * 1000:.0f} mm" if d > 0 else "—")
+    if b > 0 and d > 0 and As > 0 and fck > 0:
+        fcd = fck / 1.5
+        fyd = fyk / 1.15
+        x   = min(As * fyd / (0.8 * b * fcd), d)
+        mrd = As * fyd * (d - 0.4 * x)
+        dw.mrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m")
+    else:
+        dw.mrd_lbl.setText("—")
+
+
+def _design_update_melrd(dw: _DesignWidgets) -> None:
+    """Live M_Rd for steel / timber — plastic (W_pl) preferred, elastic (W_el) fallback.
+
+    EC3 §6.2.5: M_c,Rd = W_pl × fy / γ_M0  (Class 1/2)
+                          W_el × fy / γ_M0  (Class 3)
+    γ_M0 = 1.0 per EN 1993-1-1 §6.1(1).
+    """
+    fy  = dw.fy.value()  * 1e6
+    Wpl = dw.Wpl.value() * 1e-6
+    Wel = dw.Wel.value() * 1e-6
+    gamma_M0 = 1.0
+    if Wpl > 0 and fy > 0:
+        dw.melrd_lbl.setText(f"{Wpl * fy / gamma_M0 / 1e3:.2f} kN·m  (pl)")
+    elif Wel > 0 and fy > 0:
+        dw.melrd_lbl.setText(f"{Wel * fy / gamma_M0 / 1e3:.2f} kN·m  (el)")
+    else:
+        dw.melrd_lbl.setText("—")
+
+
+# ── Shared distributed-load table logic (used by _MemberForm & _MultiMemberForm) ──
+
+@dataclass
+class _DLTableWidgets:
+    table: QTableWidget
+    model_state: object   # ModelState | None
+    active_case_id: int    # fallback case id used for newly-added rows
+
+
+def _dlt_populate(dw: _DLTableWidgets, member_id: int) -> None:
+    """Populate table from all load cases' dist_loads for one member."""
+    dw.table.setRowCount(0)
+    if not dw.model_state:
+        return
+    for lc in dw.model_state.load_cases:
+        for dl in lc.get_member_load(member_id).dist_loads:
+            if dl.direction == "qz":  # hidden from UI
+                continue
+            _dlt_add_row(dw, lc.id, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
+
+
+def _dlt_add_row(dw: _DLTableWidgets, case_id: int,
+                  direction_key: str, ws_kn: float, we_kn: float) -> None:
+    row = dw.table.rowCount()
+    dw.table.insertRow(row)
+    # Case column: dropdown of all load cases — user can reassign here
+    case_combo = QComboBox()
+    if dw.model_state:
+        for lc in dw.model_state.load_cases:
+            case_combo.addItem(lc.name, lc.id)
+    for i in range(case_combo.count()):
+        if case_combo.itemData(i) == case_id:
+            case_combo.setCurrentIndex(i)
+            break
+    dw.table.setCellWidget(row, 0, case_combo)
+    # Direction column (read-only, stores direction key in UserRole)
+    for dkey, dlabel, dtip in _DL_DIRS:
+        if dkey == direction_key:
+            di = QTableWidgetItem(dlabel)
+            di.setToolTip(dtip)
+            di.setFlags(di.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            di.setData(Qt.ItemDataRole.UserRole, dkey)
+            dw.table.setItem(row, 1, di)
+            break
+    dw.table.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
+    dw.table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+
+
+def _dlt_add_entry(dw: _DLTableWidgets, direction: str) -> None:
+    """Add a new empty row for the given direction, defaulting to the active case."""
+    _dlt_add_row(dw, dw.active_case_id, direction, 0.0, 0.0)
+
+
+def _dlt_remove_row(dw: _DLTableWidgets) -> None:
+    rows = sorted({idx.row() for idx in dw.table.selectedIndexes()}, reverse=True)
+    for r in rows:
+        dw.table.removeRow(r)
+    if not rows and dw.table.rowCount() > 0:
+        dw.table.removeRow(dw.table.rowCount() - 1)
+
+
+# ── Shared section-picker logic (used by _MemberForm & _MultiMemberForm) ──────
+
+def _run_section_picker(parent: QWidget, *, E: QDoubleSpinBox, A: QDoubleSpinBox,
+                         I: QDoubleSpinBox, density: QDoubleSpinBox,
+                         fy: QDoubleSpinBox, fy_lbl: QLabel,
+                         Wpl: QDoubleSpinBox, Wel: QDoubleSpinBox,
+                         b_sec: QDoubleSpinBox, h_sec: QDoubleSpinBox,
+                         on_material_change, on_done) -> None:
+    """Open the section-library picker and push the result into the given
+    widgets. on_material_change(mat_type) updates Design-tab visibility;
+    on_done() saves immediately, without an extra Apply click."""
+    from ui_qt.section_picker import SectionPickerDialog
+    dlg = SectionPickerDialog(
+        current_E=E.value() * 1e9, current_A=A.value(), current_I=I.value() * 1e-6,
+        parent=parent,
+    )
+    if not (dlg.exec() and dlg.get_result()):
+        return
+    E_val, A_val, I_val, W_pl, W_el, b, h, density_val, fy_val, mat_type = dlg.get_result()
+    E.setValue(E_val / 1e9)
+    A.setValue(A_val)
+    I.setValue(I_val * 1e6)
+    density.setValue(density_val)
+    fy.setValue(fy_val / 1e6)
+    if W_pl > 0:
+        Wpl.setValue(W_pl * 1e6)
+    if W_el > 0:
+        Wel.setValue(W_el * 1e6)
+    if b > 0:
+        b_sec.setValue(b * 1000)   # m → mm
+    if h > 0:
+        h_sec.setValue(h * 1000)   # m → mm
+    fy_lbl.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
+    on_material_change(mat_type)
+    on_done()
+
 
 # _MemberForm
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,6 +666,11 @@ class _MemberForm(QWidget):
         type_names = ["BEAM","BAR","PIN_LEFT","PIN_RIGHT"]
         self._type_combo.setCurrentIndex(type_names.index(member.element_type.name))
         tf.addRow("Type:", self._type_combo)
+        self._group = QLineEdit(member.group)
+        self._group.setPlaceholderText("e.g. Column, Rafter, Diagonal…")
+        self._group.setToolTip(
+            "Free-form label — used by 'Colour by Group' (Ctrl+G) and reporting.")
+        tf.addRow("Group:", self._group)
         _sl.addWidget(type_box)
 
         sec_box = QGroupBox("Section properties")
@@ -453,6 +739,12 @@ class _MemberForm(QWidget):
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._dl_table.verticalHeader().setVisible(False)
         self._dl_table.setFixedHeight(120)
+        _active_id = self._load_case.id if self._load_case else (
+            self._model_state.load_cases[0].id
+            if self._model_state and self._model_state.load_cases else 0
+        )
+        self._dlw = _DLTableWidgets(table=self._dl_table, model_state=self._model_state,
+                                     active_case_id=_active_id)
         self._dl_populate()
         dl_layout.addWidget(self._dl_table)
         dl_btn_row = QHBoxLayout()
@@ -565,6 +857,13 @@ class _MemberForm(QWidget):
         self._mrd_lbl.setStyleSheet("color:#00cccc; font-weight:bold;")
         df.addRow("M_Rd (kN·m):", self._mrd_lbl)
 
+        self._dw = _DesignWidgets(
+            form=self._design_form, fy=self._fy, Wpl=self._Wpl, Wel=self._Wel,
+            melrd_lbl=self._melrd_lbl, b_sec=self._b_sec, h_sec=self._h_sec,
+            cover=self._cover, d_lbl=self._d_lbl, As_t=self._As_t, fyk=self._fyk,
+            mrd_lbl=self._mrd_lbl,
+        )
+
         # Connect concrete fields to live M_Rd display
         for _w in (self._fy, self._b_sec, self._h_sec, self._cover,
                    self._As_t, self._fyk):
@@ -621,92 +920,21 @@ class _MemberForm(QWidget):
             self._divide_callback(self._member.id, n)
 
     def _update_design_visibility(self, mat_type: str) -> None:
-        """Show concrete section fields or steel/timber W_pl/W_el based on material type."""
-        if not hasattr(self, "_design_form"):
-            return
-        df = self._design_form
-        is_conc = (mat_type == "concrete")
-        df.setRowVisible(self._Wpl,       not is_conc)
-        df.setRowVisible(self._Wel,       not is_conc)
-        df.setRowVisible(self._melrd_lbl, not is_conc)
-        df.setRowVisible(self._b_sec,  is_conc)
-        df.setRowVisible(self._h_sec,  is_conc)
-        df.setRowVisible(self._cover,  is_conc)
-        df.setRowVisible(self._d_lbl,  is_conc)
-        df.setRowVisible(self._As_t,   is_conc)
-        df.setRowVisible(self._fyk,    is_conc)
-        df.setRowVisible(self._mrd_lbl, is_conc)
+        _design_update_visibility(self._dw, mat_type)
 
     def _update_mrd_display(self, _val: float = 0.0) -> None:
-        """Recompute and display M_Rd live from concrete section inputs."""
-        if not hasattr(self, "_mrd_lbl"):
-            return
-        fck = self._fy.value() * 1e6
-        b   = self._b_sec.value() / 1000
-        h   = self._h_sec.value() / 1000
-        c   = self._cover.value() / 1000
-        d   = h - c
-        As  = self._As_t.value()  / 1e6
-        fyk = self._fyk.value()   * 1e6
-        if hasattr(self, "_d_lbl"):
-            self._d_lbl.setText(f"{d * 1000:.0f} mm" if d > 0 else "—")
-        if b > 0 and d > 0 and As > 0 and fck > 0:
-            fcd = fck / 1.5
-            fyd = fyk / 1.15
-            x   = min(As * fyd / (0.8 * b * fcd), d)
-            mrd = As * fyd * (d - 0.4 * x)
-            self._mrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m")
-        else:
-            self._mrd_lbl.setText("—")
+        _design_update_mrd(self._dw)
 
     def _update_melrd_display(self, _val: float = 0.0) -> None:
-        """Live M_Rd for steel / timber — plastic (W_pl) preferred, elastic (W_el) fallback.
-
-        EC3 §6.2.5: M_c,Rd = W_pl × fy / γ_M0  (Class 1/2)
-                              W_el × fy / γ_M0  (Class 3)
-        γ_M0 = 1.0 per EN 1993-1-1 §6.1(1).
-        """
-        if not hasattr(self, "_melrd_lbl"):
-            return
-        fy      = self._fy.value()  * 1e6    # Pa
-        Wpl     = self._Wpl.value() * 1e-6   # m³
-        Wel     = self._Wel.value() * 1e-6   # m³
-        gamma_M0 = 1.0
-        if Wpl > 0 and fy > 0:
-            mrd = Wpl * fy / gamma_M0
-            self._melrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m  (pl)")
-        elif Wel > 0 and fy > 0:
-            mrd = Wel * fy / gamma_M0
-            self._melrd_lbl.setText(f"{mrd / 1e3:.2f} kN·m  (el)")
-        else:
-            self._melrd_lbl.setText("—")
+        _design_update_melrd(self._dw)
 
     def _pick_section(self) -> None:
-        from ui_qt.section_picker import SectionPickerDialog
-        dlg = SectionPickerDialog(
-            current_E=self._E.value() * 1e9,
-            current_A=self._A.value(),
-            current_I=self._I.value() * 1e-6,
-            parent=self,
+        _run_section_picker(
+            self, E=self._E, A=self._A, I=self._I, density=self._density,
+            fy=self._fy, fy_lbl=self._fy_lbl, Wpl=self._Wpl, Wel=self._Wel,
+            b_sec=self._b_sec, h_sec=self._h_sec,
+            on_material_change=self._update_design_visibility, on_done=self._apply,
         )
-        if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el, b, h, density, fy, mat_type = dlg.get_result()
-            self._E.setValue(E / 1e9)
-            self._A.setValue(A)
-            self._I.setValue(I * 1e6)
-            self._density.setValue(density)
-            self._fy.setValue(fy / 1e6)
-            if W_pl > 0:
-                self._Wpl.setValue(W_pl * 1e6)
-            if W_el > 0:
-                self._Wel.setValue(W_el * 1e6)
-            if b > 0:
-                self._b_sec.setValue(b * 1000)   # m → mm
-            if h > 0:
-                self._h_sec.setValue(h * 1000)   # m → mm
-            self._fy_lbl.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
-            self._update_design_visibility(mat_type)
-            self._apply()   # save immediately — no extra Apply click needed
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -730,56 +958,17 @@ class _MemberForm(QWidget):
     # ── distributed loads table helpers ──────────────────────────────────────
 
     def _dl_populate(self) -> None:
-        """Populate table from all load cases' dist_loads for this member."""
-        self._dl_table.setRowCount(0)
-        if not self._model_state:
-            return
-        for lc in self._model_state.load_cases:
-            for dl in lc.get_member_load(self._member.id).dist_loads:
-                if dl.direction == "qz":  # hidden from UI
-                    continue
-                self._dl_add_row(lc.id, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
+        _dlt_populate(self._dlw, self._member.id)
 
     def _dl_add_entry(self, direction: str) -> None:
-        """Add a new empty row for the given direction, defaulting to the active case."""
-        active_id = self._load_case.id if self._load_case else (
-            self._model_state.load_cases[0].id
-            if self._model_state and self._model_state.load_cases else 0
-        )
-        self._dl_add_row(active_id, direction, 0.0, 0.0)
+        _dlt_add_entry(self._dlw, direction)
 
     def _dl_remove_row(self) -> None:
-        rows = sorted({idx.row() for idx in self._dl_table.selectedIndexes()}, reverse=True)
-        for r in rows:
-            self._dl_table.removeRow(r)
-        if not rows and self._dl_table.rowCount() > 0:
-            self._dl_table.removeRow(self._dl_table.rowCount() - 1)
+        _dlt_remove_row(self._dlw)
 
     def _dl_add_row(self, case_id: int,
                     direction_key: str, ws_kn: float, we_kn: float) -> None:
-        row = self._dl_table.rowCount()
-        self._dl_table.insertRow(row)
-        # Case column: dropdown of all load cases — user can reassign here
-        case_combo = QComboBox()
-        if self._model_state:
-            for lc in self._model_state.load_cases:
-                case_combo.addItem(lc.name, lc.id)
-        for i in range(case_combo.count()):
-            if case_combo.itemData(i) == case_id:
-                case_combo.setCurrentIndex(i)
-                break
-        self._dl_table.setCellWidget(row, 0, case_combo)
-        # Direction column (read-only, stores direction key in UserRole)
-        for dkey, dlabel, dtip in _DL_DIRS:
-            if dkey == direction_key:
-                di = QTableWidgetItem(dlabel)
-                di.setToolTip(dtip)
-                di.setFlags(di.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                di.setData(Qt.ItemDataRole.UserRole, dkey)
-                self._dl_table.setItem(row, 1, di)
-                break
-        self._dl_table.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
-        self._dl_table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+        _dlt_add_row(self._dlw, case_id, direction_key, ws_kn, we_kn)
 
     def _add_pdl_row(self, start: float, end: float,
                      w_start_kn: float, w_end_kn: float) -> None:
@@ -801,6 +990,7 @@ class _MemberForm(QWidget):
         m = self._member
         type_names = ["BEAM","BAR","PIN_LEFT","PIN_RIGHT"]
         m.element_type = ElementType[type_names[self._type_combo.currentIndex()]]
+        m.group   = self._group.text().strip()
         m.E       = self._E.value() * 1e9
         m.A       = self._A.value()
         m.I       = self._I.value() * 1e-6
@@ -817,6 +1007,7 @@ class _MemberForm(QWidget):
         m.d_eff       = (self._h_sec.value() - self._cover.value()) / 1000
         m.As_tension  = self._As_t.value()  / 1e6
         m.fyk         = self._fyk.value()   * 1e6
+        m.reinforcement_estimated = False   # user has now reviewed/set it directly
         if self._load_case is not None:
             # ── point loads (active case) ─────────────────────────────────────
             point_loads = []
@@ -1069,6 +1260,12 @@ class _MultiMemberForm(QWidget):
             type_names.index(first.element_type.name) if all_same_type else 0
         )
         tf.addRow("Type:", self._type_combo)
+        self._group_m = QLineEdit(first.group)
+        self._group_m.setPlaceholderText("e.g. Column, Rafter, Diagonal…")
+        self._group_m.setToolTip(
+            "Free-form label — used by 'Colour by Group' (Ctrl+G) and reporting.\n"
+            "Applies to every selected member.")
+        tf.addRow("Group:", self._group_m)
         sec_l.addWidget(type_box)
 
         sec_box = QGroupBox("Section properties")
@@ -1112,6 +1309,12 @@ class _MultiMemberForm(QWidget):
         hh_m.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._dl_table_m.verticalHeader().setVisible(False)
         self._dl_table_m.setFixedHeight(120)
+        _active_id_m = self._load_case.id if self._load_case else (
+            self._model_state.load_cases[0].id
+            if self._model_state and self._model_state.load_cases else 0
+        )
+        self._dlw = _DLTableWidgets(table=self._dl_table_m, model_state=self._model_state,
+                                     active_case_id=_active_id_m)
         self._dl_populate_m()
         dl_layout.addWidget(self._dl_table_m)
         dl_btn_row = QHBoxLayout()
@@ -1167,6 +1370,13 @@ class _MultiMemberForm(QWidget):
         self._design_form_m.addRow("M_Rd (kN·m):", self._mrd_lbl_m)
         des_l.addWidget(des_box)
 
+        self._dw = _DesignWidgets(
+            form=self._design_form_m, fy=self._fy_m, Wpl=self._Wpl_m, Wel=self._Wel_m,
+            melrd_lbl=self._melrd_lbl_m, b_sec=self._b_sec_m, h_sec=self._h_sec_m,
+            cover=self._cover_m, d_lbl=self._d_lbl_m, As_t=self._As_t_m, fyk=self._fyk_m,
+            mrd_lbl=self._mrd_lbl_m,
+        )
+
         for _w in (self._fy_m, self._b_sec_m, self._h_sec_m,
                    self._cover_m, self._As_t_m, self._fyk_m):
             _w.valueChanged.connect(self._update_mrd_display_m)
@@ -1177,6 +1387,7 @@ class _MultiMemberForm(QWidget):
         _mat_type_m = _infer_mat_type(first.E)
         self._fy_lbl_m.setText(_MAT_TYPE_LABELS.get(_mat_type_m, "fy (MPa):"))
         self._update_design_visibility_m(_mat_type_m)
+        self._update_mrd_display_m()
         self._update_melrd_display_m()
 
         # ── Apply button ──────────────────────────────────────────────────────
@@ -1185,130 +1396,34 @@ class _MultiMemberForm(QWidget):
         root.addWidget(btn)
 
     def _update_design_visibility_m(self, mat_type: str = "steel") -> None:
-        is_conc = (mat_type == "concrete")
-        df = self._design_form_m
-        df.setRowVisible(self._Wpl_m,       not is_conc)
-        df.setRowVisible(self._Wel_m,       not is_conc)
-        df.setRowVisible(self._melrd_lbl_m, not is_conc)
-        df.setRowVisible(self._b_sec_m,  is_conc)
-        df.setRowVisible(self._h_sec_m,  is_conc)
-        df.setRowVisible(self._cover_m,  is_conc)
-        df.setRowVisible(self._d_lbl_m,  is_conc)
-        df.setRowVisible(self._As_t_m,   is_conc)
-        df.setRowVisible(self._fyk_m,    is_conc)
-        df.setRowVisible(self._mrd_lbl_m, is_conc)
+        _design_update_visibility(self._dw, mat_type)
 
     def _update_mrd_display_m(self, _val: float = 0.0) -> None:
-        fck = self._fy_m.value() * 1e6
-        b   = self._b_sec_m.value() / 1000
-        h   = self._h_sec_m.value() / 1000
-        c   = self._cover_m.value() / 1000
-        d   = h - c
-        As  = self._As_t_m.value()  / 1e6
-        fyk = self._fyk_m.value()   * 1e6
-        if hasattr(self, "_d_lbl_m"):
-            self._d_lbl_m.setText(f"{d * 1000:.0f} mm" if d > 0 else "—")
-        if b > 0 and d > 0 and As > 0 and fck > 0:
-            fcd = fck / 1.5
-            fyd = fyk / 1.15
-            x   = min(As * fyd / (0.8 * b * fcd), d)
-            mrd = As * fyd * (d - 0.4 * x)
-            self._mrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m")
-        else:
-            self._mrd_lbl_m.setText("—")
+        _design_update_mrd(self._dw)
 
     def _update_melrd_display_m(self, _val: float = 0.0) -> None:
-        """Live M_Rd for steel / timber — plastic (W_pl) preferred, elastic (W_el) fallback."""
-        if not hasattr(self, "_melrd_lbl_m"):
-            return
-        fy      = self._fy_m.value()  * 1e6
-        Wpl     = self._Wpl_m.value() * 1e-6
-        Wel     = self._Wel_m.value() * 1e-6
-        gamma_M0 = 1.0
-        if Wpl > 0 and fy > 0:
-            mrd = Wpl * fy / gamma_M0
-            self._melrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m  (pl)")
-        elif Wel > 0 and fy > 0:
-            mrd = Wel * fy / gamma_M0
-            self._melrd_lbl_m.setText(f"{mrd / 1e3:.2f} kN·m  (el)")
-        else:
-            self._melrd_lbl_m.setText("—")
+        _design_update_melrd(self._dw)
 
     def _dl_populate_m(self) -> None:
-        self._dl_table_m.setRowCount(0)
-        if not self._model_state:
-            return
-        first = self._members[0]
-        for lc in self._model_state.load_cases:
-            for dl in lc.get_member_load(first.id).dist_loads:
-                if dl.direction == "qz":
-                    continue
-                self._dl_add_row_m(lc.id, dl.direction, dl.w_start / 1e3, dl.w_end / 1e3)
+        _dlt_populate(self._dlw, self._members[0].id)
 
     def _dl_add_row_m(self, case_id: int,
                       direction_key: str, ws_kn: float, we_kn: float) -> None:
-        row = self._dl_table_m.rowCount()
-        self._dl_table_m.insertRow(row)
-        case_combo = QComboBox()
-        if self._model_state:
-            for lc in self._model_state.load_cases:
-                case_combo.addItem(lc.name, lc.id)
-        for i in range(case_combo.count()):
-            if case_combo.itemData(i) == case_id:
-                case_combo.setCurrentIndex(i)
-                break
-        self._dl_table_m.setCellWidget(row, 0, case_combo)
-        for dkey, dlabel, dtip in _DL_DIRS:
-            if dkey == direction_key:
-                di = QTableWidgetItem(dlabel)
-                di.setToolTip(dtip)
-                di.setFlags(di.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                di.setData(Qt.ItemDataRole.UserRole, dkey)
-                self._dl_table_m.setItem(row, 1, di)
-                break
-        self._dl_table_m.setCellWidget(row, 2, _spin(ws_kn, -1e6, 1e6, 1.0, 2))
-        self._dl_table_m.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
+        _dlt_add_row(self._dlw, case_id, direction_key, ws_kn, we_kn)
 
     def _dl_add_entry_m(self, direction: str) -> None:
-        active_id = self._load_case.id if self._load_case else (
-            self._model_state.load_cases[0].id
-            if self._model_state and self._model_state.load_cases else 0
-        )
-        self._dl_add_row_m(active_id, direction, 0.0, 0.0)
+        _dlt_add_entry(self._dlw, direction)
 
     def _dl_remove_row_m(self) -> None:
-        rows = sorted({idx.row() for idx in self._dl_table_m.selectedIndexes()}, reverse=True)
-        for r in rows:
-            self._dl_table_m.removeRow(r)
-        if not rows and self._dl_table_m.rowCount() > 0:
-            self._dl_table_m.removeRow(self._dl_table_m.rowCount() - 1)
+        _dlt_remove_row(self._dlw)
 
     def _pick_section(self) -> None:
-        from ui_qt.section_picker import SectionPickerDialog
-        dlg = SectionPickerDialog(
-            current_E=self._E.value() * 1e9,
-            current_A=self._A.value(),
-            current_I=self._I.value() * 1e-6,
-            parent=self,
+        _run_section_picker(
+            self, E=self._E, A=self._A, I=self._I, density=self._density,
+            fy=self._fy_m, fy_lbl=self._fy_lbl_m, Wpl=self._Wpl_m, Wel=self._Wel_m,
+            b_sec=self._b_sec_m, h_sec=self._h_sec_m,
+            on_material_change=self._update_design_visibility_m, on_done=self._apply,
         )
-        if dlg.exec() and dlg.get_result():
-            E, A, I, W_pl, W_el, b, h, density, fy, mat_type = dlg.get_result()
-            self._E.setValue(E / 1e9)
-            self._A.setValue(A)
-            self._I.setValue(I * 1e6)
-            self._density.setValue(density)
-            self._fy_m.setValue(fy / 1e6)
-            if W_pl > 0:
-                self._Wpl_m.setValue(W_pl * 1e6)
-            if W_el > 0:
-                self._Wel_m.setValue(W_el * 1e6)
-            if b > 0:
-                self._b_sec_m.setValue(b * 1000)   # m → mm
-            if h > 0:
-                self._h_sec_m.setValue(h * 1000)   # m → mm
-            self._fy_lbl_m.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
-            self._update_design_visibility_m(mat_type)
-            self._apply()   # save immediately — no extra Apply click needed
 
     def _apply(self) -> None:
         type_names = ["BEAM", "BAR", "PIN_LEFT", "PIN_RIGHT"]
@@ -1340,8 +1455,10 @@ class _MultiMemberForm(QWidget):
                     w_start=ws.value() * 1e3,
                     w_end=we.value()   * 1e3,
                 ))
+        group = self._group_m.text().strip()
         for m in self._members:
             m.element_type = elem_type
+            m.group   = group
             m.E       = E
             m.A       = A
             m.I       = I
@@ -1355,6 +1472,7 @@ class _MultiMemberForm(QWidget):
             m.d_eff       = d_eff
             m.As_tension  = As_t
             m.fyk         = fyk
+            m.reinforcement_estimated = False   # user has now reviewed/set it directly
             if self._model_state:
                 for lc in self._model_state.load_cases:
                     old_ml = lc.get_member_load(m.id)
@@ -1511,7 +1629,7 @@ class ResultsPanel(QWidget):
         ])
 
         self._design_table = self._make_table([
-            "Member", "M_Ed (kN·m)", "M_Rd (kN·m)", "η (%)", "Status",
+            "Member", "Check", "Demand", "Capacity", "η (%)", "Status",
         ])
 
         self._tabs.addTab(self._wrap(self._disp_table),   "Displacements")
@@ -1657,7 +1775,7 @@ class ResultsPanel(QWidget):
         col_vals: dict[int, list[float]] = {1: [], 2: [], 3: [], 4: [], 5: [], 7: []}
         xL_plus:  list[float] = []  # x/L where M+ peak occurs per member
         xL_minus: list[float] = []  # x/L where M- peak occurs per member
-        design_data: list[tuple[int, float]] = []  # (mid, M_Ed N·m)
+        design_data: list[tuple[int, float, float]] = []  # (mid, M_Ed N·m, N_Ed N)
 
         for row, res in enumerate(member_results):
             mid  = res.element_id
@@ -1707,7 +1825,8 @@ class ResultsPanel(QWidget):
             col_vals[5].append(Mp_kNm)
             col_vals[7].append(Mm_kNm)
             xL_plus.append(xL_p);    xL_minus.append(xL_m)
-            design_data.append((mid, max(abs(M_plus), abs(M_minus))))
+            design_data.append((mid, max(abs(M_plus), abs(M_minus)),
+                               max((res.N_i, res.N_j), key=abs)))   # sign kept: + = compression
 
         # Footer Max / Min rows
         if n_members > 0:
@@ -1838,7 +1957,7 @@ class ResultsPanel(QWidget):
 
         # ── Member forces (simplified 4-column envelope) ───────────────────────
         self._env_force_table.setRowCount(len(state.members))
-        env_design_data: list[tuple[int, float]] = []
+        env_design_data: list[tuple[int, float, float]] = []
         for row, md in enumerate(state.members):
             all_res = [
                 r for run in solve_runs
@@ -1856,7 +1975,7 @@ class ResultsPanel(QWidget):
                 f"{N / 1e3:.3f}", f"{V / 1e3:.3f}", f"{M / 1e3:.3f}",
             ])
             self._force_row_to_member.append(md.id)
-            env_design_data.append((md.id, abs(M)))
+            env_design_data.append((md.id, abs(M), N))   # N keeps its sign: + = compression
 
         for tbl in (self._disp_table, self._react_table,
                     self._env_force_table, self._design_table):
@@ -1928,21 +2047,29 @@ class ResultsPanel(QWidget):
             self._syncing = False
 
     def _populate_design_table(
-        self, m_ed_data: list[tuple[int, float]], model_state
+        self, m_ed_data: list[tuple[int, float, float]], model_state
     ) -> None:
-        """Fill the Design tab from (member_id, M_Ed_Nm) pairs."""
+        """Fill the Design tab from (member_id, M_Ed_Nm, N_Ed_N) triples.
+
+        Each member contributes one row per applicable check, decided by its
+        element_type: BAR -> axial only; BEAM/PIN_LEFT/PIN_RIGHT -> bending
+        only, or axial + bending + a combined N+M interaction row when it
+        carries real axial force (e.g. a column) — see _compute_member_design_rows.
+        """
         self._design_row_to_member = []
-        self._design_table.blockSignals(True)
-        self._design_table.setRowCount(len(m_ed_data))
+        flat_rows: list[dict] = []
 
-        for row, (mid, M_Ed) in enumerate(m_ed_data):
-            md   = model_state.get_member(mid)
-            fk   = md.fy   if md else 275e6
-            W_pl = md.W_pl if md else 0.0
-            W_el = md.W_el if md else 0.0
+        for mid, M_Ed, N_Ed in m_ed_data:
+            md = model_state.get_member(mid)
+            fk   = md.fy      if md else 275e6
+            A    = md.A       if md else 0.0
+            W_pl = md.W_pl    if md else 0.0
+            W_el = md.W_el    if md else 0.0
             dens = md.density if md else 0.0
+            etype = md.element_type if md else ElementType.BEAM
 
-            # Infer material family from density
+            # Infer material family from density (same convention as the
+            # member-properties Design tab's _infer_mat_type)
             if 2000 <= dens <= 3000:
                 mat = "concrete"
             elif 300 <= dens <= 800:
@@ -1950,72 +2077,76 @@ class ResultsPanel(QWidget):
             else:
                 mat = "steel"   # steel / custom / zero density all use steel formula
 
-            if mat == "concrete":
-                # EC2 §6.1 — rectangular stress block
-                b     = md.b_sec if md else 0.0
-                d     = md.d_eff if md else 0.0
-                As    = md.As_tension if md else 0.0
-                fyk_v = md.fyk if md else 500e6
-                fck   = fk
-                if b > 0 and d > 0 and As > 0 and fck > 0:
-                    fcd  = fck / 1.5
-                    fyd  = fyk_v / 1.15
-                    x    = min(As * fyd / (0.8 * b * fcd), d)
-                    M_Rd = As * fyd * (d - 0.4 * x)
-                    eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
-                    status = ("PASS ✓" if eta <= 100.0 else "FAIL ✗") if eta is not None else "N/A"
-                else:
-                    M_Rd = 0.0
-                    eta  = None
-                    status = "Set b/d/As"
-            else:
-                # EC3 §6.2.5 — plastic (Class 1/2) preferred, elastic (Class 3) fallback
-                # γ_M0 = 1.0 per EN 1993-1-1 §6.1(1)
-                gamma_M0 = 1.0
-                if W_pl > 0:
-                    M_Rd = fk * W_pl / gamma_M0   # plastic moment resistance
-                elif W_el > 0:
-                    M_Rd = fk * W_el / gamma_M0   # elastic moment resistance
-                else:
-                    M_Rd = 0.0
-                eta  = (M_Ed / M_Rd * 100) if M_Rd > 0 else None
-                if eta is not None:
-                    status = "PASS ✓" if eta <= 100.0 else "FAIL ✗"
-                elif W_pl == 0 and W_el == 0:
-                    status = "N/A — set W_pl"
-                else:
-                    status = "N/A"
+            b     = md.b_sec      if md else 0.0
+            d     = md.d_eff      if md else 0.0
+            As    = md.As_tension if md else 0.0
+            fyk_v = md.fyk        if md else 500e6
 
+            estimated = mat == "concrete" and bool(md and md.reinforcement_estimated)
+            for check_row in _compute_member_design_rows(
+                etype, mat, fk, A, W_pl, W_el, b, d, As, fyk_v, M_Ed, N_Ed,
+            ):
+                if estimated and check_row["eta"] is not None:
+                    check_row["status"] += "  (min. reinf. — refine)"
+                flat_rows.append({"mid": mid, **check_row})
+
+        self._design_table.blockSignals(True)
+        self._design_table.clearSpans()   # drop any spans from a previous populate
+        self._design_table.setRowCount(len(flat_rows))
+
+        for row, r in enumerate(flat_rows):
+            demand   = f"{r['demand'] / 1e3:.3f} {r['unit']}"     if r['demand']   is not None else "—"
+            capacity = f"{r['capacity'] / 1e3:.3f} {r['unit']}"   if r['capacity'] is not None else "—"
             self._set_row(self._design_table, row, [
-                str(mid),
-                f"{M_Ed / 1e3:.3f}",
-                f"{M_Rd / 1e3:.3f}" if M_Rd > 0 else "—",
-                f"{eta:.1f}" if eta is not None else "—",
-                status,
+                str(r["mid"]),
+                r["check"],
+                demand,
+                capacity,
+                f"{r['eta']:.1f}" if r["eta"] is not None else "—",
+                r["status"],
             ])
-            self._design_row_to_member.append(mid)
+            self._design_row_to_member.append(r["mid"])
 
             # Colour-code by utilisation
-            eta_ref = eta
-            if mat == "concrete" and eta_ref is None:
-                bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # blue-grey — dims not set
-            elif eta_ref is not None:
-                if eta_ref <= 80.0:
-                    bg, fg = QColor("#1b3a1b"), QColor("#90ee90")   # green — low
-                elif eta_ref <= 100.0:
-                    bg, fg = QColor("#3a3000"), QColor("#ffe066")   # amber — near limit
-                else:
-                    bg, fg = QColor("#3a0000"), QColor("#ff6b6b")   # red — exceeded
+            if r["eta"] is None:
+                bg, fg = QColor(28, 28, 48), QColor("#8899cc")     # info — check N/A or not configured
+            elif r["eta"] <= 80.0:
+                bg, fg = QColor("#1b3a1b"), QColor("#90ee90")       # green — low
+            elif r["eta"] <= 100.0:
+                bg, fg = QColor("#3a3000"), QColor("#ffe066")       # amber — near limit
             else:
-                bg, fg = QColor(30, 30, 30), QColor("#909090")
+                bg, fg = QColor("#3a0000"), QColor("#ff6b6b")       # red — exceeded
 
             bg_brush = QBrush(bg)
             fg_brush = QBrush(fg)
-            for col in range(self._design_table.columnCount()):
+            # Column 0 (Member) is styled separately below as a spanned group
+            # header, so its colour isn't tied to any one check's PASS/FAIL.
+            for col in range(1, self._design_table.columnCount()):
                 item = self._design_table.item(row, col)
                 if item:
                     item.setBackground(bg_brush)
                     item.setForeground(fg_brush)
+
+        # Group consecutive rows that belong to the same member: span the
+        # Member cell across them so it's visually obvious "these N rows are
+        # one element assessed against N different capacities," instead of
+        # looking like N separate members that happen to share an ID.
+        header_bg = QBrush(QColor("#26282c"))
+        header_fg = QBrush(QColor("#dddddd"))
+        row = 0
+        while row < len(flat_rows):
+            span = 1
+            while row + span < len(flat_rows) and flat_rows[row + span]["mid"] == flat_rows[row]["mid"]:
+                span += 1
+            item = self._design_table.item(row, 0)
+            if item:
+                item.setBackground(header_bg)
+                item.setForeground(header_fg)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                f = item.font(); f.setBold(True); item.setFont(f)
+            if span > 1:
+                self._design_table.setSpan(row, 0, span, 1)
+            row += span
 
         self._design_table.blockSignals(False)
 

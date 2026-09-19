@@ -390,6 +390,11 @@ class MemberData:
     d_eff:      float = 0.0    # m  — effective depth to tension steel centroid
     As_tension: float = 0.0    # m² — tension reinforcement area
     fyk:        float = 500e6  # Pa — reinforcement yield strength (default 500 MPa)
+    # True when As_tension was auto-placed at the EC2 §9.2.1.1 code minimum
+    # (e.g. by a wizard) rather than chosen by the user — the Design tab
+    # flags this so a passing check isn't mistaken for a finished design.
+    # Cleared the moment the user applies a value from the properties panel.
+    reinforcement_estimated: bool = False
 
 
 # ── Full model state ──────────────────────────────────────────────────────────
@@ -587,7 +592,8 @@ class ModelState:
                  "n_sub": m.n_sub, "density": m.density,
                  "fy": m.fy, "W_pl": m.W_pl, "W_el": m.W_el,
                  "b_sec": m.b_sec, "h_sec": m.h_sec, "d_eff": m.d_eff,
-                 "As_tension": m.As_tension, "fyk": m.fyk}
+                 "As_tension": m.As_tension, "fyk": m.fyk,
+                 "reinforcement_estimated": m.reinforcement_estimated}
                 for m in self.members
             ],
             "load_cases": [lc.to_dict() for lc in self.load_cases],
@@ -648,6 +654,7 @@ class ModelState:
                 d_eff=md.get("d_eff", 0.0),
                 As_tension=md.get("As_tension", 0.0),
                 fyk=md.get("fyk", 500e6),
+                reinforcement_estimated=md.get("reinforcement_estimated", False),
             ))
         if "load_cases" in d:
             s.load_cases.clear()
