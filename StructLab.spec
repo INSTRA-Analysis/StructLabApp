@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for StructLab -- 2D/3D Structural Analysis Desktop App.
+r"""PyInstaller spec for StructLab -- 2D/3D Structural Analysis Desktop App.
 
 Standard build command (outside OneDrive):
     pyinstaller StructLab.spec --distpath C:\Builds\StructLab\dist --workpath C:\Builds\StructLab\build --noconfirm
@@ -167,7 +167,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX disabled: compression triggers AV false-positives and can corrupt
+    # Qt/numpy DLLs. Robustness of the distributed .exe > bundle size.
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -183,7 +185,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,   # see EXE note — disabled for AV/DLL robustness
     upx_exclude=[],
     name="StructLab",
 )
