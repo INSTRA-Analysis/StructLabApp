@@ -211,3 +211,23 @@ def inverse_isometric_yz(sx: float, sy: float, x_fixed: float,
 def is_3d_model(nodes: list) -> bool:
     """Return True if any node in the model has a non-zero z coordinate."""
     return any(getattr(n, 'z', 0.0) != 0.0 for n in nodes)
+
+
+def camera_dir(azimuth_deg: float | None = None,
+               elevation_deg: float | None = None) -> tuple[float, float, float]:
+    """Unit vector pointing FROM the origin TOWARD the camera, in model space.
+
+    Used to decide whether a 3D face (given as 3+ world-space points) faces
+    the viewer, via dot(face_normal, camera_dir()) — positive means front-facing.
+    """
+    if azimuth_deg is None:
+        azimuth_deg = ISO_AZIMUTH
+    if elevation_deg is None:
+        elevation_deg = ISO_ELEVATION
+    az = math.radians(azimuth_deg)
+    el = math.radians(elevation_deg)
+    return (
+        -math.sin(az) * math.cos(el),
+         math.cos(az) * math.cos(el),
+         math.sin(el),
+    )

@@ -341,13 +341,7 @@ class ViewCube:
 
 def _cam_dir(az_deg: float, el_deg: float) -> tuple[float, float, float]:
     """Unit vector pointing FROM origin TOWARD the camera in model space."""
-    az = math.radians(az_deg)
-    el = math.radians(el_deg)
-    return (
-        -math.sin(az) * math.cos(el),
-         math.cos(az) * math.cos(el),
-         math.sin(el),
-    )
+    return _proj.camera_dir(az_deg, el_deg)
 
 
 def _dot(a: tuple, b: tuple) -> float:
