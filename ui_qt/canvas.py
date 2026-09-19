@@ -783,8 +783,21 @@ class StructCanvas(QGraphicsScene):
                         views[0].mapFromGlobal(QCursor.pos())
                     )
                     self._apply_grab(scene_pos)
-        elif text in '0123456789':
+        elif text and text in '0123456789':
             self._grab_typed += text
+            self._apply_grab_typed_value()
+        elif text and text in '.,':
+            # ',' accepted as a decimal alias (some locales use it as the
+            # decimal separator) — always normalized to '.', since float()
+            # only accepts '.'.
+            if '.' not in self._grab_typed:
+                self._grab_typed += '.'
+                self._apply_grab_typed_value()
+        elif text == '-':
+            # Toggle sign (Blender-style) — works whenever pressed, not
+            # just as the first character typed.
+            self._grab_typed = (self._grab_typed[1:] if self._grab_typed.startswith('-')
+                                else '-' + self._grab_typed)
             self._apply_grab_typed_value()
 
     # ── S-scale ─────────────────────────────────────────────────────────────────
@@ -981,13 +994,17 @@ class StructCanvas(QGraphicsScene):
                     scene_pos = views[0].mapToScene(
                         views[0].mapFromGlobal(QCursor.pos()))
                     self._apply_scale(scene_pos)
-        elif text and text in '0123456789.':
+        elif text and text in '0123456789':
             self._scale_typed += text
             self._apply_scale_typed_value()
-        elif text == '-' and not self._grab_typed:
-            self._grab_typed = '-'
-        elif text == '.' and '.' not in self._grab_typed:
-            self._grab_typed += '.'
+        elif text and text in '.,':
+            if '.' not in self._scale_typed:
+                self._scale_typed += '.'
+                self._apply_scale_typed_value()
+        elif text == '-':
+            self._scale_typed = (self._scale_typed[1:] if self._scale_typed.startswith('-')
+                                 else '-' + self._scale_typed)
+            self._apply_scale_typed_value()
 
     def _is_3d_mode(self) -> bool:
         return self.model_state.analysis_mode == "3D"
