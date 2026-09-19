@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
         self._build_view_toolbar()
         self._build_docks()
         self._build_view_menu()
+        self._build_shortcuts_menu()
         self._build_status_bar()
         self._wire_selection()
         self._setup_autosave()
@@ -527,6 +528,27 @@ class MainWindow(QMainWindow):
             dock.show()
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,  self._left_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
+
+    def _build_shortcuts_menu(self) -> None:
+        """A live reference menu listing every keyboard shortcut, right after
+        View. Rows are disabled (informational only — setting a real
+        .setShortcut() here would rebind the key to this do-nothing action);
+        the single source of truth is dialogs._SHORTCUTS, shared with the
+        Help > Keyboard Shortcuts dialog so the two can't drift apart."""
+        from ui_qt.dialogs import _SHORTCUTS
+        mb = self.menuBar()
+        shortcuts_menu = mb.addMenu("Shortcuts")
+        bold = None
+        for name, key in _SHORTCUTS:
+            if key is None:
+                act = shortcuts_menu.addAction(name)
+                if bold is None:
+                    bold = act.font()
+                    bold.setBold(True)
+                act.setFont(bold)
+            else:
+                act = shortcuts_menu.addAction(f"    {name}\t{key}")
+            act.setEnabled(False)
 
     def _on_toggle_local_axes(self, checked: bool) -> None:
         from ui_qt.canvas_items import set_show_local_axes
