@@ -1496,12 +1496,36 @@ class StructCanvas(QGraphicsScene):
         self._isolated = False
 
     def load_state(self, state: ModelState) -> None:
+        """Replace the model with `state` and rebuild the scene from it.
+
+        For swapping in a DIFFERENT ModelState (a new file, preset, etc.).
+        Do not pass self.model_state back into this — clear_model() clears
+        it before rebuilding, so that would wipe the very data you meant to
+        redraw. Use redraw() instead when the model_state object is already
+        current and only the visuals need to catch up (e.g. after an
+        out-of-band edit via the Python console)."""
         self.clear_model()
         self.model_state = state
+        self._rebuild_items()
+
+    def redraw(self) -> None:
+        """Rebuild scene items from the CURRENT model_state, without
+        touching its data — for callers that mutated model_state directly
+        (out-of-band, e.g. the Python console) and just need the canvas to
+        catch up. See load_state()'s docstring for why that method can't be
+        reused here by passing it self.model_state."""
+        self.clear()
+        self._overlay_items.clear()
+        self._node_items.clear()
+        self._member_items.clear()
+        self._isolated = False
+        self._rebuild_items()
+
+    def _rebuild_items(self) -> None:
         self._suppress_changed = True
-        for node in state.nodes:
+        for node in self.model_state.nodes:
             self._add_node_item(node)
-        for member in state.members:
+        for member in self.model_state.members:
             self._add_member_item(member)
         self._suppress_changed = False
         self.model_changed.emit()

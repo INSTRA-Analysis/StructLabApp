@@ -459,7 +459,9 @@ class MainWindow(QMainWindow):
         from ui_qt.console import ConsoleDialog
         if not hasattr(self, "_console_dialog") or self._console_dialog is None:
             self._console_dialog = ConsoleDialog(
-                self._scene.model_state, parent=self
+                self._scene.model_state,
+                refresh_cb=self._refresh_after_console_edit,
+                parent=self,
             )
             self._console_dialog.finished.connect(
                 lambda: setattr(self, "_console_dialog", None)
@@ -467,6 +469,25 @@ class MainWindow(QMainWindow):
         self._console_dialog.show()
         self._console_dialog.raise_()
         self._console_dialog.activateWindow()
+
+    def _refresh_after_console_edit(self) -> None:
+        """Redraw the canvas from the live model_state after a console edit,
+        and discard stale results — same as any other model-changing action
+        (see _on_model_changed), since node/member IDs the solve cache and
+        overlays refer to may no longer match the edited model. Re-frames the
+        view on the whole model (like _apply_model_state) since a console
+        edit isn't made with the current viewport in mind — new geometry can
+        easily land outside it, or off a blank canvas entirely.
+
+        Uses redraw(), NOT load_state(self._scene.model_state) — the console
+        edits model_state in place, so it's already the scene's current
+        object; load_state() would clear it out from under itself (see its
+        docstring)."""
+        self._scene.redraw()
+        self._results_panel.clear()
+        self._scene.clear_overlays()
+        self._set_overlay_controls_enabled(False)
+        self._view.zoom_to_fit()
 
     def _on_keyboard_shortcuts(self) -> None:
         from ui_qt.dialogs import show_keyboard_shortcuts
