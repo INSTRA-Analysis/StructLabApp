@@ -177,6 +177,39 @@ STEEL_PROFILES: dict[str, list[tuple[str, float, float, float, float]]] = {
     "RHS":  _rhs(),
 }
 
+
+_E_STEEL_DEFAULT = 210e9   # Pa — EN 1993-1-1
+
+
+def steel_profile_by_name(name: str) -> tuple[float, float, float, float] | None:
+    """(A, I, W_pl, W_el) in SI units for a named profile (e.g. "IPE 400"),
+    or None if the name isn't in the library — SHS shapes aren't currently
+    catalogued (only CHS/RHS), so a caller must handle that gracefully rather
+    than assume every dropdown-listed name resolves."""
+    for profiles in STEEL_PROFILES.values():
+        for entry in profiles:
+            if entry[0] == name:
+                return entry[1], entry[2], entry[3], entry[4]
+    return None
+
+
+def steel_capacity_by_name(name: str) -> tuple[float, float] | None:
+    """(W_pl, W_el) in m^3 for a named profile, or None if unknown."""
+    prof = steel_profile_by_name(name)
+    return (prof[2], prof[3]) if prof else None
+
+
+def default_steel_section(name: str, fy: float = 355e6
+                          ) -> tuple[float, float, float, float, float, float] | None:
+    """(E, A, I, W_pl, W_el, fy) bundle for a named profile — convenience for
+    wizard dialog defaults. None if the name isn't catalogued."""
+    prof = steel_profile_by_name(name)
+    if prof is None:
+        return None
+    A, I, W_pl, W_el = prof
+    return _E_STEEL_DEFAULT, A, I, W_pl, W_el, fy
+
+
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def rectangular_section(b: float, h: float) -> tuple[float, float]:
@@ -211,3 +244,20 @@ def hollow_rect_section(b: float, h: float, t: float) -> tuple[float, float]:
     A = b * h - (b - 2 * t) * (h - 2 * t)
     I = (b * h**3 - (b - 2 * t) * (h - 2 * t)**3) / 12
     return A, I
+
+
+def min_reinforcement_area(b: float, d: float, fck: float, fyk: float) -> float:
+    """EC2 §9.2.1.1(1) minimum tension reinforcement area [m²] for a
+    rectangular concrete section, b/d in metres, fck/fyk in Pa.
+
+        As,min = max(0.26 · (fctm/fyk) · b·d,  0.0013 · b·d)
+        fctm = 0.30 · fck^(2/3)   (Table 3.1, valid for fck ≤ 50 MPa)
+
+    A starting-point value for auto-generated (e.g. wizard) sections, not a
+    substitute for an actual reinforcement design — callers that use this
+    should flag the result as provisional.
+    """
+    if b <= 0.0 or d <= 0.0 or fyk <= 0.0 or fck <= 0.0:
+        return 0.0
+    fctm = 0.30 * (fck / 1e6) ** (2.0 / 3.0) * 1e6   # Pa
+    return max(0.26 * (fctm / fyk) * b * d, 0.0013 * b * d)
