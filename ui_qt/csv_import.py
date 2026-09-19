@@ -202,6 +202,11 @@ def parse_structlab_csv(path: str | Path) -> tuple[ModelState, list[str]]:
         iy = (row.get("iy", "") or "").strip()
         if iy:                       # explicit weak-axis I; else defaults to I
             member.I_y = _to_float(iy, member.I)
+        # Optional section moduli for the Design tab's bending capacity check
+        # (steel/timber). Omit these columns and it just reads "N/A" until a
+        # real profile is set via the section picker.
+        member.W_pl = _to_float(row.get("w_pl", ""), member.W_pl)
+        member.W_el = _to_float(row.get("w_el", ""), member.W_el)
 
     # ── SUPPORTS ───────────────────────────────────────────────────────────────
     for row in _rows_as_dicts(sections.get("SUPPORTS", [])):
