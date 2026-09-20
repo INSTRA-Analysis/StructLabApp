@@ -462,6 +462,7 @@ class MainWindow(QMainWindow):
             self._console_dialog = ConsoleDialog(
                 self._scene.model_state,
                 refresh_cb=self._refresh_after_console_edit,
+                solve_cb=self._on_solve,
                 parent=self,
             )
             self._console_dialog.finished.connect(

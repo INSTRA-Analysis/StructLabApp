@@ -17,6 +17,8 @@ Pre-injected names
     refresh   — redraw the canvas from `state`/`model` after editing it,
                 clear any stale solve results/overlays, and re-frame the
                 view on the whole model
+    solve     — run the app's own Solve on the canvas model: fills the
+                results panel and draws the BMD/SFD/AFD/Deformed overlays
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ _BANNER = """\
   ║  sdk      →  sdk module  (build new models from scratch)  ║
   ║  np       →  numpy                                        ║
   ║  plt      →  matplotlib.pyplot                            ║
+  ║  solve()  →  run the app's Solve, diagrams on canvas      ║
   ║  refresh()→  redraw canvas, re-frame view, clear stale data║
   ╚══════════════════════════════════════════════════════════╝
 \033[0m"""
@@ -55,6 +58,7 @@ class ConsoleDialog(QDialog):
         self,
         model_state: ModelState,
         refresh_cb: Callable[[], None] | None = None,
+        solve_cb: Callable[[], None] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -68,7 +72,8 @@ class ConsoleDialog(QDialog):
 
         self._model_state = model_state
         self._refresh_cb = refresh_cb
-        self._widget = _make_console_widget(model_state, refresh_cb)
+        self._solve_cb = solve_cb
+        self._widget = _make_console_widget(model_state, refresh_cb, solve_cb)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -110,7 +115,9 @@ class ConsoleDialog(QDialog):
         self._widget.reset(clear=True)
         QTimer.singleShot(
             300,
-            lambda: _inject_namespace(self._widget, self._model_state, self._refresh_cb),
+            lambda: _inject_namespace(
+                self._widget, self._model_state, self._refresh_cb, self._solve_cb
+            ),
         )
 
     def _restart_kernel(self) -> None:
@@ -128,7 +135,11 @@ class ConsoleDialog(QDialog):
 
 # ── Factory helpers ───────────────────────────────────────────────────────────
 
-def _make_console_widget(model_state: ModelState, refresh_cb: Callable[[], None] | None):
+def _make_console_widget(
+    model_state: ModelState,
+    refresh_cb: Callable[[], None] | None,
+    solve_cb: Callable[[], None] | None = None,
+):
     """Build, configure, and return a RichJupyterWidget."""
     import sys, io
     from qtconsole.inprocess import QtInProcessKernelManager, QtInProcessRichJupyterWidget
@@ -161,13 +172,16 @@ def _make_console_widget(model_state: ModelState, refresh_cb: Callable[[], None]
     widget.style_sheet = _CONSOLE_STYLE
     widget.set_default_style("linux")
 
-    _inject_namespace(widget, model_state, refresh_cb)
+    _inject_namespace(widget, model_state, refresh_cb, solve_cb)
 
     return widget
 
 
 def _inject_namespace(
-    widget, model_state: ModelState, refresh_cb: Callable[[], None] | None
+    widget,
+    model_state: ModelState,
+    refresh_cb: Callable[[], None] | None,
+    solve_cb: Callable[[], None] | None = None,
 ) -> None:
     """Push live variables into the IPython kernel namespace."""
     import sdk as _sdk
@@ -182,6 +196,12 @@ def _inject_namespace(
         print(f"refresh(): canvas now shows {len(model_state.nodes)} node(s), "
               f"{len(model_state.members)} member(s).")
 
+    def _solve() -> None:
+        if solve_cb is None:
+            print("solve() is unavailable — no canvas is attached to this console.")
+            return
+        solve_cb()
+
     shell = widget.kernel_manager.kernel.shell
     shell.push({
         "sdk":     _sdk,
@@ -190,6 +210,7 @@ def _inject_namespace(
         "np":      _np,
         "plt":     _plt,
         "refresh": _refresh,
+        "solve":   _solve,
     })
 
     # Register %paste as a magic that reads from the Qt clipboard,
