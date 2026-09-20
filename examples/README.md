@@ -8,6 +8,16 @@ Import a structure from a single **sectioned CSV** file via **File ▸ Import �
   (converted from the "3D Truss Toolbox" example data).
 - `pratt_truss_2d.csv` — a 2D Pratt truss bridge (bars), grouped by role.
 - `space_frame_roof_3d.csv` — a 3D double-layer space-frame roof (bars).
+- `space_frame_lecture37_3d.csv` — 561-node / 2,092-member 3D space-frame roof truss (bars,
+  E = 200 GPa, A = 0.005 m²), four fully restrained base nodes and 260 kN of vertical nodal
+  load (converted from the "Lecture 37 (Space frame)" notebook data; max displacement 5.19 mm,
+  max axial force 66.4 kN).
+- `space_frame_vault_3d.csv` — a clean, parametric rebuild of the same concept: a 78 × 30 m
+  barrel-vault double-layer space frame (6 m module, 4 m deep, parabolic vault along X, springing
+  15 m / rise 4 m) on four corner tripod legs. 153 nodes / 532 bar members in four groups
+  (`Bottom chord`, `Top chord`, `Web`, `Leg`), centred on the origin, 20 kN per top node.
+  Checked for duplicate/overlapping members and near-coincident nodes (none); max displacement
+  30 mm, member forces −374 … +137 kN. Light enough to orbit smoothly.
 - `portal_frame_3d.csv` — a 3D portal frame using **beam** elements (`I`, `Iy`, `J`).
 - `multibay_frame_2d.csv` — a 2D 2-bay × 2-storey moment frame using **beam** elements.
 

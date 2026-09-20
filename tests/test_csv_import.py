@@ -192,3 +192,91 @@ def test_example_parses_and_solves(filename):
     model, member_el_map = build_model(state, state.active_case)
     cache = solve_engine(model, member_el_map, state)
     assert np.all(np.isfinite(cache["displacements"])), f"{filename}: singular"
+
+
+# ── Lecture 37 space frame (converted from the notebook's Vertices/Edges/... files) ──
+
+SPACE_FRAME_CSV = EXAMPLES / "space_frame_lecture37_3d.csv"
+
+
+def test_lecture37_space_frame_import():
+    state, warnings = parse_structlab_csv(SPACE_FRAME_CSV)
+    assert warnings == []
+    assert len(state.nodes) == 561
+    assert len(state.members) == 2092
+    assert all(m.element_type is ElementType.BAR for m in state.members)
+    assert all(m.E == pytest.approx(200e9) and m.A == pytest.approx(0.005) for m in state.members)
+    fixed = [n for n in state.nodes if n.support_type is SupportType.FIXED]
+    assert len(fixed) == 4
+    loaded = state.active_case.node_loads
+    assert len(loaded) == 260
+    assert all(load.fz == -1000.0 and load.fx == 0 and load.fy == 0 for load in loaded.values())
+
+
+def test_lecture37_space_frame_solution():
+    """Values cross-checked against an independent NumPy DSM of the notebook's method."""
+    import numpy as np
+    from ui_qt.model_builder import build_model
+    from ui_qt.solve_actions import solve_engine
+
+    state, _ = parse_structlab_csv(SPACE_FRAME_CSV)
+    model, member_el_map = build_model(state, state.active_case)
+    cache = solve_engine(model, member_el_map, state)
+
+    dpn = cache["model"].dofs_per_node                                   # 6 in 3D
+    disp = np.asarray(cache["displacements"]).reshape(-1, dpn)[:, :3]
+    assert np.abs(disp).max() == pytest.approx(5.1863e-3, rel=1e-4)      # m
+    reactions = np.asarray(cache["reactions"]).reshape(-1, dpn)[:, :3]
+    assert reactions[:, 2].sum() == pytest.approx(260e3, rel=1e-6)       # N, balances 260 x 1 kN
+    assert abs(reactions[:, 0].sum()) < 1.0 and abs(reactions[:, 1].sum()) < 1.0
+    axial = [abs(r.N_j) for r in cache["member_results"]]
+    assert max(axial) == pytest.approx(66.411e3, rel=1e-4)               # N
+
+
+# ── Parametric barrel-vault space frame (clean rebuild of the Lecture 37 concept) ──
+
+VAULT_CSV = EXAMPLES / "space_frame_vault_3d.csv"
+
+
+def test_vault_space_frame_is_clean():
+    state, warnings = parse_structlab_csv(VAULT_CSV)
+    assert warnings == []
+    assert len(state.nodes) == 153
+    assert len(state.members) == 532
+    assert all(m.element_type is ElementType.BAR for m in state.members)
+    groups = {m.group for m in state.members}
+    assert groups == {"Bottom chord", "Top chord", "Web", "Leg"}
+    # no duplicate members (either direction), no self-loops, no coincident nodes
+    pairs = [frozenset((m.node_i, m.node_j)) for m in state.members]
+    assert len(pairs) == len(set(pairs)) and all(len(p) == 2 for p in pairs)
+    coords = [(round(n.x, 3), round(n.y, 3), round(n.z, 3)) for n in state.nodes]
+    assert len(coords) == len(set(coords))
+    # every node is used, and the four base nodes sit exactly on the ground
+    used = {i for m in state.members for i in (m.node_i, m.node_j)}
+    assert used == {n.id for n in state.nodes}
+    fixed = [n for n in state.nodes if n.support_type is SupportType.FIXED]
+    assert len(fixed) == 4 and all(n.z == 0.0 for n in fixed)
+    assert len(state.active_case.node_loads) == 65
+
+
+def test_vault_space_frame_solution():
+    """Cross-checked against an independent NumPy DSM (agreement ~1e-16 m)."""
+    import numpy as np
+    from ui_qt.model_builder import build_model
+    from ui_qt.solve_actions import solve_engine
+
+    state, _ = parse_structlab_csv(VAULT_CSV)
+    model, member_el_map = build_model(state, state.active_case)
+    cache = solve_engine(model, member_el_map, state)
+
+    dpn = cache["model"].dofs_per_node                                       # 6 in 3D
+    reactions = np.asarray(cache["reactions"]).reshape(-1, dpn)[:, :3]
+    assert reactions[:, 2].sum() == pytest.approx(65 * 20e3, rel=1e-9)      # balances the load
+    assert abs(reactions[:, 0].sum()) < 1.0 and abs(reactions[:, 1].sum()) < 1.0
+    supports = [n.id for n in state.nodes if n.support_type is SupportType.FIXED]
+    assert reactions[supports, 2] == pytest.approx(325e3, rel=1e-6)          # symmetric: 4 x 325 kN
+    disp = np.asarray(cache["displacements"]).reshape(-1, dpn)[:, :3]
+    assert np.abs(disp).max() == pytest.approx(30.18e-3, rel=1e-3)
+    axial = np.array([r.N_j for r in cache["member_results"]])
+    assert axial.max() == pytest.approx(136.5e3, rel=1e-3)
+    assert axial.min() == pytest.approx(-373.5e3, rel=1e-3)
