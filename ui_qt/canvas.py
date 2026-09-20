@@ -79,11 +79,14 @@ class StructCanvas(QGraphicsScene):
     view_preset          = pyqtSignal(float, float)  # emitted when user snaps to a named view (az, el)
     plane_offset_changed = pyqtSignal(float)         # emitted whenever the working-plane offset changes
     _hide_welcome: bool = False    # once user takes action, never show welcome
+    _MIN_SCENE_HALF_PX = 4000.0    # scene rect is never smaller than +/-50 m
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setSceneRect(-4000, -4000, 8000, 8000)
+        self.setSceneRect(-self._MIN_SCENE_HALF_PX, -self._MIN_SCENE_HALF_PX,
+                          2 * self._MIN_SCENE_HALF_PX, 2 * self._MIN_SCENE_HALF_PX)
         self.model_state = ModelState()
+        self.model_changed.connect(self._fit_scene_rect)
         self._mode = CanvasMode.SELECT
         self._next_member_type = ElementType.BEAM
         self._member_start_node: NodeData | None = None
@@ -1401,6 +1404,23 @@ class StructCanvas(QGraphicsScene):
         self._overlay_items.clear()
         self._member_overlay_items.clear()
 
+    def _fit_scene_rect(self) -> None:
+        """Grow the scene rectangle so the whole model stays reachable.
+
+        Pan and orbit work by moving the view's scroll bars, and Qt clamps those
+        to the scene rectangle — anything outside it can't be scrolled to. The
+        projection is orthographic (a rotation), so a node's on-screen distance
+        from the scene origin is its 3D distance from the model origin at ANY
+        azimuth/elevation. A square sized by the farthest node therefore keeps
+        the model inside the rectangle through every orbit, with no resizing
+        needed on reproject(). Margin covers diagram/deformed-shape overlays.
+        """
+        reach_m = max((math.sqrt(n.x ** 2 + n.y ** 2 + n.z ** 2)
+                       for n in self.model_state.nodes), default=0.0)
+        half = max(self._MIN_SCENE_HALF_PX, reach_m * PX_PER_M * 1.25 + 1000.0)
+        if abs(self.sceneRect().right() - half) > 1e-6:
+            self.setSceneRect(-half, -half, 2 * half, 2 * half)
+
     def reproject(self) -> None:
         """Reposition all items after the isometric projection angles change."""
         for nitem in self._node_items.values():
@@ -1593,6 +1613,7 @@ class StructCanvas(QGraphicsScene):
         self._member_items.clear()
         self.model_state.clear()
         self._isolated = False
+        self._fit_scene_rect()   # back to the default size for the empty model
 
     def load_state(self, state: ModelState) -> None:
         """Replace the model with `state` and rebuild the scene from it.
