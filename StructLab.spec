@@ -11,6 +11,7 @@ Output:
     C:\Builds\StructLab\dist\StructLab\StructLab.exe  (one-folder bundle)
 """
 
+import os
 import sys
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
@@ -52,7 +53,8 @@ debugpy_datas  = collect_data_files("debugpy")
 a = Analysis(
     ["ui_qt/main.py"],
     pathex=["."],
-    binaries=[],
+    # libffi is required by _ctypes but not auto-detected in the conda env
+    binaries=[(os.path.join(sys.base_prefix, "Library", "bin", "ffi.dll"), ".")],
     datas=(
         mpl_datas
         + qtconsole_datas
