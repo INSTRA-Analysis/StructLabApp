@@ -123,7 +123,7 @@ def show_about(parent) -> None:
     title.setStyleSheet("color:#00ACC1;")
     layout.addWidget(title)
 
-    layout.addWidget(_lbl("V1.0.0", "color:#888; font-size:11px;"))
+    layout.addWidget(_lbl("V1.2", "color:#888; font-size:11px;"))
 
     line = QLabel(); line.setFixedHeight(1)
     line.setStyleSheet("background:#2a2a34;")
