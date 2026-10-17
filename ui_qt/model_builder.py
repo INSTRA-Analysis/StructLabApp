@@ -204,7 +204,8 @@ def build_model(state: ModelState,
             el_ids.append(next_el_id)
 
             if lc.include_self_weight and has_3d and md.density > 0.0:
-                _add_self_weight_3d(model, el, md.density * md.A * _GRAVITY)
+                _add_self_weight_3d(
+                    model, el, lc.self_weight_factor * md.density * md.A * _GRAVITY)
 
             # Distributed load: sum all 'w' dist_loads; UDL when uniform, UVL when varying
             w_i = sum(dl.w_start + k       / n_sub * (dl.w_end - dl.w_start)
@@ -396,7 +397,7 @@ def build_model(state: ModelState,
             angle = math.atan2(dy, dx)
             sin_a = math.sin(angle)
             cos_a = math.cos(angle)
-            w_self = md.density * md.A * _G   # N/m total weight per unit length
+            w_self = lc.self_weight_factor * md.density * md.A * _G   # N/m
 
             is_bar = md.element_type == ElementType.BAR
 
@@ -452,10 +453,17 @@ def _merge_load_case_into(
     for nid, nl in source.node_loads.items():
         ex = target.node_loads.get(nid, NodeLoad())
         target.node_loads[nid] = NodeLoad(
-            fx     = ex.fx     + factor * nl.fx,
-            fy     = ex.fy     + factor * nl.fy,
-            moment = ex.moment + factor * nl.moment,
+            fx       = ex.fx       + factor * nl.fx,
+            fy       = ex.fy       + factor * nl.fy,
+            moment   = ex.moment   + factor * nl.moment,
+            fz       = ex.fz       + factor * nl.fz,
+            moment_x = ex.moment_x + factor * nl.moment_x,
+            moment_y = ex.moment_y + factor * nl.moment_y,
         )
+
+    if source.include_self_weight:
+        target.include_self_weight = True
+        target.self_weight_factor += factor * source.self_weight_factor
 
     for mid, ml in source.member_loads.items():
         if member_filter is not None and mid not in member_filter:
@@ -487,7 +495,8 @@ def build_model_combined(state: ModelState,
     Each case in ``combination.factors`` is multiplied by its partial factor and
     summed into a single synthetic LoadCase that is then passed to ``build_model``.
     """
-    merged = LoadCase(id=-1, name=combination.name, category="combined")
+    merged = LoadCase(id=-1, name=combination.name, category="combined",
+                      self_weight_factor=0.0)
     for case_id, factor in combination.factors.items():
         lc = state.get_load_case(case_id)
         if lc is None or factor == 0.0:
@@ -511,7 +520,8 @@ def build_model_pattern(
     typically 1.50); members outside the set receive zero Q load, simulating
     the unloaded spans in the alternating / adjacent patterns.
     """
-    merged = LoadCase(id=-1, name="pattern", category="combined")
+    merged = LoadCase(id=-1, name="pattern", category="combined",
+                      self_weight_factor=0.0)
     for lc in g_cases:
         _merge_load_case_into(merged, lc, g_factor)
     for lc in q_cases:

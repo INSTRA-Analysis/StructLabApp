@@ -137,6 +137,10 @@ class LoadCase:
     node_loads: dict = field(default_factory=dict)   # node_id  → NodeLoad
     member_loads: dict = field(default_factory=dict) # member_id → MemberLoad
     include_self_weight: bool = False                # True on exactly one G case
+    # Multiplier on self-weight when include_self_weight is set. 1.0 for a stored
+    # case; a combination's merged case carries its partial factor here.
+    # Not serialised.
+    self_weight_factor: float = 1.0
 
     # ── accessors ──────────────────────────────────────────────────────────────
 
