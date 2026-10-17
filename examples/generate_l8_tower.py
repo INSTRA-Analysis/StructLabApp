@@ -30,6 +30,10 @@ Modelling choices
 * Each section family is its own ``group`` so sections can be reassigned per group.
 * Self-weight uses the app's own option (Self weight case).
 * Load attachment points are returned in ATTACH (arm tips, earth-wire nodes).
+* Cable loads (docs/L8_tower_cable_loads.pdf) are added as separate load cases at those
+  points: Conductor weight, Ice, Wind +X, Wind -X. They are CHARACTERISTIC loads on a
+  SUSPENSION basis from the assumptions in ``CableAssumptions``; they carry no partial
+  factors and no wind on the tower body, broken-wire or line-angle (tension) loads.
 """
 
 from __future__ import annotations
@@ -46,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ui_qt.angle_sections import angle_properties
 from ui_qt.io import save_model
-from ui_qt.model_state import ElementType, ModelState, SupportType
+from ui_qt.model_state import ElementType, ModelState, NodeLoad, SupportType
 
 E_STEEL, RHO = 210e9, 7850.0
 
@@ -165,12 +169,97 @@ TOWERS: dict[str, TowerSpec] = {
 ATTACH: dict[str, list[int]] = {}      # label -> node ids (filled by build())
 
 
+# ── Cable loads ──────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Conductor:
+    name: str
+    diameter: float         # m
+    mass_per_m: float       # kg/m
+    uts_kn: float           # breaking load [kN]
+
+
+ZEBRA = Conductor("ACSR Zebra", 0.02862, 1.621, 131.9)    # APAR ACSR catalogue
+LYNX = Conductor("ACSR Lynx", 0.01953, 0.842, 79.8)
+
+
+@dataclass(frozen=True)
+class CableAssumptions:
+    """Inputs for the characteristic cable loads. Change here; everything follows.
+
+    ``span`` is used as both the wind span and the weight span (UK normal span for
+    275/400 kV towers). Wind speed, ice thickness and hardware weights are ILLUSTRATIVE
+    assumptions, not code values.
+    """
+    span: float = 360.0                 # m
+    bundle: int = 2                     # sub-conductors per phase (twin)
+    wind_speed: float = 35.0            # m/s
+    air_density: float = 1.225          # kg/m³
+    drag: float = 1.0                   # drag coefficient on the cable
+    ice_thickness: float = 0.010        # m radial
+    ice_density: float = 900.0          # kg/m³
+    hardware_phase_kn: float = 2.0      # insulator string + fittings, per phase
+    hardware_earth_kn: float = 0.5      # earth-wire clamp / fittings
+    phase: Conductor = ZEBRA
+    earth: Conductor = LYNX
+    gravity: float = 9.81
+
+
+def cable_loads(a: CableAssumptions = CableAssumptions()) -> dict:
+    """Characteristic load per phase and for the earth wire, in kN (wind as a force on the span)."""
+    q = 0.5 * a.air_density * a.wind_speed ** 2          # Pa
+
+    def ice_kg_per_m(d: float) -> float:
+        return math.pi * ((d / 2 + a.ice_thickness) ** 2 - (d / 2) ** 2) * a.ice_density
+
+    def one(c: Conductor, n: int, hardware: float) -> dict[str, float]:
+        weight = n * c.mass_per_m * a.gravity * a.span / 1e3
+        return {"weight": weight, "hardware": hardware,
+                "vertical": weight + hardware,
+                "ice": n * ice_kg_per_m(c.diameter) * a.gravity * a.span / 1e3,
+                "wind": q * a.drag * n * c.diameter * a.span / 1e3}
+
+    return {"q": q, "phase": one(a.phase, a.bundle, a.hardware_phase_kn),
+            "earth": one(a.earth, 1, a.hardware_earth_kn)}
+
+
+# (name, category, vertical component, transverse X component) — each a multiple of the loads
+CABLE_CASES = (
+    ("Conductor weight", "G", ("vertical", 1.0), None),
+    ("Ice", "Q", ("ice", 1.0), None),
+    ("Wind +X", "W", None, ("wind", +1.0)),
+    ("Wind -X", "W", None, ("wind", -1.0)),
+)
+
+
+def add_cable_load_cases(state: ModelState, a: CableAssumptions = CableAssumptions()) -> None:
+    """Add the cable loads as separate load cases at the attachment nodes in ATTACH.
+
+    Each phase attachment has two nodes (front / back plane): each takes half. The earth
+    wire is spread over the four top-ring corners: a quarter each. Loads are characteristic
+    (unfactored); vertical is downward (-Z); wind acts across the line (±X).
+    """
+    loads = cable_loads(a)
+    for name, category, vertical, transverse in CABLE_CASES:
+        case = state.add_load_case(name, category)
+        for label, node_ids in ATTACH.items():
+            kind = "earth" if label == "Earth wire" else "phase"
+            share = 1.0 / len(node_ids)
+            fz = fx = 0.0
+            if vertical:
+                fz = -loads[kind][vertical[0]] * vertical[1] * share * 1e3
+            if transverse:
+                fx = loads[kind][transverse[0]] * transverse[1] * share * 1e3
+            for nid in node_ids:
+                case.set_node_load(nid, NodeLoad(fx=fx, fz=fz))
+
+
 # ── Builder ──────────────────────────────────────────────────────────────────
 
 CORNERS = [(-1, -1), (1, -1), (1, 1), (-1, 1)]       # face i runs corner i -> i+1
 
 
-def build(spec: TowerSpec = D30) -> ModelState:
+def build(spec: TowerSpec = D30, cable: CableAssumptions | None = CableAssumptions()) -> ModelState:
     ATTACH.clear()
     s = ModelState()
     s.mode_3d = True
@@ -309,6 +398,8 @@ def build(spec: TowerSpec = D30) -> ModelState:
 
     for n in rings[levels[0]]:
         s.get_node(n).support_type = SupportType.PIN
+    if cable is not None:
+        add_cable_load_cases(s, cable)
     return s
 
 
@@ -355,10 +446,15 @@ if __name__ == "__main__":
                   f"  widest crossarm {widest:5.2f} m")
         raise SystemExit
     chosen = TOWERS[args[0]] if args else D30
-    model = build(chosen)
+    model = build(chosen, None if "--no-cable-loads" in sys.argv else CableAssumptions())
     out = Path(__file__).resolve().parent / f"{chosen.name.lower()}_tower_3d.slab"
     save_model(model, out)
     print(f"Wrote {out}\n{summary(model)}")
+    if "--no-cable-loads" not in sys.argv:
+        ld = cable_loads()
+        print(f"\nCable load cases (characteristic, per phase): vertical {ld['phase']['vertical']:.1f} kN, "
+              f"ice +{ld['phase']['ice']:.1f} kN, wind {ld['phase']['wind']:.1f} kN; earth wire "
+              f"{ld['earth']['vertical']:.1f} / +{ld['earth']['ice']:.1f} / {ld['earth']['wind']:.1f} kN")
     if "--plot" in sys.argv:
         png = out.with_suffix(".png")
         plot_front(model, png)
