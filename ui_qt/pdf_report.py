@@ -399,6 +399,9 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
     plt.close(fig)
 
 
+MAX_DIAGRAM_PAGES = 24     # per-member SFD/BMD pages before the report keeps only the top few
+
+
 def _is_3d(state: ModelState) -> bool:
     """True when the engine analyses this model in 3D (any node has z != 0).
 
@@ -678,7 +681,22 @@ def _page_diagrams(pdf: PdfPages, meta: Any, state: ModelState,
     sfd_bmd_map = {r.element_id: r for r in pp.sfd_bmd(n_points=30)}
     el_map      = {el.id: el for el in model.elements}
 
-    for member, sub_ids in zip(state.members, member_el_map):
+    def _peak_moment(sub_ids: list[int]) -> float:
+        return max((float(np.abs(sfd_bmd_map[e].M).max()) for e in sub_ids
+                    if e in sfd_bmd_map), default=0.0)
+
+    pairs = list(zip(state.members, member_el_map))
+    n_total = len(pairs)
+    if n_total > MAX_DIAGRAM_PAGES:
+        # A page per member is unusable on a lattice tower (hundreds of pages):
+        # keep the most heavily bent members, in model order, and say so on each page.
+        keep = {m.id for m, ids in sorted(pairs, key=lambda p: -_peak_moment(p[1]))
+                [:MAX_DIAGRAM_PAGES]}
+        pairs = [(m, ids) for m, ids in pairs if m.id in keep]
+    subset_note = (f"   | {len(pairs)} of {n_total} members shown (largest |M|)"
+                   if len(pairs) < n_total else "")
+
+    for member, sub_ids in pairs:
         x_parts, V_parts, M_parts = [], [], []
         x_offset = 0.0
         for eid in sub_ids:
@@ -703,7 +721,7 @@ def _page_diagrams(pdf: PdfPages, meta: Any, state: ModelState,
         fig.suptitle(
             f"Member {member.id}   "
             f"(node {member.node_i} → node {member.node_j})   "
-            f"| {report_basis}",
+            f"| {report_basis}{subset_note}",
             fontsize=10, fontweight="bold", color=_TEXT,
         )
 
@@ -855,6 +873,13 @@ def _draw_table(
             x += cw
         y -= row_h
         if y < 0.08:
+            hidden = len(rows) - row_idx - 1
+            if hidden > 0:
+                fig.text(_L, y - 0.004,
+                         f"… {hidden} more row{'s' if hidden != 1 else ''} not shown "
+                         f"(table truncated to fit the page; full data is in the model file)",
+                         fontsize=7.5, color=_RED, style="italic", va="top",
+                         transform=fig.transFigure)
             break
 
     return y - 0.004

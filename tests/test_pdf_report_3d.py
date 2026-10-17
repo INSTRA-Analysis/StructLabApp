@@ -59,3 +59,30 @@ def test_2d_report_is_unchanged_in_shape(tmp_path):
     assert "Rz (kN)" not in text and "Z (m)" not in text
     assert "Ry (kN)" in text and "M (kN·m)" in text
     assert "Global equilibrium satisfied" in text
+
+
+def _long_beam(n_members: int) -> ModelState:
+    s = ModelState()
+    nodes = [s.add_node(2.0 * k, 0) for k in range(n_members + 1)]
+    nodes[0].support_type, nodes[-1].support_type = SupportType.PIN, SupportType.ROLLER
+    for a, b in zip(nodes, nodes[1:]):
+        m = s.add_member(a.id, b.id)
+        m.A, m.I = 0.01, 4e-5
+    s.load_cases[0].set_node_load(nodes[n_members // 2].id, NodeLoad(fy=-5000.0))
+    return s
+
+
+def test_long_tables_say_how_many_rows_were_cut(tmp_path):
+    """A table that cannot fit on the page must say so, never drop rows silently."""
+    text = _report_text(tmp_path, _long_beam(45))
+    assert "more rows not shown" in text
+
+
+def test_short_tables_have_no_truncation_notice(tmp_path):
+    assert "not shown" not in _report_text(tmp_path, _long_beam(5))
+
+
+def test_member_diagram_pages_are_capped_and_labelled(tmp_path):
+    from ui_qt.pdf_report import MAX_DIAGRAM_PAGES
+    text = _report_text(tmp_path, _long_beam(MAX_DIAGRAM_PAGES + 6))
+    assert f"{MAX_DIAGRAM_PAGES} of {MAX_DIAGRAM_PAGES + 6} members shown" in text
