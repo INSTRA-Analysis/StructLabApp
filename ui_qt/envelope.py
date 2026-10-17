@@ -2,7 +2,8 @@
 
 solve_runs_rich is a list of dicts, each with:
   'combo'          — LoadCombination
-  'displacements'  — numpy array, index [node.id * 3 + dof], dof 0=dx 1=dy 2=θ
+  'displacements'  — numpy array, index [node.id * dpn + dof]; dpn = run['model'].dofs_per_node
+                     (2D: dof 0=dx 1=dy 2=θ;  3D: 0=dx 1=dy 2=dz 3..5=θx θy θz)
   'member_results' — list[ElementResult], one per UI member (aggregated ends)
   'sub_results'    — list[ElementResult], one per sub-element (for sampling)
   'member_el_map'  — list[list[int]], member_el_map[i] = sub-element IDs for member i
@@ -234,6 +235,24 @@ def _make_plot_tab(solve_runs_rich: list, state: ModelState,
 
 # ── EnvelopeDialog ─────────────────────────────────────────────────────────────
 
+def _vertical_dof(run: dict) -> tuple[int, int]:
+    """(dofs per node, index of the vertical DOF) for a solved run: Y in 2D, Z in 3D."""
+    model = run.get("model")
+    dpn = model.dofs_per_node if model is not None else 3
+    return dpn, (2 if dpn == 6 else 1)
+
+
+def vertical_axis_label(run: dict) -> str:
+    """'z' for a 3D run, 'y' for a 2D run."""
+    return "z" if _vertical_dof(run)[0] == 6 else "y"
+
+
+def vertical_displacement_mm(run: dict, node_id: int) -> float:
+    """Vertical displacement of a node in mm, read with the run's own DOF stride."""
+    dpn, idx = _vertical_dof(run)
+    return float(run["displacements"][node_id * dpn + idx]) * 1000.0
+
+
 class EnvelopeDialog(QDialog):
     """Show max/min envelope results across all load combinations."""
 
@@ -273,8 +292,10 @@ class EnvelopeDialog(QDialog):
 
     def _node_tab(self, runs: list, state: ModelState) -> QTableWidget:
         tbl = QTableWidget(len(state.nodes), 5)
+        axis = vertical_axis_label(runs[0]) if runs else "y"
         tbl.setHorizontalHeaderLabels(
-            ["Node", "Max δy (mm)", "Combo (max)", "Min δy (mm)", "Combo (min)"]
+            ["Node", f"Max δ{axis} (mm)", "Combo (max)",
+             f"Min δ{axis} (mm)", "Combo (min)"]
         )
         _style_table(tbl)
 
@@ -286,7 +307,7 @@ class EnvelopeDialog(QDialog):
         for run in runs:
             combo = run['combo'];  displacements = run['displacements']
             for nd in state.nodes:
-                dy = displacements[nd.id * 3 + 1] * 1000
+                dy = vertical_displacement_mm(run, nd.id)
                 e  = env[nd.id]
                 if dy > e["max_dy"]:
                     e["max_dy"] = dy;  e["max_c"] = combo.name

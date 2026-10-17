@@ -177,3 +177,27 @@ def test_member_tab_tracks_max_min_moment_shear_and_axial(qapp):
     assert _cell_text(tbl, 0, 8) == "A"
     assert _cell_text(tbl, 0, 9) == "12.000"    # Max N tension (N < 0), combo B
     assert _cell_text(tbl, 0, 10) == "B"
+
+
+# ── DOF stride: 2D reads Y, 3D reads Z ────────────────────────────────────────
+
+class _Model:
+    def __init__(self, dpn): self.dofs_per_node = dpn
+
+
+def test_vertical_displacement_uses_the_runs_dof_stride():
+    from ui_qt.envelope import vertical_axis_label, vertical_displacement_mm
+    # Two nodes. 2D: [dx, dy, θ] each. 3D: [dx, dy, dz, θx, θy, θz] each.
+    d2 = np.array([0, 0, 0, 0.001, -0.002, 0.0])
+    d3 = np.zeros(12); d3[6:9] = [0.001, 0.005, -0.003]
+    run2 = {"displacements": d2, "model": _Model(3)}
+    run3 = {"displacements": d3, "model": _Model(6)}
+    assert vertical_displacement_mm(run2, 1) == pytest.approx(-2.0)
+    assert vertical_displacement_mm(run3, 1) == pytest.approx(-3.0)   # dz, not dy
+    assert (vertical_axis_label(run2), vertical_axis_label(run3)) == ("y", "z")
+
+
+def test_vertical_displacement_defaults_to_2d_without_a_model():
+    from ui_qt.envelope import vertical_displacement_mm
+    run = {"displacements": np.array([0, 0, 0, 0.001, -0.002, 0.0])}
+    assert vertical_displacement_mm(run, 1) == pytest.approx(-2.0)
