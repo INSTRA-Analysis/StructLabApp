@@ -86,3 +86,15 @@ def test_select_members_replaces_selection_and_skips_hidden(qapp):
     sc.select_members([ms[0].id, ms[1].id])
     selected = {it.member.id for it in sc.selectedItems() if hasattr(it, "member")}
     assert selected == {ms[0].id}
+
+
+def test_window_shows_cursor_coordinates_in_the_status_bar(qapp, monkeypatch):
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    win = MainWindow()
+    try:
+        win._scene.cursor_coords.emit("x = 1.00   y = 2.00 m")
+        assert win._sb_cursor.text() == "x = 1.00   y = 2.00 m"
+    finally:
+        win.close()
