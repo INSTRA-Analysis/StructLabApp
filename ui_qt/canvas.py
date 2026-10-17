@@ -78,6 +78,7 @@ class StructCanvas(QGraphicsScene):
     view_changed         = pyqtSignal()              # emitted when 3D projection angles change (orbit end)
     view_preset          = pyqtSignal(float, float)  # emitted when user snaps to a named view (az, el)
     plane_offset_changed = pyqtSignal(float)         # emitted whenever the working-plane offset changes
+    cursor_coords        = pyqtSignal(str)           # live pointer position text for the status bar
     _hide_welcome: bool = False    # once user takes action, never show welcome
     _MIN_SCENE_HALF_PX = 4000.0    # scene rect is never smaller than +/-50 m
 
@@ -490,7 +491,33 @@ class StructCanvas(QGraphicsScene):
                 self._drag_snapshot_saved = True
             super().mousePressEvent(event)
 
+    def cursor_text(self, pos: QPointF) -> str:
+        """Model coordinates (m) under scene point ``pos``, on the active working plane in 3D.
+
+        Empty when the view is edge-on to the plane (no unique point)."""
+        if not self._is_3d_mode():
+            return f"x = {pos.x() / PX_PER_M:.2f}   y = {-pos.y() / PX_PER_M:.2f} m"
+        az, el = _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION
+        sx, sy, off = pos.x(), pos.y(), self._plane_offset
+        degen = 0.09
+        if self._working_plane == WorkingPlane.XZ:
+            if abs(math.cos(math.radians(az))) < degen:
+                return ""
+            x, z = inverse_isometric_xz(sx, sy, off, PX_PER_M, az, el)
+            return f"x = {x:.2f}   y = {off:.2f}   z = {z:.2f} m   (XZ plane)"
+        if self._working_plane == WorkingPlane.YZ:
+            if abs(math.sin(math.radians(az))) < degen:
+                return ""
+            y, z = inverse_isometric_yz(sx, sy, off, PX_PER_M, az, el)
+            return f"x = {off:.2f}   y = {y:.2f}   z = {z:.2f} m   (YZ plane)"
+        if abs(math.sin(math.radians(el))) < degen:
+            return ""
+        z = off if self._working_plane == WorkingPlane.XY else 0.0
+        x, y = inverse_isometric(sx, sy, z, PX_PER_M, az, el)
+        return f"x = {x:.2f}   y = {y:.2f}   z = {z:.2f} m   (XY plane)"
+
     def mouseMoveEvent(self, event) -> None:
+        self.cursor_coords.emit(self.cursor_text(event.scenePos()))
         if self._grab_active and not self._grab_typed:
             self._apply_grab(event.scenePos())
         if self._scale_active and not self._scale_typed:

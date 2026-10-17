@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         self._view  = StructView(self._scene)
         self.setCentralWidget(self._view)
         self._scene.model_changed.connect(self._on_model_changed)
+        self._scene.cursor_coords.connect(self._sb_cursor.setText)
         self._scene.view_changed.connect(self._redraw_overlays)
         self._scene.view_preset.connect(self._on_view_preset)
         self._scene.plane_offset_changed.connect(self._on_scene_plane_offset_changed)
@@ -1140,6 +1141,10 @@ class MainWindow(QMainWindow):
         self._sb.showMessage("Ready  |  S=Select  N=Add Node  M=Add Member  R=Measure")
         self._sb_stats = QLabel("")
         self._sb_stats.setStyleSheet("color: #888888; padding-right: 8px;")
+        self._sb_cursor = QLabel("")
+        self._sb_cursor.setStyleSheet("color: #8fb8c8; padding-right: 12px;")
+        self._sb_cursor.setMinimumWidth(260)
+        self._sb.addPermanentWidget(self._sb_cursor)
         self._sb.addPermanentWidget(self._sb_stats)
         self.setStatusBar(self._sb)
 
