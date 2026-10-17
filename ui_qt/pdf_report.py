@@ -69,7 +69,7 @@ def generate_report(
     date_str = now.strftime("%d %B %Y")
 
     with PdfPages(filepath) as pdf:
-        _page_title(pdf, meta, date_str, report_basis)
+        _page_title(pdf, meta, date_str, report_basis, "3D" if _is_3d(state) else "2D")
         _page_model(pdf, meta, state, date_str, report_basis)
         if canvas_image_path and Path(canvas_image_path).exists():
             _page_diagram(pdf, meta, canvas_image_path, date_str, report_basis)
@@ -153,14 +153,14 @@ def _footer(fig: plt.Figure, date_str: str, page_note: str = "") -> None:
 # ── Page 1: Title ─────────────────────────────────────────────────────────────
 
 def _page_title(pdf: PdfPages, meta: Any, date_str: str,
-                report_basis: str) -> None:
+                report_basis: str, dimension: str = "2D") -> None:
     fig, ax = _new_fig()
 
     # Brand
     fig.text(0.5, 0.82, "StructLab",
              fontsize=46, fontweight="bold", color=_CYAN,
              ha="center", va="center", transform=fig.transFigure)
-    fig.text(0.5, 0.768, "2D Structural Analysis  —  Direct Stiffness Method",
+    fig.text(0.5, 0.768, f"{dimension} Structural Analysis  —  Direct Stiffness Method",
              fontsize=10, color=_GREY, ha="center", va="center",
              transform=fig.transFigure)
     ax.axhline(0.745, xmin=0.10, xmax=0.90, color=_CYAN, linewidth=1.5)
@@ -261,11 +261,19 @@ def _page_model(pdf: PdfPages, meta: Any, state: ModelState,
     y = 0.860
 
     y = _section_label(fig, "Nodes", y)
-    y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Support"],
-                    [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
-                      n.support_type.name]
-                     for n in state.nodes],
-                    y)
+    if _is_3d(state):
+        y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Z (m)", "Support"],
+                        [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
+                          f"{0.0 if abs(n.z) < 1e-9 else n.z:.3f}",
+                          n.support_type.name]
+                         for n in state.nodes],
+                        y)
+    else:
+        y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Support"],
+                        [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
+                          n.support_type.name]
+                         for n in state.nodes],
+                        y)
     y -= 0.018
 
     y = _section_label(fig, "Members", y)
@@ -328,24 +336,30 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
     _header(ax, meta, "Loading Summary", report_basis)
     _footer(fig, date_str)
     y = 0.860
+    three_d = _is_3d(state)
 
     for lc in state.load_cases:
         y = _section_label(fig, f"LC{lc.id}: {lc.name}  [{lc.category}]", y)
 
         # Node loads — skip if all zero
+        def _kn(v: float) -> str:
+            return f"{v/1e3:.3f}" if v else "—"
+
         nl_rows = []
         for nid, nl in lc.node_loads.items():
-            if not nl.is_zero():
-                nl_rows.append([
-                    str(nid),
-                    f"{nl.fx/1e3:.3f}"     if nl.fx     else "—",
-                    f"{nl.fy/1e3:.3f}"     if nl.fy     else "—",
-                    f"{nl.moment/1e3:.3f}" if nl.moment  else "—",
-                ])
+            if nl.is_zero():
+                continue
+            if three_d:
+                nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fy), _kn(nl.fz),
+                                _kn(nl.moment_x), _kn(nl.moment_y), _kn(nl.moment)])
+            else:
+                nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fy), _kn(nl.moment)])
         if nl_rows:
             y = _mini_label(fig, "Node Loads", y)
             y = _draw_table(fig,
-                            ["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"],
+                            ["Node", "Fx (kN)", "Fy (kN)", "Fz (kN)",
+                             "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if three_d
+                            else ["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"],
                             nl_rows, y)
 
         # Member loads — include qx columns
@@ -354,22 +368,22 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
             if ml.is_zero():
                 continue
             w_s,  w_e  = ml.net("w")
-            qx_s, qx_e = ml.net("qx")
-            ml_rows.append([
-                str(mid),
-                f"{w_s/1e3:.3f}"   if w_s   else "—",
-                f"{w_e/1e3:.3f}"   if w_e   else "—",
-                f"{qx_s/1e3:.3f}"  if qx_s  else "—",
-                f"{qx_e/1e3:.3f}"  if qx_e  else "—",
-                f"{len(ml.point_loads)} pt" if ml.point_loads else "—",
-            ])
+            row = [str(mid), _kn(w_s), _kn(w_e)]
+            for axis in (("qx", "qy", "qz") if three_d else ("qx",)):
+                q_s, q_e = ml.net(axis)
+                row += [_kn(q_s), _kn(q_e)]
+            row.append(f"{len(ml.point_loads)} pt" if ml.point_loads else "—")
+            ml_rows.append(row)
         if ml_rows:
             y = _mini_label(fig, "Member Loads", y)
-            y = _draw_table(fig,
-                            ["Mbr", "w_i (kN/m)", "w_j (kN/m)",
-                             "qx_i (kN/m)", "qx_j (kN/m)", "Pt loads"],
-                            ml_rows, y,
-                            col_widths=[0.07, 0.148, 0.148, 0.148, 0.148, 0.100])
+            heads = ["Mbr", "w_i (kN/m)", "w_j (kN/m)"]
+            for axis in (("qx", "qy", "qz") if three_d else ("qx",)):
+                heads += [f"{axis}_i (kN/m)", f"{axis}_j (kN/m)"]
+            heads.append("Pt loads")
+            n_cols = len(heads) - 2
+            w_col = 0.74 / n_cols
+            y = _draw_table(fig, heads, ml_rows, y,
+                            col_widths=[0.07] + [w_col] * n_cols + [0.100])
 
         if not nl_rows and not ml_rows:
             fig.text(_L + 0.02, y - 0.010, "(No loads defined in this case)",
@@ -383,6 +397,11 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
 
     pdf.savefig(fig, bbox_inches="tight", dpi=150)
     plt.close(fig)
+
+
+def _is_3d(state: ModelState) -> bool:
+    """True when the report should show the 3D columns (Z, Fz, Mx, My, ...)."""
+    return state.mode_3d or any(n.z != 0.0 for n in state.nodes)
 
 
 # ── Page 5: Support reactions ─────────────────────────────────────────────────
@@ -403,80 +422,67 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
         plt.close(fig)
         return
 
-    # Reactions table
+    # Reactions table — DOF stride follows the solved model (3 = 2D, 6 = 3D)
+    dpn      = cache["model"].dofs_per_node if cache.get("model") is not None else 3
+    is_3d    = dpn == 6
+    n_force  = 3 if is_3d else 2
     rows     = []
-    sum_rx   = 0.0
-    sum_ry   = 0.0
+    sums     = [0.0] * n_force
     for n in state.nodes:
         if n.support_type == SupportType.FREE:
             continue
-        rx = float(reactions[n.id * 3])
-        ry = float(reactions[n.id * 3 + 1])
-        rm = float(reactions[n.id * 3 + 2])
-        sum_rx += rx
-        sum_ry += ry
-        rows.append([str(n.id), n.support_type.name,
-                     f"{rx/1e3:.4f}", f"{ry/1e3:.4f}", f"{rm/1e3:.4f}"])
+        comps = [float(reactions[n.id * dpn + k]) for k in range(dpn)]
+        for k in range(n_force):
+            sums[k] += comps[k]
+        rows.append([str(n.id), n.support_type.name]
+                    + [f"{c/1e3:.4f}" for c in comps])
 
-    y = _draw_table(fig, ["Node", "Support", "Rx (kN)", "Ry (kN)", "M (kN·m)"],
-                    rows, y)
+    headers = (["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",
+                "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if is_3d
+               else ["Node", "Support", "Rx (kN)", "Ry (kN)", "M (kN·m)"])
+    y = _draw_table(fig, headers, rows, y)
 
     # ── Equilibrium check ─────────────────────────────────────────────────────
-    # Applied loads = total of all equivalent nodal forces assembled by the solver.
-    # F[0::3] = Fx, F[1::3] = Fy at every DOF in the model (incl. sub-nodes).
-    # For a correct DSM solution: ΣR + ΣF_applied = 0 to machine precision.
+    # Applied loads = total of all equivalent nodal forces assembled by the solver,
+    # read with the model's own DOF stride. For a correct DSM solution
+    # ΣR + ΣF_applied = 0 to machine precision (forces only; moments about the
+    # origin are not summed here).
     y -= 0.025
+    axes = ["x", "y", "z"][:n_force]
     try:
         from solver.assembler import Assembler
         model = cache["model"]
-        asm   = Assembler(model)
-        F     = asm.global_force_vector(model.elements)
-        fx_applied = float(np.sum(F[0::3]))
-        fy_applied = float(np.sum(F[1::3]))
-        res_x      = abs(sum_rx + fx_applied)
-        res_y      = abs(sum_ry + fy_applied)
-        tol        = max(1.0, abs(sum_ry) * 1e-4)
-        ok_x       = res_x < tol
-        ok_y       = res_y < tol
+        F     = Assembler(model).global_force_vector(model.elements)
+        applied  = [float(np.sum(F[k::dpn])) for k in range(n_force)]
+        residual = [abs(sums[k] + applied[k]) for k in range(n_force)]
+        tol      = max(1.0, max(abs(s) for s in sums) * 1e-4)
+        oks      = [r < tol for r in residual]
+        all_ok   = all(oks)
 
-        # Applied load row
         fig.text(_L, y,
-                 f"Applied:   ΣFx = {fx_applied/1e3:.3f} kN    "
-                 f"ΣFy = {fy_applied/1e3:.3f} kN",
-                 fontsize=8.5, color=_GREY, va="top",
-                 transform=fig.transFigure)
+                 "Applied:   " + "    ".join(
+                     f"ΣF{a} = {v/1e3:.3f} kN" for a, v in zip(axes, applied)),
+                 fontsize=8.5, color=_GREY, va="top", transform=fig.transFigure)
         y -= 0.022
         fig.text(_L, y,
-                 f"Reactions: ΣRx = {sum_rx/1e3:.3f} kN    "
-                 f"ΣRy = {sum_ry/1e3:.3f} kN",
-                 fontsize=8.5, color=_GREY, va="top",
-                 transform=fig.transFigure)
+                 "Reactions: " + "    ".join(
+                     f"ΣR{a} = {v/1e3:.3f} kN" for a, v in zip(axes, sums)),
+                 fontsize=8.5, color=_GREY, va="top", transform=fig.transFigure)
         y -= 0.022
-
-        # Residual check row
-        cx = _GREEN if ok_x else _RED
-        cy = _GREEN if ok_y else _RED
-        fig.text(_L, y,
-                 f"Residual:  |ΣFx| = {res_x/1e3:.2e} kN",
-                 fontsize=8.5, color=cx, va="top",
-                 transform=fig.transFigure)
-        fig.text(0.48, y,
-                 f"|ΣFy| = {res_y/1e3:.2e} kN",
-                 fontsize=8.5, color=cy, va="top",
-                 transform=fig.transFigure)
+        for k, (a, r, ok) in enumerate(zip(axes, residual, oks)):
+            fig.text(_L + 0.26 * k, y, f"|ΣF{a}| = {r/1e3:.2e} kN",
+                     fontsize=8.5, color=_GREEN if ok else _RED, va="top",
+                     transform=fig.transFigure)
         y -= 0.022
-
-        verdict = "✓  Global equilibrium satisfied" if (ok_x and ok_y) else \
-                  "⚠  Equilibrium residual exceeds tolerance"
-        fig.text(0.5, y, verdict,
+        fig.text(0.5, y,
+                 "✓  Global equilibrium satisfied" if all_ok
+                 else "⚠  Equilibrium residual exceeds tolerance",
                  fontsize=9, fontweight="bold",
-                 color=_GREEN if (ok_x and ok_y) else _RED,
+                 color=_GREEN if all_ok else _RED,
                  ha="center", va="top", transform=fig.transFigure)
-
-    except Exception as exc:
-        fig.text(_L, y, f"Equilibrium check skipped: {exc}",
-                 fontsize=8, color=_GREY, va="top",
-                 transform=fig.transFigure)
+    except Exception as exc:  # report must never fail on the check itself
+        fig.text(_L, y, f"Equilibrium check unavailable: {exc}",
+                 fontsize=8.5, color=_GREY, va="top", transform=fig.transFigure)
 
     pdf.savefig(fig, bbox_inches="tight", dpi=150)
     plt.close(fig)
@@ -495,6 +501,14 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     _footer(fig, date_str)
     y = 0.860
 
+    dpn      = cache["model"].dofs_per_node if cache.get("model") is not None else 3
+    is_3d    = dpn == 6
+    v_idx    = 2 if is_3d else 1          # vertical DOF: Z in 3D, Y in 2D
+
+    def _sway(nid: int) -> float:
+        dx = float(disps[nid * dpn])
+        return math.hypot(dx, float(disps[nid * dpn + 1])) if is_3d else dx
+
     # Build node-coordinate map and connectivity lookup
     node_map   = {n.id: n for n in state.nodes}
     free_nodes = [n for n in state.nodes if n.support_type == SupportType.FREE]
@@ -505,7 +519,7 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     for m in state.members:
         ni = node_map[m.node_i]
         nj = node_map[m.node_j]
-        L  = math.hypot(nj.x - ni.x, nj.y - ni.y)
+        L  = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
         member_len[m.id] = L
         node_members.setdefault(m.node_i, []).append(L)
         node_members.setdefault(m.node_j, []).append(L)
@@ -518,11 +532,9 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     horiz_data = []   # (|dx|, node_id, L_ref)
 
     for n in free_nodes:
-        dx = float(disps[n.id * 3])
-        dy = float(disps[n.id * 3 + 1])
         L  = _ref_len(n.id)
-        vert_data.append( (abs(dy), n.id, L) )
-        horiz_data.append((abs(dx), n.id, L) )
+        vert_data.append( (abs(float(disps[n.id * dpn + v_idx])), n.id, L) )
+        horiz_data.append((abs(_sway(n.id)), n.id, L) )
 
     if not vert_data:
         fig.text(0.5, 0.5, "No free nodes — checks not applicable.",
@@ -537,17 +549,15 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
 
     disp_rows = []
     for n in free_nodes:
-        dx  = float(disps[n.id * 3])
-        dy  = float(disps[n.id * 3 + 1])
-        rot = float(disps[n.id * 3 + 2])
-        disp_rows.append([
-            str(n.id),
-            f"{dx*1e3:.3f}",
-            f"{dy*1e3:.3f}",
-            f"{math.degrees(rot):.4f}",
-        ])
+        d = [float(disps[n.id * dpn + k]) for k in range(dpn)]
+        if is_3d:
+            disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
+        else:
+            disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[1]*1e3:.3f}",
+                              f"{math.degrees(d[2]):.4f}"])
     y = _draw_table(fig,
-                    ["Node", "dx (mm)", "dy (mm)", "θ (°)"],
+                    ["Node", "dx (mm)", "dy (mm)", "dz (mm)"] if is_3d
+                    else ["Node", "dx (mm)", "dy (mm)", "θ (°)"],
                     disp_rows, y,
                     col_widths=[0.10, 0.20, 0.20, 0.22])
     y -= 0.020
@@ -562,7 +572,7 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     col_v   = _GREEN   if pass_v else _RED
 
     y = _draw_table(fig,
-                    ["Max |dy|", "Node", "Ref. length L", "δ/L",
+                    ["Max |dz|" if is_3d else "Max |dy|", "Node", "Ref. length L", "δ/L",
                      "Limit", "Result"],
                     [[f"{max_dy*1e3:.2f} mm", str(ctrl_nid_v),
                       f"{ctrl_L_v:.3f} m",
@@ -584,7 +594,7 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     col_h   = _GREEN   if pass_h else _RED
 
     y = _draw_table(fig,
-                    ["Max |dx|", "Node", "Ref. height H", "δ/H",
+                    ["Max |d_xy|" if is_3d else "Max |dx|", "Node", "Ref. height H", "δ/H",
                      "Limit", "Result"],
                     [[f"{max_dx*1e3:.2f} mm", str(ctrl_nid_h),
                       f"{ctrl_L_h:.3f} m",
@@ -625,16 +635,24 @@ def _page_member_forces(pdf: PdfPages, meta: Any, state: ModelState,
         plt.close(fig)
         return
 
-    headers = ["Mbr", "N_i (kN)", "V_i (kN)", "M_i (kN·m)",
-               "N_j (kN)", "V_j (kN)", "M_j (kN·m)"]
-    rows = [
-        [str(r.element_id),
-         f"{r.N_i/1e3:.3f}", f"{r.V_i/1e3:.3f}", f"{r.M_i/1e3:.3f}",
-         f"{r.N_j/1e3:.3f}", f"{r.V_j/1e3:.3f}", f"{r.M_j/1e3:.3f}"]
-        for r in member_results
-    ]
-    _draw_table(fig, headers, rows, y,
-                col_widths=[0.06, 0.13, 0.13, 0.15, 0.13, 0.13, 0.15])
+    if member_results[0].is_3d:
+        # 3D: every component at both ends (N, Vy, Vz, T, My, Mz), in kN / kN·m.
+        names = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        headers = ["Mbr"] + [f"{n}_{e}" for e in "ij" for n in names]
+        rows = [[str(r.element_id)] + [f"{v/1e3:.2f}" for v in r.end_forces]
+                for r in member_results]
+        _draw_table(fig, headers, rows, y, col_widths=[0.06] + [0.075] * 12)
+    else:
+        headers = ["Mbr", "N_i (kN)", "V_i (kN)", "M_i (kN·m)",
+                   "N_j (kN)", "V_j (kN)", "M_j (kN·m)"]
+        rows = [
+            [str(r.element_id),
+             f"{r.N_i/1e3:.3f}", f"{r.V_i/1e3:.3f}", f"{r.M_i/1e3:.3f}",
+             f"{r.N_j/1e3:.3f}", f"{r.V_j/1e3:.3f}", f"{r.M_j/1e3:.3f}"]
+            for r in member_results
+        ]
+        _draw_table(fig, headers, rows, y,
+                    col_widths=[0.06, 0.13, 0.13, 0.15, 0.13, 0.13, 0.15])
 
     pdf.savefig(fig, bbox_inches="tight", dpi=150)
     plt.close(fig)
