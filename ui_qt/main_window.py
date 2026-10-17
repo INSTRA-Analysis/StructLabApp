@@ -443,6 +443,14 @@ class MainWindow(QMainWindow):
             "Tint members by their group label, with a legend (Ctrl+G)")
         self._colour_group_act.toggled.connect(self._on_colour_by_group_toggled)
 
+        self._thickness_act = tools_menu.addAction("Thickness by Section")
+        self._thickness_act.setCheckable(True)
+        self._thickness_act.setChecked(False)
+        self._thickness_act.setShortcut(QKeySequence("Ctrl+T"))
+        self._thickness_act.setToolTip(
+            "Draw members thicker the larger their cross-section area (Ctrl+T)")
+        self._thickness_act.toggled.connect(self._on_thickness_toggled)
+
         tools_menu.addSeparator()
 
         act = tools_menu.addAction("Python Console", self._open_console)
@@ -455,6 +463,9 @@ class MainWindow(QMainWindow):
 
     def _on_colour_by_group_toggled(self, checked: bool) -> None:
         self._scene.set_colour_by_group(checked)
+
+    def _on_thickness_toggled(self, checked: bool) -> None:
+        self._scene.set_thickness_by_section(checked)
 
     def _open_console(self) -> None:
         from ui_qt.console import ConsoleDialog
@@ -1985,6 +1996,8 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._update_status_stats()
         self._props_panel.set_model_state(self._scene.model_state)
+        if self._scene._thickness_by_section and not getattr(self._scene, "_suppress_changed", False):
+            self._scene.refresh_section_widths()      # a section may have been edited
 
     def _update_status_stats(self) -> None:
         """Update the status bar permanent widget with live model + results stats."""

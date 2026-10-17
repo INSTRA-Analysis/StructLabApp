@@ -1002,7 +1002,7 @@ class MemberItem(QGraphicsLineItem):
         else:
             pen = QPen(_BAR_PEN if self.member.element_type == ElementType.BAR
                        else _BEAM_PEN)
-        pen.setWidthF(width)
+        pen.setWidthF(width * self._scene.section_width_factor(self.member))
         return pen
 
     def _update_pen(self) -> None:

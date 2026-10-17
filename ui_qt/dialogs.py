@@ -57,6 +57,7 @@ _SHORTCUTS = [
     ("Tools",                    None),
     ("Toggle Load Arrows",       "L"),
     ("Colour by Group",          "Ctrl+G"),
+    ("Thickness by Section",     "Ctrl+T"),
     ("Python Console",           "Ctrl+`"),
 ]
 

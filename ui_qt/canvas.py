@@ -131,6 +131,10 @@ class StructCanvas(QGraphicsScene):
         # ── "colour by group" view flag ───────────────────────────────────────
         self._colour_by_group: bool = False
 
+        # ── "thickness by section" view flag (line width follows sqrt(A)) ─────
+        self._thickness_by_section: bool = False
+        self._sqrt_area_range: tuple[float, float] = (0.0, 0.0)
+
         # ── load graphics visibility ──────────────────────────────────────────
         self._show_loads: bool = True
 
@@ -1503,6 +1507,33 @@ class StructCanvas(QGraphicsScene):
         for mitem in self._member_items.values():
             mitem.update_visual_scale(scale)
         self.update()
+
+    # Line-width multiplier range for the "Thickness by section" view. sqrt(A) rather than A:
+    # an L 200x20 has ~15x the area of an L 50x5, which would make the small bracing vanish.
+    _THICKNESS_MIN, _THICKNESS_MAX = 0.6, 2.2
+
+    def set_thickness_by_section(self, enabled: bool) -> None:
+        """Toggle the 'Thickness by section' view: member line width follows the
+        square root of its section area, scaled to the sizes present in the model."""
+        self._thickness_by_section = bool(enabled)
+        self.refresh_section_widths()
+
+    def refresh_section_widths(self) -> None:
+        """Recompute the area range and re-pen every member (after a section edit)."""
+        roots = [math.sqrt(m.A) for m in self.model_state.members if m.A > 0]
+        self._sqrt_area_range = (min(roots), max(roots)) if roots else (0.0, 0.0)
+        scale = self._current_view_scale()
+        for mitem in self._member_items.values():
+            mitem.update_visual_scale(scale)
+        self.update()
+
+    def section_width_factor(self, member: MemberData) -> float:
+        """Pen-width multiplier for ``member``; 1.0 when the view is off or the size is unknown."""
+        lo, hi = self._sqrt_area_range
+        if not self._thickness_by_section or member.A <= 0 or hi - lo < 1e-12:
+            return 1.0
+        t = (math.sqrt(member.A) - lo) / (hi - lo)
+        return self._THICKNESS_MIN + (self._THICKNESS_MAX - self._THICKNESS_MIN) * t
 
     def active_groups(self) -> list[str]:
         """Distinct non-empty member group labels, in first-seen order."""
