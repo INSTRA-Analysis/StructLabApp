@@ -74,3 +74,17 @@ Nodal point loads in newtons along the global axes. `Fz < 0` is downward.
 
 Any rows the importer can't use (bad node reference, unknown `etype`, malformed numbers)
 are skipped and reported in a summary dialog — the rest of the model still loads.
+
+## Transmission towers (generated)
+
+`generate_l8_tower.py` builds a UK L8 400 kV tower from a parametric `TowerSpec` and writes a
+`.slab` file (Z up, self-weight case on, sections grouped by role so they can be reassigned).
+
+- `l8c_d30_tower_3d.slab` — the **L8(c) D30** angle tower, reproduced from its published elevation
+  drawing: asymmetric crossarms, tapered shaft, X-braced upper body and K-braced lower body.
+  Member sections are a representative first design, not the real schedule.
+- `l8c_d30_tower_3d.png` — front-elevation preview of it.
+- Other types: `python examples/generate_l8_tower.py --list` (L8c_D, L8c_D60, L8c_D90 are the D30
+  template scaled to those towers' published height, base width and crossarm width); add
+  `--plot` for a front-elevation PNG. A new tower type is a new `TowerSpec` (arm levels and
+  reaches, leg spacing profile, bracing bands).
