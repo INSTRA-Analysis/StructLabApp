@@ -5,6 +5,7 @@ They are called by MainWindow's thin wrapper methods.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -12,13 +13,38 @@ import numpy as np
 
 # ── Pre-solve validation ──────────────────────────────────────────────────────
 
+@dataclass(frozen=True)
+class Issue:
+    """One validation finding, with the nodes / members it is about (for select-and-zoom)."""
+    severity: str                       # "error" | "warning"
+    text: str
+    node_ids: tuple[int, ...] = ()
+    member_ids: tuple[int, ...] = ()
+
+
 def validate_model(state) -> tuple[list[str], list[str]]:
     """Return (errors, warnings) for the given ModelState.
 
     Errors block solving. Warnings are shown but solving continues.
     """
-    errors: list[str] = []
-    warnings: list[str] = []
+    issues = validate_model_issues(state)
+    return ([i.text for i in issues if i.severity == "error"],
+            [i.text for i in issues if i.severity == "warning"])
+
+
+def validate_model_issues(state) -> list[Issue]:
+    """Validate ``state``; each Issue names the nodes / members involved."""
+    issues: list[Issue] = []
+
+    class _Sink(list):
+        def __init__(self, severity: str) -> None:
+            super().__init__()
+            self._severity = severity
+
+        def append(self, text: str, nodes=(), members=()) -> None:     # type: ignore[override]
+            issues.append(Issue(self._severity, text, tuple(nodes), tuple(members)))
+
+    errors, warnings = _Sink("error"), _Sink("warning")
 
     # Connected node IDs
     connected = {m.node_i for m in state.members} | {m.node_j for m in state.members}
@@ -27,7 +53,8 @@ def validate_model(state) -> tuple[list[str], list[str]]:
     floating = [n for n in state.nodes if n.id not in connected]
     if floating:
         ids = ", ".join(str(n.id) for n in floating)
-        errors.append(f"Floating node(s) with no members attached: {ids}")
+        errors.append(f"Floating node(s) with no members attached: {ids}",
+                      nodes=[n.id for n in floating])
 
     # Support checks
     from ui_qt.model_state import SupportType
@@ -43,7 +70,8 @@ def validate_model(state) -> tuple[list[str], list[str]]:
             errors.append(
                 "No PIN or FIXED support — only ROLLERs found.\n"
                 "Structure cannot resist horizontal forces (likely singular).\n"
-                "Change at least one ROLLER to PIN."
+                "Change at least one ROLLER to PIN.",
+                nodes=[n.id for n in supports],
             )
 
     # Zero-length members
@@ -58,7 +86,8 @@ def validate_model(state) -> tuple[list[str], list[str]]:
             if length < 1e-6:
                 errors.append(
                     f"Member {m.id} has zero length "
-                    f"(nodes {m.node_i} and {m.node_j} are at the same point)"
+                    f"(nodes {m.node_i} and {m.node_j} are at the same point)",
+                    nodes=[m.node_i, m.node_j], members=[m.id],
                 )
 
     # No loads in the active case
@@ -102,10 +131,11 @@ def validate_model(state) -> tuple[list[str], list[str]]:
                 "out-of-plane response is zero.\n"
                 "To include them, give the structure genuine 3D geometry (at least one "
                 "node with z ≠ 0). Note: a flat grillage in the X-Y plane is not "
-                "supported — model it with real 3D geometry."
+                "supported — model it with real 3D geometry.",
+                nodes=oop_nodes, members=oop_members,
             )
 
-    return errors, warnings
+    return issues
 
 
 # ── Solve engine pipeline ─────────────────────────────────────────────────────

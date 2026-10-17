@@ -1625,6 +1625,23 @@ class StructCanvas(QGraphicsScene):
             if item is not None and item.isVisible():
                 item.setSelected(True)
 
+    def focus_on(self, node_ids=(), member_ids=()) -> int:
+        """Select these nodes / members and zoom the view onto them (e.g. a validation
+        finding). Returns how many items were found; ids that no longer exist are ignored."""
+        self.clearSelection()
+        items = [self._node_items[n] for n in node_ids if n in self._node_items]
+        items += [self._member_items[m] for m in member_ids if m in self._member_items]
+        for it in items:
+            if not it.isVisible():
+                it.set_visible_all(True)
+            it.setSelected(True)
+        if items and self.views():
+            rect = items[0].sceneBoundingRect()
+            for it in items[1:]:
+                rect = rect.united(it.sceneBoundingRect())
+            self.views()[0].zoom_to_rect(rect)
+        return len(items)
+
     def active_groups(self) -> list[str]:
         """Distinct non-empty member group labels, in first-seen order."""
         seen: list[str] = []
@@ -2576,6 +2593,17 @@ class StructView(QGraphicsView):
         """
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, self._fit_now)
+
+    def zoom_to_rect(self, rect, min_size: float = 160.0) -> None:
+        """Fit ``rect`` (scene units) in the view, never closer than ``min_size`` across."""
+        pad = max(80.0, 0.25 * max(rect.width(), rect.height()))
+        rect = rect.adjusted(-pad, -pad, pad, pad)
+        if rect.width() < min_size or rect.height() < min_size:
+            c = rect.center()
+            half = min_size / 2
+            rect = rect.__class__(c.x() - half, c.y() - half, min_size, min_size)
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._notify_zoom()
 
     def _fit_now(self) -> None:
         rect = self.scene().itemsBoundingRect()

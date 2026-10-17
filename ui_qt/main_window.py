@@ -1443,6 +1443,7 @@ class MainWindow(QMainWindow):
             msg = "Cannot solve — model has the following issues:\n\n"
             msg += "\n\n".join(f"  • {e}" for e in errors)
             QMessageBox.critical(self, "Model validation failed", msg)
+            self._show_blocking_issues()
             return
         if warnings:
             msg = "Model has warnings:\n\n"
@@ -1514,6 +1515,7 @@ class MainWindow(QMainWindow):
                     "Check supports and structure geometry."
                     + (f"\n\n{exc.hint}" if getattr(exc, "hint", "") else "")
                 )
+                self._scene.focus_on(getattr(exc, "node_ids", ()))
             else:
                 QMessageBox.critical(self, "Solve error", msg)
             self._sb.showMessage("Combination solve failed.")
@@ -1532,6 +1534,7 @@ class MainWindow(QMainWindow):
             msg = "Cannot solve — model has issues:\n\n"
             msg += "\n\n".join(f"  • {e}" for e in errors)
             QMessageBox.critical(self, "Model validation failed", msg)
+            self._show_blocking_issues()
             return
 
         try:
@@ -1790,8 +1793,21 @@ class MainWindow(QMainWindow):
 
     def _validate_model(self) -> tuple[list[str], list[str]]:
         """Return (errors, warnings) for the current model state."""
-        from ui_qt.solve_actions import validate_model
-        return validate_model(self._scene.model_state)
+        from ui_qt.solve_actions import validate_model_issues
+        self._last_issues = validate_model_issues(self._scene.model_state)
+        return ([i.text for i in self._last_issues if i.severity == "error"],
+                [i.text for i in self._last_issues if i.severity == "warning"])
+
+    def _show_blocking_issues(self) -> None:
+        """Select and zoom to the nodes / members the validation errors point at."""
+        nodes: list[int] = []
+        members: list[int] = []
+        for i in getattr(self, "_last_issues", []):
+            if i.severity == "error":
+                nodes += i.node_ids
+                members += i.member_ids
+        if self._scene.focus_on(nodes, members):
+            self._sb.showMessage(f"{len(nodes)} node(s) / {len(members)} member(s) with problems are selected.")
 
     # ── solve ─────────────────────────────────────────────────────────────────
 
@@ -1823,6 +1839,7 @@ class MainWindow(QMainWindow):
             msg = "Cannot solve — model has the following issues:\n\n"
             msg += "\n\n".join(f"  • {e}" for e in errors)
             QMessageBox.critical(self, "Model validation failed", msg)
+            self._show_blocking_issues()
             self._sb.showMessage("Solve blocked — fix model issues first.")
             return
         if warnings:
@@ -1910,6 +1927,7 @@ class MainWindow(QMainWindow):
                     + (f"\n\n{exc.hint}" if getattr(exc, "hint", "") else "")
                 )
                 QMessageBox.critical(self, "Cannot solve — unstable structure", detail)
+                self._scene.focus_on(getattr(exc, "node_ids", ()))
             else:
                 QMessageBox.critical(self, "Solve error", msg)
             self._sb.showMessage("Solve failed — see error dialog for details.")

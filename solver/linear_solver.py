@@ -16,10 +16,11 @@ class UnstableStructureError(np.linalg.LinAlgError):
     ``hint`` names the nodes that move the most, which is where the mechanism is.
     """
 
-    def __init__(self, reason: str, hint: str = "") -> None:
+    def __init__(self, reason: str, hint: str = "", node_ids: tuple[int, ...] = ()) -> None:
         detail = f"\n{hint}" if hint else ""
         super().__init__(f"Singular matrix — {reason}{detail}")
         self.hint = hint
+        self.node_ids = tuple(node_ids)       # where the mechanism is (for select-and-zoom)
 
 
 # A linear-elastic structure never legitimately displaces by many times its own
@@ -61,6 +62,7 @@ class LinearSolver:
                   + ", ".join(str(i) for i in worst)
                   + " — look for a joint held only by members in one plane, a "
                     "missing brace, or a part not connected to a support."),
+            node_ids=tuple(worst),
         )
 
     def _classify_dofs(self) -> tuple[list[int], list[int]]:

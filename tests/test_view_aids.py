@@ -199,3 +199,69 @@ def test_window_has_a_groups_dock_in_the_view_menu(qapp, monkeypatch):
         win._reset_dock_layout()
     finally:
         win.close()
+
+
+# ── validation findings point at the offending items ─────────────────────────
+
+def test_validation_issues_name_the_nodes_and_members(qapp):
+    from ui_qt.model_state import ModelState, SupportType
+    from ui_qt.solve_actions import validate_model, validate_model_issues
+    state = ModelState()
+    a, b, c = state.add_node(0, 0, 0), state.add_node(3, 0, 0), state.add_node(9, 9, 0)
+    state.add_member(a.id, b.id)
+    z = state.add_node(3, 0, 0)
+    state.add_member(b.id, z.id)                       # zero-length member
+    a.support_type = SupportType.ROLLER
+    issues = validate_model_issues(state)
+    by_text = {i.text.split(":")[0].split(" has")[0]: i for i in issues}
+    floating = next(i for i in issues if i.text.startswith("Floating"))
+    assert floating.node_ids == (c.id,)
+    zero = next(i for i in issues if "zero length" in i.text)
+    assert zero.member_ids == (state.members[1].id,) and set(zero.node_ids) == {b.id, z.id}
+    rollers = next(i for i in issues if i.text.startswith("No PIN or FIXED"))
+    assert rollers.node_ids == (a.id,)
+    errors, _ = validate_model(state)                  # the string API is unchanged
+    assert [i.text for i in issues if i.severity == "error"] == errors
+
+
+def test_focus_on_selects_and_ignores_missing_ids(qapp):
+    sc, ms = _grouped_scene()
+    sc.views()  # no view attached in the test: selection only
+    n = sc.focus_on(node_ids=[ms[0].node_i], member_ids=[ms[1].id, 9999])
+    assert n == 2
+    sel = sc.selectedItems()
+    assert {type(i).__name__ for i in sel} == {"NodeItem", "MemberItem"}
+    assert sc.focus_on([12345]) == 0 and not sc.selectedItems()
+
+
+def test_mechanism_error_carries_the_node_ids():
+    from solver.linear_solver import UnstableStructureError
+    err = UnstableStructureError("mechanism", hint="h", node_ids=(4, 7))
+    assert err.node_ids == (4, 7) and "Singular matrix" in str(err)
+
+
+def test_window_selects_the_problem_items_after_a_blocked_solve(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from ui_qt.main_window import MainWindow
+    from ui_qt.model_state import ModelState, SupportType
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: shown.append(a[1]))
+    for name in ("question", "warning", "information"):     # a stray modal would hang the run
+        monkeypatch.setattr(QMessageBox, name,
+                            lambda *a, _n=name, **k: pytest.fail(f"unexpected {_n} dialog: {a[1:3]}"))
+    state = ModelState()
+    a, b, c = state.add_node(0, 0, 0), state.add_node(3, 0, 0), state.add_node(9, 9, 0)
+    state.add_member(a.id, b.id)
+    a.support_type = SupportType.PIN
+    win = MainWindow()
+    try:
+        win._scene.load_state(state)
+        win._on_solve() if hasattr(win, "_on_solve") else win._solve()
+        assert shown and "validation" in shown[0].lower()
+        sel = win._scene.selectedItems()
+        assert [getattr(i, "node", None).id for i in sel] == [c.id]
+    finally:
+        win._is_dirty = False                  # no "save changes?" prompt on close
+        win.close()
