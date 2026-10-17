@@ -343,6 +343,7 @@ class NodeItem(QGraphicsEllipseItem):
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
+        self.setAcceptHoverEvents(True)       # tooltip text is built on hover
         self.setZValue(2)
         self.setBrush(QBrush(QColor("#2255cc")))
         self.setPen(QPen(QColor("#003399"), 1))
@@ -353,6 +354,20 @@ class NodeItem(QGraphicsEllipseItem):
         self._draw_support_symbol()
         self._draw_hinge_indicator()
         self._draw_load_symbols()
+
+    def hoverEnterEvent(self, event) -> None:
+        self.setToolTip(self.tooltip_text())
+        super().hoverEnterEvent(event)
+
+    def tooltip_text(self) -> str:
+        """Node id, coordinates (m) and support, built fresh on hover."""
+        n = self.node
+        if is_3d_model(self._scene.model_state.nodes):
+            coords = f"x = {n.x:.3f}   y = {n.y:.3f}   z = {n.z:.3f} m"
+        else:
+            coords = f"x = {n.x:.3f}   y = {n.y:.3f} m"
+        support = n.support_type.name.replace("_", " ").capitalize()
+        return f"Node {n.id}\n{coords}\nSupport: {support}"
 
     def set_movable(self, movable: bool) -> None:
         if movable and is_3d_model(self._scene.model_state.nodes):
