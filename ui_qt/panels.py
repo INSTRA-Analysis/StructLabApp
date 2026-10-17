@@ -597,10 +597,12 @@ def _run_section_picker(parent: QWidget, *, E: QDoubleSpinBox, A: QDoubleSpinBox
                          fy: QDoubleSpinBox, fy_lbl: QLabel,
                          Wpl: QDoubleSpinBox, Wel: QDoubleSpinBox,
                          b_sec: QDoubleSpinBox, h_sec: QDoubleSpinBox,
-                         on_material_change, on_done) -> None:
+                         on_material_change, on_done, on_extra=None) -> None:
     """Open the section-library picker and push the result into the given
     widgets. on_material_change(mat_type) updates Design-tab visibility;
-    on_done() saves immediately, without an extra Apply click."""
+    on_done() saves immediately, without an extra Apply click. on_extra(dict) receives
+    the section's extra properties (angles: I_y = minor principal moment, J, i_v ...)
+    before on_done runs; it is only called when the section has any."""
     from ui_qt.section_picker import SectionPickerDialog
     dlg = SectionPickerDialog(
         current_E=E.value() * 1e9, current_A=A.value(), current_I=I.value() * 1e-6,
@@ -624,6 +626,9 @@ def _run_section_picker(parent: QWidget, *, E: QDoubleSpinBox, A: QDoubleSpinBox
         h_sec.setValue(h * 1000)   # m → mm
     fy_lbl.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
     on_material_change(mat_type)
+    extra = dlg.get_extra()
+    if extra and on_extra is not None:
+        on_extra(extra)
     on_done()
 
 
@@ -677,10 +682,10 @@ class _MemberForm(QWidget):
         sf = QFormLayout(sec_box)
         self._E    = _spin(member.E / 1e9,        0, 1000,   1,    1)
         self._A    = _spin(member.A,               0, 100,    0.001, 6)
-        self._I    = _spin(member.I * 1e6,         0, 1e6,    1,    2)
+        self._I    = _spin(member.I * 1e6,         0, 1e6,    1,    4)
         _Iy_val    = member.I_y if member.I_y is not None else member.I
-        self._Iy   = _spin(_Iy_val * 1e6,          0, 1e6,    1,    2)
-        self._J    = _spin(member.J * 1e6,         0, 1e6,    0.01, 3)
+        self._Iy   = _spin(_Iy_val * 1e6,          0, 1e6,    1,    4)
+        self._J    = _spin(member.J * 1e6,         0, 1e6,    0.01, 5)
         self._beta = _spin(math.degrees(member.beta_angle), -180.0, 180.0, 5.0, 1)
         sf.addRow("E (GPa):",         self._E)
         sf.addRow("A (m²):",          self._A)
@@ -934,7 +939,13 @@ class _MemberForm(QWidget):
             fy=self._fy, fy_lbl=self._fy_lbl, Wpl=self._Wpl, Wel=self._Wel,
             b_sec=self._b_sec, h_sec=self._h_sec,
             on_material_change=self._update_design_visibility, on_done=self._apply,
+            on_extra=self._apply_section_extra,
         )
+
+    def _apply_section_extra(self, extra: dict) -> None:
+        """Angle picked: the minor principal moment is the weak-axis I_y; set J too."""
+        self._Iy.setValue(extra["I_y"] * 1e6)
+        self._J.setValue(extra["J"] * 1e6)
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -1099,6 +1110,11 @@ def _build_section_lookup() -> dict[tuple[float, float], str]:
             for entry in profiles:
                 name, A, I = entry[0], entry[1], entry[2]
                 lookup[(round(A, 8), round(I, 12))] = name
+        # An angle is recognised by either principal moment: a member may carry I_u
+        # (picked from the library) or I_v (minor axis, e.g. generated lattice members).
+        from ui_qt.angle_sections import ANGLE_SECTIONS
+        for name, ang in ANGLE_SECTIONS.items():
+            lookup.setdefault((round(ang.A, 8), round(ang.I_v, 12)), name)
     except Exception:
         lookup = {}
     _SECTION_LOOKUP_CACHE = lookup
@@ -1272,7 +1288,7 @@ class _MultiMemberForm(QWidget):
         sf = QFormLayout(sec_box)
         self._E = _spin(first.E / 1e9, 0, 1000, 1, 1)
         self._A = _spin(first.A,       0, 100,  0.001, 6)
-        self._I = _spin(first.I * 1e6, 0, 1e6,  1, 2)
+        self._I = _spin(first.I * 1e6, 0, 1e6,  1, 4)
         sf.addRow("E (GPa):",        self._E)
         sf.addRow("A (m²):",         self._A)
         sf.addRow("I (×10⁻⁶ m⁴):",  self._I)
@@ -1423,7 +1439,12 @@ class _MultiMemberForm(QWidget):
             fy=self._fy_m, fy_lbl=self._fy_lbl_m, Wpl=self._Wpl_m, Wel=self._Wel_m,
             b_sec=self._b_sec_m, h_sec=self._h_sec_m,
             on_material_change=self._update_design_visibility_m, on_done=self._apply,
+            on_extra=self._remember_section_extra,
         )
+
+    def _remember_section_extra(self, extra: dict) -> None:
+        """Keep the picked angle's I_y / J until _apply writes them to every member."""
+        self._pending_extra = dict(extra)
 
     def _apply(self) -> None:
         type_names = ["BEAM", "BAR", "PIN_LEFT", "PIN_RIGHT"]
@@ -1473,6 +1494,10 @@ class _MultiMemberForm(QWidget):
             m.As_tension  = As_t
             m.fyk         = fyk
             m.reinforcement_estimated = False   # user has now reviewed/set it directly
+            extra = getattr(self, "_pending_extra", None)
+            if extra:
+                m.I_y = extra["I_y"]
+                m.J   = extra["J"]
             if self._model_state:
                 for lc in self._model_state.load_cases:
                     old_ml = lc.get_member_load(m.id)
@@ -1481,6 +1506,7 @@ class _MultiMemberForm(QWidget):
                         point_loads=old_ml.point_loads,
                         partial_loads=old_ml.partial_loads,
                     ))
+        self._pending_extra = None
         self._summary_lbl.setText(_multi_member_summary_html(self._members))
         self._on_apply()
 

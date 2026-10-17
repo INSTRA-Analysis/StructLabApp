@@ -18,13 +18,15 @@ published height / base width / crossarm width. Only D30 follows its drawing in 
 Modelling choices
 -----------------
 * Legs and arm chords: continuous BEAM members. All bracing: BAR.
+* Sections come from the app's angle library (ui_qt/angle_sections.py, EN 10056-1). A corner
+  leg uses its principal axes (I_v about the tangential axis, I_u about the radial axis,
+  beta = 0); other beams use the minor axis I_v on both axes (safe side, orientation unknown).
 * Bracing patterns per band: ``X`` (two crossing bars per face), ``V`` (corners of the
   upper level to the centre of the lower one) and ``LAMBDA`` (centre of the upper level
   to the corners of the lower one). V/LAMBDA use a node at the centre of a horizontal;
   a node held only by bars in one plane is a mechanism, so every such level gets a plan
   diaphragm: a diamond ring through the four face-centre nodes plus two crossing bars.
   (Crossing bars alone are not enough: the opposite pair can still translate together.)
-* Angle sections use I = I_y = the axis parallel to the legs (no beta_angle).
 * Each section family is its own ``group`` so sections can be reassigned per group.
 * Self-weight uses the app's own option (Self weight case).
 * Load attachment points are returned in ATTACH (arm tips, earth-wire nodes).
@@ -42,38 +44,27 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from ui_qt.angle_sections import angle_properties
 from ui_qt.io import save_model
 from ui_qt.model_state import ElementType, ModelState, SupportType
 
-# ── Equal-angle sections (EN 10056-1): name -> (A cm², I_yy cm⁴, t mm, b mm) ──
-ANGLES: dict[str, tuple[float, float, float, float]] = {
-    "L200x20": (76.3, 2850.0, 20.0, 200.0),
-    "L150x15": (43.0, 898.0, 15.0, 150.0),
-    "L120x12": (27.5, 368.0, 12.0, 120.0),
-    "L100x10": (19.2, 177.0, 10.0, 100.0),
-    "L90x9":   (15.5, 116.0, 9.0, 90.0),
-    "L80x8":   (12.3, 72.3, 8.0, 80.0),
-    "L70x7":   (9.40, 42.4, 7.0, 70.0),
-    "L60x6":   (6.91, 22.8, 6.0, 60.0),
-    "L50x5":   (4.80, 11.0, 5.0, 50.0),
-}
 E_STEEL, RHO = 210e9, 7850.0
 
 # group -> (section, element type, fy [Pa])
 GROUPS: dict[str, tuple[str, ElementType, float]] = {
-    "Leg 1 (base)":      ("L200x20", ElementType.BEAM, 355e6),
-    "Leg 2":             ("L150x15", ElementType.BEAM, 355e6),
-    "Leg 3":             ("L120x12", ElementType.BEAM, 355e6),
-    "Leg 4 (top)":       ("L100x10", ElementType.BEAM, 355e6),
-    "K-brace":           ("L120x12", ElementType.BAR, 275e6),
-    "Diagonal lower":    ("L80x8",   ElementType.BAR, 275e6),
-    "Diagonal upper":    ("L60x6",   ElementType.BAR, 275e6),
-    "Horizontal":        ("L70x7",   ElementType.BAR, 275e6),
-    "Horizontal (K level)": ("L90x9", ElementType.BAR, 275e6),
-    "Plan bracing":      ("L50x5",   ElementType.BAR, 275e6),
-    "Arm chord":         ("L100x10", ElementType.BEAM, 355e6),
-    "Arm web":           ("L60x6",   ElementType.BAR, 275e6),
-    "Arm plan bracing":  ("L50x5",   ElementType.BAR, 275e6),
+    "Leg 1 (base)":      ("L 200×20", ElementType.BEAM, 355e6),
+    "Leg 2":             ("L 150×15", ElementType.BEAM, 355e6),
+    "Leg 3":             ("L 120×12", ElementType.BEAM, 355e6),
+    "Leg 4 (top)":       ("L 100×10", ElementType.BEAM, 355e6),
+    "K-brace":           ("L 120×12", ElementType.BAR, 275e6),
+    "Diagonal lower":    ("L 80×8",   ElementType.BAR, 275e6),
+    "Diagonal upper":    ("L 60×6",   ElementType.BAR, 275e6),
+    "Horizontal":        ("L 70×7",   ElementType.BAR, 275e6),
+    "Horizontal (K level)": ("L 90×9", ElementType.BAR, 275e6),
+    "Plan bracing":      ("L 50×5",   ElementType.BAR, 275e6),
+    "Arm chord":         ("L 100×10", ElementType.BEAM, 355e6),
+    "Arm web":           ("L 60×6",   ElementType.BAR, 275e6),
+    "Arm plan bracing":  ("L 50×5",   ElementType.BAR, 275e6),
 }
 LEG_GROUPS = [(12.2, "Leg 1 (base)"), (19.7, "Leg 2"), (29.2, "Leg 3"), (1e9, "Leg 4 (top)")]
 X_LOWER_LIMIT = 29.2          # X-bracing below this height uses the heavier diagonal
@@ -201,11 +192,16 @@ def build(spec: TowerSpec = D30) -> ModelState:
             return
         pairs.add((min(a, b), max(a, b)))
         section, etype, fy = GROUPS[group]
-        area_cm2, iyy_cm4, t, b_mm = ANGLES[section]
+        ang = angle_properties(section)
         m = s.add_member(a, b)
         m.group, m.element_type, m.E, m.fy, m.density = group, etype, E_STEEL, fy, RHO
-        m.A, m.I, m.I_y = area_cm2 * 1e-4, iyy_cm4 * 1e-8, iyy_cm4 * 1e-8
-        m.J = (2 * b_mm - t) * t ** 3 / 3.0 * 1e-12          # thin-walled angle, m⁴
+        m.A, m.J = ang.A, ang.J
+        if group.startswith("Leg"):
+            # Corner angle, beta = 0: local y is radial = the angle's symmetry axis (u),
+            # so bending about local z (tangential, v axis) uses I_v and about y uses I_u.
+            m.I, m.I_y = ang.I_v, ang.I_u
+        else:
+            m.I = m.I_y = ang.I_v        # orientation unknown: use the minor axis (safe side)
         m.n_sub = 10 if etype == ElementType.BEAM else 2
 
     def coord(n: int) -> tuple[float, float, float]:

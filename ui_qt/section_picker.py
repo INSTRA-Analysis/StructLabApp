@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from ui_qt.section_library import (
-    MATERIALS, STEEL_PROFILES,
+    MATERIALS, STEEL_PROFILES, angle_section_extras,
     rectangular_section, t_beam_section,
     circular_section, hollow_rect_section,
 )
@@ -103,6 +103,10 @@ class SectionPickerDialog(QDialog):
         prev_form.addRow("I (cm⁴):",   self._lbl_I)
         prev_form.addRow("W_pl (cm³):", self._lbl_Wpl)
         prev_form.addRow("W_el (cm³):", self._lbl_Wel)
+        self._lbl_extra = QLabel("")
+        self._lbl_extra.setWordWrap(True)
+        self._lbl_extra.setStyleSheet("color: #8fb8c8;")
+        prev_form.addRow(self._lbl_extra)
         layout.addWidget(prev_box)
 
         # ── Buttons ───────────────────────────────────────────────────────────
@@ -350,6 +354,7 @@ class SectionPickerDialog(QDialog):
         if not hasattr(self, "_lbl_A"):
             return   # called during __init__ before preview labels exist
         result = self._compute_section()
+        self._lbl_extra.setText(self._angle_info_text())
         if result is None:
             self._lbl_A.setText("—")
             self._lbl_I.setText("—")
@@ -362,10 +367,32 @@ class SectionPickerDialog(QDialog):
             self._lbl_Wpl.setText(f"{W_pl * 1e6:.1f} cm³" if W_pl > 0 else "—")
             self._lbl_Wel.setText(f"{W_el * 1e6:.1f} cm³" if W_el > 0 else "—")
 
+    def _selected_angle(self) -> str | None:
+        """Name of the angle section currently chosen on the Steel tab, else None."""
+        if self._tabs.currentIndex() != 0:
+            return None
+        if not self._series_combo.currentText().startswith("L ("):
+            return None
+        idx = self._profile_combo.currentIndex()
+        return self._profile_combo.itemText(idx) if idx >= 0 else None
+
+    def _angle_info_text(self) -> str:
+        name = self._selected_angle()
+        extra = angle_section_extras(name) if name else None
+        if extra is None:
+            return ""
+        return (f"Angle: I = I_u (major principal); I_y := I_v = "
+                f"{extra['I_y'] * 1e8:.2f} cm⁴ (minor)\n"
+                f"i_v = {extra['i_v'] * 1e2:.2f} cm (buckling)   "
+                f"J = {extra['J'] * 1e8:.2f} cm⁴   {extra['mass_per_m']:.1f} kg/m\n"
+                "W_pl = W_el (angles are designed elastically)")
+
     def _on_accept(self) -> None:
         result = self._compute_section()
         if result is None:
             return
+        name = self._selected_angle()
+        self._extra = (angle_section_extras(name) or {}) if name else {}
         A, I, W_pl, W_el, b, h = result
         E        = self._E_spin.value() * 1e9
         density  = self._density_spin.value()
@@ -377,6 +404,14 @@ class SectionPickerDialog(QDialog):
         self.accept()
 
     # ── Public accessor ───────────────────────────────────────────────────────
+
+    def get_extra(self) -> dict[str, float]:
+        """Extra properties of the picked section, SI units; empty for non-angle sections.
+
+        For an angle: ``I_y`` (minor principal moment, the member's weak-axis I_y), ``J``,
+        ``i_v``, ``i_u``, ``mass_per_m``, ``cx``, ``cy``.
+        """
+        return dict(getattr(self, "_extra", {}) or {})
 
     def get_result(self) -> tuple | None:
         """Return (E, A, I, W_pl, W_el, b, h, density, fy, mat_type) or None if cancelled.
