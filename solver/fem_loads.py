@@ -15,7 +15,7 @@ Pin-release correction:
 
 import numpy as np
 
-from core.load import ElementLoad, LoadType
+from core.load import ElementLoad, LoadDirection, LoadType
 
 
 def _correct_for_pins(f: np.ndarray, L: float,
@@ -77,6 +77,25 @@ def _pin_correct_plane(f: np.ndarray, L: float,
         f[v_j] = f[v_j] - f[m_j] / L
 
 
+def _check_direction(load: ElementLoad, is_3d: bool) -> None:
+    """Reject load directions this module cannot represent, instead of misreading them.
+
+    Only local transverse directions have fixed-end formulas: LOCAL_Y (2D and 3D)
+    and LOCAL_Z (3D). The GLOBAL_* members of LoadDirection are not implemented;
+    resolve such a load into local components (or lump it to nodes) before it
+    reaches the solver, as model_builder does for qx / qy / qz.
+    """
+    allowed = ((LoadDirection.LOCAL_Y, LoadDirection.LOCAL_Z) if is_3d
+               else (LoadDirection.LOCAL_Y,))
+    if load.direction not in allowed:
+        mode = "3D" if is_3d else "2D"
+        raise ValueError(
+            f"Element load on element {load.element_id} has direction "
+            f"{load.direction.name}, which is not supported in {mode} analysis "
+            f"(supported: {', '.join(d.name for d in allowed)})."
+        )
+
+
 def fixed_end_forces(load: ElementLoad, length: float,
                      pin_i: bool = False, pin_j: bool = False,
                      is_3d: bool = False) -> np.ndarray:
@@ -97,6 +116,7 @@ def fixed_end_forces(load: ElementLoad, length: float,
     Assembler applies F -= FEF, so FEF represents fixed-end support reactions.
     """
     L = length
+    _check_direction(load, is_3d)
 
     if is_3d:
         return _fef_3d(load, L, pin_i, pin_j)
