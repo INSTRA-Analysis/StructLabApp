@@ -1473,6 +1473,7 @@ class MainWindow(QMainWindow):
                     self, "Cannot solve — unstable structure",
                     "The stiffness matrix is singular.\n"
                     "Check supports and structure geometry."
+                    + (f"\n\n{exc.hint}" if getattr(exc, "hint", "") else "")
                 )
             else:
                 QMessageBox.critical(self, "Solve error", msg)
@@ -1867,6 +1868,7 @@ class MainWindow(QMainWindow):
                     "  • Floating node — a node with no members attached\n"
                     "  • Mechanism — the truss or frame can move without any member stretching\n\n"
                     "Tip: For a truss, use PIN at one end and ROLLER at the other."
+                    + (f"\n\n{exc.hint}" if getattr(exc, "hint", "") else "")
                 )
                 QMessageBox.critical(self, "Cannot solve — unstable structure", detail)
             else:
