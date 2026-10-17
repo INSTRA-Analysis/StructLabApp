@@ -14,8 +14,8 @@ Modelling choices
   legs (no beta_angle); principal-axis values are used in the member checks.
 * Each section family is its own `group`, so sections can be re-assigned per group.
 * Phase and earth-wire attachment nodes are returned in ATTACH for the load step.
-* Self-weight is applied as explicit -Z nodal loads (half of each member weight at each end)
-  in the "Self weight" case, because the built-in option acts along global Y.
+* Self-weight uses the app's own option (on in the "Self weight" case): bars are lumped
+  to their joints, legs and arm chords are distributed along their length.
 
 Run:  python examples/generate_l8_tower.py
 """
@@ -93,7 +93,7 @@ def build() -> ModelState:
     s.mode_3d = True
     s.metadata.title = "L8 D STD 400 kV suspension tower (representative)"
     s.load_cases[0].name = "Self weight"
-    s.load_cases[0].include_self_weight = False   # built-in self-weight acts along Y, not Z
+    s.load_cases[0].include_self_weight = True
 
     keys: dict[tuple[float, float, float], int] = {}
 
@@ -174,20 +174,7 @@ def build() -> ModelState:
 
     for n in rings[0]:
         s.get_node(n).support_type = SupportType.PIN
-    add_self_weight(s)
     return s
-
-
-def add_self_weight(s: ModelState) -> None:
-    """Lump each member's weight half-and-half onto its end nodes as -Z loads."""
-    lc = s.load_cases[0]
-    for m in s.members:
-        a, b = s.get_node(m.node_i), s.get_node(m.node_j)
-        half = m.density * m.A * 9.81 * math.dist((a.x, a.y, a.z), (b.x, b.y, b.z)) / 2
-        for nid in (m.node_i, m.node_j):
-            nl = lc.get_node_load(nid)
-            nl.fz -= half
-            lc.set_node_load(nid, nl)
 
 
 if __name__ == "__main__":
