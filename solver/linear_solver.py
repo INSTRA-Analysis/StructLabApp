@@ -120,6 +120,15 @@ class LinearSolver:
         for i, dof in enumerate(restrained_dofs):
             reactions[dof] = r_values[i]
 
+        # Elastic supports: the spring pushes back on the structure with -k*d. Their
+        # DOFs are free (not restrained), so they are added here; without this the
+        # reactions would not sum to the applied load on a spring-supported model.
+        restrained_set = set(restrained_dofs)
+        for support in self.model.supports:
+            for dof, stiffness in support.spring_contributions(self._dpn):
+                if dof not in restrained_set:
+                    reactions[dof] = -stiffness * displacements[dof]
+
         return SolverResult(
             displacements=displacements,
             reactions=reactions,
