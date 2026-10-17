@@ -618,7 +618,7 @@ class MainWindow(QMainWindow):
             # one is defined — for now all four start an empty canvas.
             from ui_qt.model_state import ModelState
             blank = ModelState()
-            blank.analysis_mode = dlg.start_mode      # 2D (XZ) or 3D
+            blank.analysis_mode = dlg.start_mode      # "2D" (XY plane, Y up) or "3D" (Z up)
             label = "Blank" if choice == "blank" else choice.title()
             self._apply_model_state(blank, f"{label} ({dlg.start_mode})")
         elif choice.startswith("file:"):

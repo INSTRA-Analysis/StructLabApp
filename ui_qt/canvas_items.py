@@ -157,7 +157,7 @@ def px_to_m(px: float) -> float:
 def _display_3d(ms) -> bool:
     """True when the model should be drawn with the 3D isometric projection.
 
-    2D models are always drawn flat, even though their XZ geometry has z != 0.
+    2D models (native XY plane, z == 0) are always drawn flat.
     """
     if getattr(ms, "is_2d", False):
         return False

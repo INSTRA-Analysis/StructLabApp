@@ -417,8 +417,9 @@ class ModelState:
     combinations: list[LoadCombination] = field(default_factory=list)
     active_case_id: int = field(default=0)
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
-    # "3D" = 6-DOF space model (Z up). "2D" = planar 3-DOF model in the XZ plane
-    # (X horizontal, Z vertical/up, y == 0 for all nodes). The legacy boolean
+    # "3D" = 6-DOF space model (Z up). "2D" = planar 3-DOF model in the native
+    # XY plane (X horizontal, Y vertical/up, z == 0 for all nodes); set_analysis_mode
+    # swaps Y<->Z when toggling so a planar model keeps standing. The legacy boolean
     # `mode_3d` is kept as a property over this field for back-compat.
     analysis_mode: str = field(default="3D")
     _next_node_id: int = field(default=0, repr=False)
