@@ -5,7 +5,7 @@ Provides:
   - STEEL_PROFILES dict: series → list of (name, A in m², I in m⁴, W_pl in m³, W_el in m³)
     W_pl is the plastic section modulus (strong axis) used for EC3 utilization checks.
     W_el is the elastic section modulus (strong axis) used for elastic fibre stress σ = M/W_el.
-    The "L (equal)" / "L (unequal)" angle series use the MAJOR PRINCIPAL axis for I and are
+    The "L (equal)" angle series uses the MAJOR PRINCIPAL axis for I and is
     designed elastically (W_pl entry = W_el). Their full property set (I_v, i_v, J, centroid)
     is in ui_qt/angle_sections.py — see angle_section_extras().
   - concrete_section(b, h) → (A, I)
@@ -175,7 +175,7 @@ def _rhs() -> list[tuple[str, float, float, float, float]]:
 
 
 def _angles(kind: str) -> list[tuple[str, float, float, float, float]]:
-    """Hot-rolled angles (EN 10056-1). I = major principal I_u; W_pl entry = W_el because
+    """Hot-rolled equal angles (EN 10056-1). I = major principal I_u; W_pl entry = W_el because
     angle legs are slender (Class 3/4), so they are designed elastically."""
     return [(n, s.A, s.I_u, s.W_u, s.W_u)
             for n, s in ANGLE_SECTIONS.items() if s.kind == kind]
@@ -187,8 +187,7 @@ STEEL_PROFILES: dict[str, list[tuple[str, float, float, float, float]]] = {
     "HEB":  _heb(),
     "CHS":  _chs(),
     "RHS":  _rhs(),
-    "L (equal)":   _angles("equal"),
-    "L (unequal)": _angles("unequal"),
+    "L (equal)": _angles("equal"),
 }
 
 

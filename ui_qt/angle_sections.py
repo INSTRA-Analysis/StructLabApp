@@ -1,10 +1,15 @@
-"""Hot-rolled angle (L) sections to EN 10056-1: equal and unequal.
+"""Hot-rolled EQUAL angle (L) sections to EN 10056-1.
 
 Properties are COMPUTED from the nominal section geometry (leg lengths, thickness,
 root radius r1, toe radius r2 = r1/2) by numerical integration of the outline, not
 copied from a table. For the sizes checked against published tables the result agrees
-to well under 1 %. Root radii are the EN 10056-1 values for the equal angles; those of the
-unequal angles are best-effort. Use mill / supplier tables for the final design check.
+to well under 1 %. Use mill / supplier tables for the final design check.
+
+Only equal angles are catalogued: they are what lattice towers use. The geometry code
+already handles unequal legs (``a`` != ``b``, see ``_section_from_outline``); to add
+the unequal series, append sizes to a ``_UNEQUAL`` list with root radii taken from the
+standard or a supplier table, and register them in ``_build`` and in
+``section_library.STEEL_PROFILES``. Root radii are the one input that must not be guessed.
 
 Geometry and axes (x to the right, y up, origin at the heel = outside corner):
 
@@ -46,12 +51,6 @@ _EQUAL_SIZES = {
     150: (10, 12, 14, 15, 18), 160: (15, 16), 180: (16, 18), 200: (16, 18, 20, 24),
     250: (25, 28, 35),
 }
-# (long leg, short leg, thickness, r1) — best-effort root radii
-_UNEQUAL = [
-    (60, 40, 6, 6), (80, 60, 7, 8), (100, 50, 8, 10), (100, 65, 8, 10),
-    (100, 75, 10, 10), (120, 80, 10, 11), (150, 75, 10, 11), (150, 90, 12, 12),
-    (150, 100, 12, 12), (200, 100, 12, 15), (200, 150, 15, 15),
-]
 
 
 @dataclass(frozen=True)
@@ -145,10 +144,6 @@ def _build() -> dict[str, AngleSection]:
             name = f"L {_fmt(leg)}×{_fmt(t)}"
             out[name] = _section_from_outline(name, "equal", leg / 1e3, leg / 1e3,
                                               t / 1e3, r1 / 1e3, r1 / 2e3)
-    for a, b, t, r1 in _UNEQUAL:
-        name = f"L {a}×{b}×{_fmt(t)}"
-        out[name] = _section_from_outline(name, "unequal", a / 1e3, b / 1e3,
-                                          t / 1e3, r1 / 1e3, r1 / 2e3)
     return out
 
 
@@ -156,10 +151,10 @@ ANGLE_SECTIONS: dict[str, AngleSection] = _build()
 
 
 def angle_properties(name: str) -> AngleSection | None:
-    """The AngleSection called ``name`` (e.g. "L 100×10", "L 100×65×8"), or None."""
+    """The AngleSection called ``name`` (e.g. "L 100×10"), or None."""
     return ANGLE_SECTIONS.get(name)
 
 
 def angle_names(kind: str) -> list[str]:
-    """Names of the "equal" or "unequal" angles, smallest first."""
+    """Names of the catalogued angles of this ``kind`` ("equal" is the only one), in order."""
     return [n for n, s in ANGLE_SECTIONS.items() if s.kind == kind]
