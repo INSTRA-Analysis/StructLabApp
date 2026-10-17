@@ -1562,6 +1562,30 @@ class StructCanvas(QGraphicsScene):
         t = (math.sqrt(member.A) - lo) / (hi - lo)
         return self._THICKNESS_MIN + (self._THICKNESS_MAX - self._THICKNESS_MIN) * t
 
+    # ── select by group / section ─────────────────────────────────────────────
+
+    @staticmethod
+    def _section_key(m: MemberData) -> tuple[float, float, float]:
+        return (round(m.A, 8), round(m.I, 12), round(m.I_y or 0.0, 12))
+
+    def member_ids_like(self, member: MemberData, by: str) -> list[int]:
+        """Ids of the members sharing ``member``'s group (by="group") or section (by="section")."""
+        if by == "group":
+            group = (member.group or "").strip()
+            return [m.id for m in self.model_state.members
+                    if (m.group or "").strip() == group]
+        key = self._section_key(member)
+        return [m.id for m in self.model_state.members if self._section_key(m) == key]
+
+    def select_members(self, member_ids) -> None:
+        """Replace the selection with these members (hidden ones are skipped)."""
+        wanted = set(member_ids)
+        self.clearSelection()
+        for mid in wanted:
+            item = self._member_items.get(mid)
+            if item is not None and item.isVisible():
+                item.setSelected(True)
+
     def active_groups(self) -> list[str]:
         """Distinct non-empty member group labels, in first-seen order."""
         seen: list[str] = []
@@ -2865,6 +2889,19 @@ class StructView(QGraphicsView):
             act_sub.triggered.connect(
                 lambda _checked=False, ms=members: self._on_subdivide(ms)
             )
+            menu.addSeparator()
+
+        # ── Select similar (members) ──────────────────────────────────────────
+        if members:
+            first = members[0]
+            sel_menu = menu.addMenu("Select Same")
+            if (first.group or "").strip():
+                a = sel_menu.addAction(f"Group  “{first.group.strip()}”")
+                a.triggered.connect(lambda _c=False, m=first: self.scene().select_members(
+                    self.scene().member_ids_like(m, "group")))
+            a = sel_menu.addAction("Section")
+            a.triggered.connect(lambda _c=False, m=first: self.scene().select_members(
+                self.scene().member_ids_like(m, "section")))
             menu.addSeparator()
 
         # ── Mirror (any selection) ────────────────────────────────────────────

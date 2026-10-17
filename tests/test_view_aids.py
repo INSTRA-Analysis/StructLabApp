@@ -55,3 +55,34 @@ def test_cursor_signal_fires_on_mouse_move(qapp):
     except TypeError:
         pass                                    # the base-class call rejects the stub; the signal is already out
     assert seen and seen[-1].startswith("x = ")
+
+
+# ── select same group / section ───────────────────────────────────────────────
+
+def _grouped_scene():
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_state import ModelState
+    state = ModelState()
+    n = [state.add_node(i, 0, 0) for i in range(5)]
+    ms = [state.add_member(n[i].id, n[i + 1].id) for i in range(4)]
+    for m, g, a in zip(ms, ("Leg", "Leg", "Brace", ""), (0.01, 0.02, 0.01, 0.01)):
+        m.group, m.A = g, a
+    sc = StructCanvas()
+    sc.load_state(state)
+    return sc, ms
+
+
+def test_member_ids_like_group_and_section(qapp):
+    sc, ms = _grouped_scene()
+    assert sc.member_ids_like(ms[0], "group") == [ms[0].id, ms[1].id]
+    assert sc.member_ids_like(ms[3], "group") == [ms[3].id]          # no group: only itself
+    assert sc.member_ids_like(ms[0], "section") == [ms[0].id, ms[2].id, ms[3].id]
+
+
+def test_select_members_replaces_selection_and_skips_hidden(qapp):
+    sc, ms = _grouped_scene()
+    sc._member_items[ms[3].id].setSelected(True)
+    sc._member_items[ms[1].id].setVisible(False)
+    sc.select_members([ms[0].id, ms[1].id])
+    selected = {it.member.id for it in sc.selectedItems() if hasattr(it, "member")}
+    assert selected == {ms[0].id}
