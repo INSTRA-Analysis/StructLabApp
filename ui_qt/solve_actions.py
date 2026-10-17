@@ -65,7 +65,9 @@ def validate_model(state) -> tuple[list[str], list[str]]:
     lc = state.active_case
     has_node_loads = any(not lc.get_node_load(n.id).is_zero() for n in state.nodes)
     has_member_loads = bool(lc.member_loads)
-    if not has_node_loads and not has_member_loads:
+    # Self-weight is a load too: it needs the case flag AND at least one member with density.
+    has_self_weight = lc.include_self_weight and any(m.density > 0.0 for m in state.members)
+    if not has_node_loads and not has_member_loads and not has_self_weight:
         warnings.append("No loads applied in the active case — all results will be zero")
 
     # Out-of-plane loads on an effectively-2D (planar) model.
