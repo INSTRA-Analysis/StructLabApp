@@ -93,3 +93,34 @@ def test_menu_action_toggles_the_scene(qapp, monkeypatch):
         assert not win._scene._thickness_by_section
     finally:
         win.close()
+
+
+# ── hover tooltip ─────────────────────────────────────────────────────────────
+
+def test_member_tooltip_gives_group_profile_length_and_mass(qapp):
+    from ui_qt.angle_sections import angle_properties
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_state import ModelState
+    s = angle_properties("L 100×10")
+    state = ModelState()
+    a, b = state.add_node(0, 0, 0), state.add_node(3, 0, 4)
+    m = state.add_member(a.id, b.id)
+    m.A, m.I, m.group, m.density = s.A, s.I_u, "Leg", 7850.0
+    sc = StructCanvas()
+    sc.load_state(state)
+    tip = sc._member_items[m.id].tooltip_text()
+    assert "Leg" in tip and "L 100×10" in tip
+    assert "L = 5.000 m" in tip and f"{s.A * 5 * 7850:.1f} kg" in tip
+
+
+def test_tooltip_handles_missing_section_and_group(qapp):
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_state import ModelState
+    state = ModelState()
+    a, b = state.add_node(0, 0, 0), state.add_node(2, 0, 0)
+    m = state.add_member(a.id, b.id)
+    m.A = 0.0
+    sc = StructCanvas()
+    sc.load_state(state)
+    tip = sc._member_items[m.id].tooltip_text()
+    assert "no group" in tip and "no section set" in tip and "kg" not in tip

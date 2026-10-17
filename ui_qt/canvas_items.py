@@ -898,6 +898,7 @@ class MemberItem(QGraphicsLineItem):
         self._base_pen: QPen | None = None
         self._is_selected: bool = False
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setAcceptHoverEvents(True)       # tooltip text is built on hover, not per item up front
         self.setZValue(1)
         self._udl_items: list = []
         self._udl_label_items: list = []
@@ -914,6 +915,28 @@ class MemberItem(QGraphicsLineItem):
         self._draw_lateral_arrows()
         self._draw_point_loads()
         self._draw_partial_load_arrows()
+
+    def hoverEnterEvent(self, event) -> None:
+        self.setToolTip(self.tooltip_text())
+        super().hoverEnterEvent(event)
+
+    def tooltip_text(self) -> str:
+        """Group, profile, length and mass of this member (built fresh, so always current)."""
+        m = self.member
+        state = self._scene.model_state
+        ni, nj = state.get_node(m.node_i), state.get_node(m.node_j)
+        length = (math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0)
+        from ui_qt.panels import _build_section_lookup     # lazy: panels imports this module
+        lookup = _build_section_lookup()
+        profile = lookup.get((round(m.A, 8), round(m.I, 12))) or (
+            f"A = {m.A * 1e4:.2f} cm²" if m.A > 0 else "no section set")
+        kind = "Bar" if m.element_type == ElementType.BAR else "Beam"
+        lines = [f"Member {m.id}  ·  {m.group or 'no group'}",
+                 f"{profile}   ({kind})",
+                 f"L = {length:.3f} m"]
+        if m.A > 0 and m.density > 0:
+            lines[-1] += f"   {m.A * length * m.density:.1f} kg"
+        return "\n".join(lines)
 
     def update_endpoints(self) -> None:
         """Redraw line and load arrows after a connected node has moved."""
