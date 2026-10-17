@@ -98,3 +98,104 @@ def test_window_shows_cursor_coordinates_in_the_status_bar(qapp, monkeypatch):
         assert win._sb_cursor.text() == "x = 1.00   y = 2.00 m"
     finally:
         win.close()
+
+
+# ── Groups panel ──────────────────────────────────────────────────────────────
+
+def test_group_rows_quantities_and_profile_names(qapp):
+    from ui_qt.angle_sections import angle_properties
+    from ui_qt.groups_panel import group_rows
+    sc, ms = _grouped_scene()                       # Leg, Leg, Brace, (none); each 1 m long
+    s = angle_properties("L 100×10")
+    for m in ms[:2]:
+        m.A, m.I, m.density = s.A, s.I_u, 7850.0
+    rows = {r.name: r for r in group_rows(sc.model_state)}
+    assert list(rows) == ["Leg", "Brace", ""]       # first-seen order, ungrouped last
+    leg = rows["Leg"]
+    assert leg.member_ids == (ms[0].id, ms[1].id) and leg.length == pytest.approx(2.0)
+    assert leg.mass == pytest.approx(2 * s.A * 7850.0) and leg.profile == "L 100×10"
+    assert rows["Brace"].mass == 0.0 and rows[""].label == "(no group)"
+    ms[1].A = 0.005
+    assert group_rows(sc.model_state)[0].profile.startswith("mixed")
+
+
+def test_apply_section_sets_every_member_and_keeps_unset_extras(qapp):
+    from ui_qt.angle_sections import angle_properties
+    from ui_qt.groups_panel import apply_section
+    from ui_qt.section_library import angle_section_extras as extras
+    sc, ms = _grouped_scene()
+    ms[0].W_pl = 7e-4
+    s = angle_properties("L 100×10")
+    apply_section(ms[:2], (210e9, s.A, s.I_u, 0.0, s.W_u, 0.0, 0.0, 7850.0, 355e6, "steel"),
+                  extras("L 100×10"))
+    for m in ms[:2]:
+        assert (m.A, m.I, m.I_y, m.J, m.density, m.fy) == (s.A, s.I_u, s.I_v, s.J, 7850.0, 355e6)
+        assert m.W_el == s.W_u
+    assert ms[0].W_pl == 7e-4                       # picker gave 0 -> untouched
+    assert ms[2].A == 0.01                          # other groups untouched
+
+
+def test_hiding_a_group_hides_members_nodes_and_restores(qapp):
+    sc, ms = _grouped_scene()                       # chain of 5 nodes; Leg = members 0,1
+    sc.set_group_hidden("Leg", True)
+    vis = {m.id: sc._member_items[m.id].isVisible() for m in ms}
+    assert vis == {ms[0].id: False, ms[1].id: False, ms[2].id: True, ms[3].id: True}
+    nodes = {n: it.isVisible() for n, it in sc._node_items.items()}
+    n = [m.node_i for m in ms] + [ms[-1].node_j]
+    assert not nodes[n[0]] and not nodes[n[1]]      # only touch hidden members
+    assert nodes[n[2]] and nodes[n[3]] and nodes[n[4]]   # shared / visible-member nodes stay
+    sc.show_all_groups()
+    assert all(it.isVisible() for it in list(sc._member_items.values()) + list(sc._node_items.values()))
+
+
+def test_hidden_groups_survive_isolate_and_restore(qapp):
+    sc, ms = _grouped_scene()
+    sc.set_group_hidden("Brace", True)
+    sc._member_items[ms[0].id].setSelected(True)
+    sc.toggle_isolate()                              # isolate member 0 ...
+    assert sc._member_items[ms[0].id].isVisible() and not sc._member_items[ms[1].id].isVisible()
+    sc.toggle_isolate()                              # ... and restore everything
+    assert sc._member_items[ms[1].id].isVisible()
+    assert not sc._member_items[ms[2].id].isVisible()           # Brace is still hidden
+
+
+def test_panel_checkbox_toggles_visibility_and_profile_button_assigns(qapp, monkeypatch):
+    from PyQt6.QtCore import Qt
+    import ui_qt.section_picker as picker
+    from ui_qt.angle_sections import angle_properties
+    from ui_qt.groups_panel import GroupsPanel
+    from ui_qt.section_library import angle_section_extras
+    sc, ms = _grouped_scene()
+    panel = GroupsPanel(sc)
+    panel.refresh()
+    assert panel._table.rowCount() == 3
+    panel._table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)       # hide "Leg"
+    assert "Leg" in sc._hidden_groups and not sc._member_items[ms[0].id].isVisible()
+
+    s = angle_properties("L 80×8")
+
+    class Stub:
+        def __init__(self, *a, **k): pass
+        def exec(self): return True
+        def get_result(self): return (210e9, s.A, s.I_u, s.W_u, s.W_u, 0.0, 0.0, 7850.0, 355e6, "steel")
+        def get_extra(self): return angle_section_extras("L 80×8")
+
+    monkeypatch.setattr(picker, "SectionPickerDialog", Stub)
+    panel._table.selectRow(1)                                            # "Brace"
+    panel._assign_profile()
+    assert ms[2].A == s.A and ms[2].I_y == s.I_v
+    assert ms[0].A == 0.01                                               # Leg untouched
+    assert panel._table.item(1, 5).text() == "L 80×8"
+
+
+def test_window_has_a_groups_dock_in_the_view_menu(qapp, monkeypatch):
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    win = MainWindow()
+    try:
+        assert win._groups_dock.windowTitle() == "Groups"
+        win._groups_panel.refresh()
+        win._reset_dock_layout()
+    finally:
+        win.close()

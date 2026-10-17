@@ -134,6 +134,9 @@ class StructCanvas(QGraphicsScene):
 
         # ── "thickness by section" view flag (line width follows sqrt(A)) ─────
         self._thickness_by_section: bool = False
+
+        # ── groups hidden from the Groups panel (layer-style visibility) ──────
+        self._hidden_groups: set[str] = set()
         self._sqrt_area_range: tuple[float, float] = (0.0, 0.0)
 
         # ── load graphics visibility ──────────────────────────────────────────
@@ -184,6 +187,7 @@ class StructCanvas(QGraphicsScene):
                     it.setVisible(layer_vis)
             self._isolated = False
             self._isolated_member_ids.clear()
+            self._apply_group_visibility()        # groups hidden in the Groups panel stay hidden
             # Re-apply load toggle so any previously hidden loads stay hidden
             if not self._show_loads:
                 self.set_loads_visible(False)
@@ -1562,6 +1566,41 @@ class StructCanvas(QGraphicsScene):
         t = (math.sqrt(member.A) - lo) / (hi - lo)
         return self._THICKNESS_MIN + (self._THICKNESS_MAX - self._THICKNESS_MIN) * t
 
+    # ── hide / show by group ──────────────────────────────────────────────────
+
+    def set_group_hidden(self, group: str, hidden: bool) -> None:
+        """Hide or show every member of ``group`` ("" = ungrouped), with their loads,
+        overlay diagrams and any node left with no visible member."""
+        group = (group or "").strip()
+        (self._hidden_groups.add if hidden else self._hidden_groups.discard)(group)
+        self._apply_group_visibility()
+
+    def show_all_groups(self) -> None:
+        self._hidden_groups.clear()
+        self._apply_group_visibility()
+
+    def _apply_group_visibility(self) -> None:
+        if self._isolated:
+            return                      # isolation owns visibility; re-applied when it ends
+        members = self.model_state.members
+        hidden = {m.id for m in members if (m.group or "").strip() in self._hidden_groups}
+        shown_nodes = {n for m in members if m.id not in hidden for n in (m.node_i, m.node_j)}
+        used_nodes = {n for m in members for n in (m.node_i, m.node_j)}
+        for mid, item in self._member_items.items():
+            item.set_visible_all(mid not in hidden)
+        for nid, item in self._node_items.items():
+            item.set_visible_all(nid in shown_nodes or nid not in used_nodes)
+        visible_layer_items: set = set()
+        for layer, items in self._overlay_items.items():
+            if self._overlay_visible.get(layer, True):
+                visible_layer_items.update(items)
+        for mid, items in self._member_overlay_items.items():
+            for it in items:
+                it.setVisible(mid not in hidden and it in visible_layer_items)
+        if not self._show_loads:
+            self.set_loads_visible(False)
+        self.invalidate(self.sceneRect())
+
     # ── select by group / section ─────────────────────────────────────────────
 
     @staticmethod
@@ -1695,6 +1734,7 @@ class StructCanvas(QGraphicsScene):
         self._member_items.clear()
         self.model_state.clear()
         self._isolated = False
+        self._hidden_groups.clear()
         self._fit_scene_rect()   # back to the default size for the empty model
 
     def load_state(self, state: ModelState) -> None:

@@ -530,16 +530,23 @@ class MainWindow(QMainWindow):
         act_res.setShortcut("Alt+2")
         view_menu.addAction(act_res)
 
+        act_groups = self._groups_dock.toggleViewAction()
+        act_groups.setText("Groups Panel")
+        act_groups.setShortcut("Alt+3")
+        view_menu.addAction(act_groups)
+
         view_menu.addSeparator()
         view_menu.addAction("Reset Panel Layout", self._reset_dock_layout)
 
     def _reset_dock_layout(self) -> None:
         """Return both panels to their default docked positions."""
-        for dock in (self._left_dock, self._right_dock):
+        for dock in (self._left_dock, self._right_dock, self._groups_dock):
             dock.setFloating(False)
             dock.show()
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,  self._left_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._groups_dock)
+        self.tabifyDockWidget(self._right_dock, self._groups_dock)
 
     def _build_shortcuts_menu(self) -> None:
         """A live reference menu listing every keyboard shortcut, right after
@@ -1132,6 +1139,22 @@ class MainWindow(QMainWindow):
         self._right_dock.setWindowTitle("Results")
         self._right_dock.setTitleBarWidget(_DockTitleBar("  Results", self._right_dock))
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
+
+        # ── Groups dock (tabbed with Results): visibility, quantities, profile per group ──
+        from ui_qt.groups_panel import GroupsPanel
+        self._groups_panel = GroupsPanel(self._scene)
+        self._groups_panel.changed.connect(self._on_properties_applied)
+        self._groups_dock = QDockWidget(self)
+        self._groups_dock.setWidget(self._groups_panel)
+        self._groups_dock.setMinimumWidth(260)
+        self._groups_dock.setFeatures(_feat)
+        self._groups_dock.setWindowTitle("Groups")
+        self._groups_dock.setTitleBarWidget(_DockTitleBar("  Groups", self._groups_dock))
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._groups_dock)
+        self.tabifyDockWidget(self._right_dock, self._groups_dock)
+        self._right_dock.raise_()
+        self._groups_dock.visibilityChanged.connect(
+            lambda visible: visible and self._groups_panel.refresh())
 
     # ── status bar ────────────────────────────────────────────────────────────
 
@@ -2001,6 +2024,8 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._update_status_stats()
         self._props_panel.set_model_state(self._scene.model_state)
+        if self._groups_dock.isVisible():
+            self._groups_panel.refresh()
         if self._scene._thickness_by_section and not getattr(self._scene, "_suppress_changed", False):
             self._scene.refresh_section_widths()      # a section may have been edited
 
