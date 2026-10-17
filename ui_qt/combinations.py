@@ -6,6 +6,8 @@ and solve individual combinations via a callback to MainWindow.
 
 from __future__ import annotations
 
+import itertools
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -26,6 +28,16 @@ _PSI0: dict[str, float] = {"Q": 0.7, "W": 0.6, "S": 0.5}   # companion ψ₀
 _PSI2: dict[str, float] = {"Q": 0.3, "W": 0.0, "S": 0.2}   # quasi-permanent ψ₂
 
 
+def _companion_sets(cases: list) -> list[list]:
+    """Every way to take the companions with at most one case per exclusive group."""
+    free = [c for c in cases if not c.exclusive_group]
+    groups: dict[str, list] = {}
+    for c in cases:
+        if c.exclusive_group:
+            groups.setdefault(c.exclusive_group, []).append(c)
+    return [free + list(pick) for pick in itertools.product(*groups.values())]
+
+
 def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     """Generate EN 1990 Table A1.2(B) combinations — general algorithm.
 
@@ -38,6 +50,8 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     Previously auto-generated combinations (is_auto=True) are removed first so
     re-running after load-case edits gives a clean replacement.
     Manually-added combinations (is_auto=False) are preserved.
+    Load cases sharing an ``exclusive_group`` (wind +X / -X) are alternatives and are
+    never combined with each other.
 
     γG = 1.35 (unfavourable permanent)
     γQ = 1.50 (leading variable)
@@ -80,22 +94,29 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
             _combo("SLS: 1.0G",  "SLS", g_sls)
         return generated
 
-    # One ULS + one SLS Char per leading variable action
+    # One ULS + one SLS Char per leading variable action (and per choice among alternatives)
     for i, leading in enumerate(var_cases):
-        companions = [lc for j, lc in enumerate(var_cases) if j != i]
+        others = [lc for j, lc in enumerate(var_cases) if j != i
+                  and not (leading.exclusive_group
+                           and lc.exclusive_group == leading.exclusive_group)]
+        for companions in _companion_sets(others):
+            uls_parts = ["1.35G", _fmt(1.50, leading.name)]
+            uls_parts += [_fmt(_psi0(c) * 1.5, c.name) for c in companions]
+            _combo("ULS STR: " + " + ".join(uls_parts), "ULS",
+                   g_uls + [(leading, 1.50)] + [(c, _psi0(c) * 1.5) for c in companions])
 
-        uls_parts = ["1.35G", _fmt(1.50, leading.name)]
-        uls_parts += [_fmt(_psi0(c) * 1.5, c.name) for c in companions]
-        _combo("ULS STR: " + " + ".join(uls_parts), "ULS",
-               g_uls + [(leading, 1.50)] + [(c, _psi0(c) * 1.5) for c in companions])
-
-        sls_parts = ["G", _fmt(1.00, leading.name)]
-        sls_parts += [_fmt(_psi0(c), c.name) for c in companions]
-        _combo("SLS Char: " + " + ".join(sls_parts), "SLS",
-               g_sls + [(leading, 1.00)] + [(c, _psi0(c)) for c in companions])
+            sls_parts = ["G", _fmt(1.00, leading.name)]
+            sls_parts += [_fmt(_psi0(c), c.name) for c in companions]
+            _combo("SLS Char: " + " + ".join(sls_parts), "SLS",
+                   g_sls + [(leading, 1.00)] + [(c, _psi0(c)) for c in companions])
 
     # SLS Quasi-permanent: exclude variable cases whose ψ₂ = 0 (e.g. wind)
     qp_pairs = [(lc, _psi2(lc)) for lc in var_cases if _psi2(lc) > 1e-9]
+    # alternatives (same exclusive group) are never present together: keep the first
+    seen_groups: set[str] = set()
+    qp_pairs = [(lc, f) for lc, f in qp_pairs
+                if not lc.exclusive_group
+                or (lc.exclusive_group not in seen_groups and not seen_groups.add(lc.exclusive_group))]
     qp_parts = ["G"] + [_fmt(f, lc.name) for lc, f in qp_pairs]
     _combo("SLS Quasi-permanent: " + " + ".join(qp_parts), "SLS",
            g_sls + qp_pairs)

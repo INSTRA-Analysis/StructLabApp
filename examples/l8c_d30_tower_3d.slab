@@ -14270,6 +14270,7 @@
       "name": "Wind +X",
       "category": "W",
       "include_self_weight": false,
+      "exclusive_group": "Wind",
       "node_loads": {
         "64": {
           "fx": 1318.8242812499998,
@@ -14407,6 +14408,7 @@
       "name": "Wind -X",
       "category": "W",
       "include_self_weight": false,
+      "exclusive_group": "Wind",
       "node_loads": {
         "64": {
           "fx": -1318.8242812499998,

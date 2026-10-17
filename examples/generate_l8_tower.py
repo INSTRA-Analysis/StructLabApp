@@ -242,6 +242,8 @@ def add_cable_load_cases(state: ModelState, a: CableAssumptions = CableAssumptio
     loads = cable_loads(a)
     for name, category, vertical, transverse in CABLE_CASES:
         case = state.add_load_case(name, category)
+        if category == "W":
+            case.exclusive_group = "Wind"       # +X and -X are alternatives, never summed
         for label, node_ids in ATTACH.items():
             kind = "earth" if label == "Earth wire" else "phase"
             share = 1.0 / len(node_ids)

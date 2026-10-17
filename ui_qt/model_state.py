@@ -137,6 +137,9 @@ class LoadCase:
     node_loads: dict = field(default_factory=dict)   # node_id  → NodeLoad
     member_loads: dict = field(default_factory=dict) # member_id → MemberLoad
     include_self_weight: bool = False                # True on exactly one G case
+    # Cases sharing a non-empty group are alternatives (e.g. wind +X / wind -X): the
+    # auto-generated combinations never add two of them together.
+    exclusive_group: str = ""
     # Multiplier on self-weight when include_self_weight is set. 1.0 for a stored
     # case; a combination's merged case carries its partial factor here.
     # Not serialised.
@@ -177,6 +180,7 @@ class LoadCase:
             "name": self.name,
             "category": self.category,
             "include_self_weight": self.include_self_weight,
+            **({"exclusive_group": self.exclusive_group} if self.exclusive_group else {}),
             "node_loads": {
                 str(nid): {"fx": nl.fx, "fy": nl.fy, "moment": nl.moment,
                             "fz": nl.fz, "moment_x": nl.moment_x, "moment_y": nl.moment_y}
@@ -212,6 +216,7 @@ class LoadCase:
             name=d["name"],
             category=d.get("category", "G"),
             include_self_weight=d.get("include_self_weight", False),
+            exclusive_group=d.get("exclusive_group", ""),
         )
         for nid_str, nl_data in d.get("node_loads", {}).items():
             lc.node_loads[int(nid_str)] = NodeLoad(

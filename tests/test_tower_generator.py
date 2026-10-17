@@ -196,3 +196,40 @@ def test_opposite_wind_cases_give_exactly_opposite_results():
     plus = model.solve(lc="Wind +X")._cache["displacements"]
     minus = model.solve(lc="Wind -X")._cache["displacements"]
     assert minus == pytest.approx(-plus, abs=1e-12)
+
+
+# ── load combinations on the tower cases ─────────────────────────────────────
+
+def _solved(state, lc):
+    from ui_qt.model_builder import build_model, build_model_combined
+    from ui_qt.solve_actions import solve_engine
+    model, emap = (build_model_combined(state, lc) if hasattr(lc, "factors")
+                   else build_model(state, lc))
+    return solve_engine(model, emap, state)
+
+
+def test_auto_combinations_never_add_alternative_wind_directions():
+    from ui_qt.combinations import auto_generate_en1990
+    state = gen.build(gen.D30)
+    ids = {c.name: c.id for c in state.load_cases}
+    combos = auto_generate_en1990(state)
+    assert combos
+    for c in combos:
+        assert not (ids["Wind +X"] in c.factors and ids["Wind -X"] in c.factors), c.name
+    # both directions are still covered, as leading and as companion
+    for wind in ("Wind +X", "Wind -X"):
+        assert any(c.factors.get(ids[wind]) == 1.5 for c in combos if c.limit_state == "ULS")
+        assert any(c.factors.get(ids[wind]) == pytest.approx(0.9)
+                   for c in combos if c.limit_state == "ULS")
+
+
+def test_every_combination_equals_the_factored_sum_of_its_cases():
+    from ui_qt.combinations import auto_generate_en1990
+    state = gen.build(gen.D30)
+    state.load_cases[0].include_self_weight = True          # "Self weight" case
+    singles = {lc.id: _solved(state, lc) for lc in state.load_cases}
+    for combo in auto_generate_en1990(state):
+        got = _solved(state, combo)
+        for key in ("displacements", "reactions"):
+            want = sum(f * np.asarray(singles[cid][key]) for cid, f in combo.factors.items())
+            assert np.asarray(got[key]) == pytest.approx(want, rel=1e-7, abs=1e-6), (combo.name, key)
