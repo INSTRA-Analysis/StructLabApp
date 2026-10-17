@@ -400,8 +400,12 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
 
 
 def _is_3d(state: ModelState) -> bool:
-    """True when the report should show the 3D columns (Z, Fz, Mx, My, ...)."""
-    return state.mode_3d or any(n.z != 0.0 for n in state.nodes)
+    """True when the engine analyses this model in 3D (any node has z != 0).
+
+    Mirrors ``Model.dofs_per_node`` so the report describes what was solved, not
+    the UI mode flag.
+    """
+    return any(n.z != 0.0 for n in state.nodes)
 
 
 # ── Page 5: Support reactions ─────────────────────────────────────────────────
