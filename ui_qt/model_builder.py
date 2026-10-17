@@ -10,13 +10,15 @@ No Qt dependency. Called by MainWindow._on_solve().
 
 import math
 
+import numpy as np
+
 from core.model import Model
 from core.node import Node
 from core.support import Support
 from core.support import SupportType as CoreSupportType
 from core.material import Material
 from core.section import Section
-from core.load import NodalLoad, ElementLoad, LoadType
+from core.load import NodalLoad, ElementLoad, LoadType, LoadDirection
 from elements.frame_element import FrameElement
 from elements.bar_element import BarElement
 
@@ -35,6 +37,41 @@ _RIGID_MAP = {
     SupportType.ROLLER_Z: CoreSupportType.ROLLER_Z,
     SupportType.SPRING:   CoreSupportType.FREE,
 }
+
+_GRAVITY = 9.81  # m/s²
+
+
+def _add_self_weight_3d(model: Model, el, weight_per_length: float) -> None:
+    """Apply one sub-element's self-weight in a 3D (Z-up) model; gravity is -Z.
+
+    BAR: half the weight lumped to each end node (axial-only member; the truss
+    carries load through its joints).
+    FrameElement: the load is resolved on the element's own local axes
+    (``el._R3``, so ``beta_angle`` is honoured). The transverse parts become a
+    true UDL along local y / local z (exact parabolic M and V on the span); the
+    axial part is lumped half-and-half to the end nodes.
+    """
+    weight = weight_per_length * el.length
+    if isinstance(el, BarElement):
+        for node in (el.node_i, el.node_j):
+            model.nodal_loads.append(NodalLoad(node_id=node.id, fz=-weight / 2.0))
+        return
+
+    x_hat, y_hat, z_hat = el._R3[:, 0], el._R3[:, 1], el._R3[:, 2]
+    # ElementLoad magnitude is positive along -local axis; gravity is global -Z.
+    for axis, hat in ((LoadDirection.LOCAL_Y, y_hat), (LoadDirection.LOCAL_Z, z_hat)):
+        w_transverse = weight_per_length * hat[2]
+        if abs(w_transverse) > 1e-12:
+            model.element_loads.append(ElementLoad(
+                element_id=el.id, load_type=LoadType.UDL,
+                magnitude=w_transverse, direction=axis,
+            ))
+    axial_force = -weight / 2.0 * x_hat[2] * x_hat       # global vector per end node
+    if np.linalg.norm(axial_force) > 1e-9:
+        for node in (el.node_i, el.node_j):
+            model.nodal_loads.append(NodalLoad(
+                node_id=node.id, fx=axial_force[0], fy=axial_force[1], fz=axial_force[2],
+            ))
 
 
 def build_model(state: ModelState,
@@ -165,6 +202,9 @@ def build_model(state: ModelState,
 
             model.elements.append(el)
             el_ids.append(next_el_id)
+
+            if lc.include_self_weight and has_3d and md.density > 0.0:
+                _add_self_weight_3d(model, el, md.density * md.A * _GRAVITY)
 
             # Distributed load: sum all 'w' dist_loads; UDL when uniform, UVL when varying
             w_i = sum(dl.w_start + k       / n_sub * (dl.w_end - dl.w_start)
@@ -339,8 +379,9 @@ def build_model(state: ModelState,
     # BEAM/FRAME elements: transverse component w·cos(α) applied as a UDL on
     # each sub-element (gives correct parabolic BMD); axial component w·sin(α)
     # lumped as nodal forces so inclined members / columns get correct compression.
-    if lc.include_self_weight:
-        _G = 9.81  # m/s²
+    # 3D models (any z != 0) are handled per sub-element in the loop above, along -Z.
+    if lc.include_self_weight and not has_3d:
+        _G = _GRAVITY
         for mi, md in enumerate(state.members):
             if md.density <= 0.0:
                 continue
