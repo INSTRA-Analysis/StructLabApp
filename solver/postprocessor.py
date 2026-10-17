@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.load import ElementLoad, LoadType
+from core.load import ElementLoad, LoadDirection, LoadType
 from elements.frame_element import FrameElement
 from solver.fem_loads import fixed_end_forces
 
@@ -38,16 +38,25 @@ class ElementResult:
     @property
     def N_i(self) -> float: return self.end_forces[0]
     @property
+    def _weak_plane(self) -> bool:
+        """3D only: True when bending is dominated by the x-z plane (M_y, V_z).
+
+        Chosen once per element from BOTH ends, so M_i, M_j, V_i, V_j and the
+        diagram slope always refer to the same plane. Ties go to the strong
+        (x-y, M_z) plane.
+        """
+        f = self.end_forces
+        return max(abs(f[4]), abs(f[10])) > max(abs(f[5]), abs(f[11]))
+
+    @property
     def V_i(self) -> float:
         if self.is_3d:
-            Vy, Vz = self.end_forces[1], self.end_forces[2]
-            return Vy if abs(Vy) >= abs(Vz) else Vz
+            return self.end_forces[2] if self._weak_plane else self.end_forces[1]
         return self.end_forces[1]
     @property
     def M_i(self) -> float:
         if self.is_3d:
-            My, Mz = self.end_forces[4], self.end_forces[5]
-            return My if abs(My) >= abs(Mz) else Mz
+            return self.end_forces[4] if self._weak_plane else self.end_forces[5]
         return self.end_forces[2]
     @property
     def N_j(self) -> float:
@@ -55,14 +64,12 @@ class ElementResult:
     @property
     def V_j(self) -> float:
         if self.is_3d:
-            Vy, Vz = self.end_forces[7], self.end_forces[8]
-            return Vy if abs(Vy) >= abs(Vz) else Vz
+            return self.end_forces[8] if self._weak_plane else self.end_forces[7]
         return self.end_forces[4]
     @property
     def M_j(self) -> float:
         if self.is_3d:
-            My, Mz = self.end_forces[10], self.end_forces[11]
-            return My if abs(My) >= abs(Mz) else Mz
+            return self.end_forces[10] if self._weak_plane else self.end_forces[11]
         return self.end_forces[5]
 
     @property
@@ -73,8 +80,7 @@ class ElementResult:
         dM_y/dx = -V_z  (M_y plane, e.g. vertical members with global-Y load)
         """
         if self.is_3d:
-            My, Mz = self.end_forces[4], self.end_forces[5]
-            return -self.end_forces[2] if abs(My) >= abs(Mz) else self.end_forces[1]
+            return -self.end_forces[2] if self._weak_plane else self.end_forces[1]
         return self.end_forces[1]
 
     # ── 3D-specific accessors (valid when is_3d is True) ─────────────────
@@ -207,16 +213,25 @@ class Postprocessor:
         V = np.full_like(x, er.V_i)
         M = er.M_i + er._bmd_V_i * x
 
+        # 3D: the diagram is drawn in one bending plane (see ElementResult._weak_plane);
+        # only element loads acting in that plane contribute. In the x-z plane the
+        # moment slope is -V_z, so the load terms enter M with the opposite sign.
+        weak = er.is_3d and er._weak_plane
+        plane = LoadDirection.LOCAL_Z if weak else LoadDirection.LOCAL_Y
+        m_sign = -1.0 if weak else 1.0
+
         for eload in self._load_map.get(el.id, []):
+            if er.is_3d and eload.direction != plane:
+                continue
             if eload.load_type == LoadType.UDL:
                 w = eload.magnitude  # positive = downward
                 V -= w * x
-                M -= w * x**2 / 2
+                M -= m_sign * w * x**2 / 2
             elif eload.load_type == LoadType.POINT_FORCE:
                 P = eload.magnitude   # positive = downward
                 a = eload.position    # m from node_i
                 mask = x >= a
                 V[mask] -= P
-                M[mask] -= P * (x[mask] - a)
+                M[mask] -= m_sign * P * (x[mask] - a)
 
         return V, M
