@@ -263,5 +263,63 @@ def test_window_selects_the_problem_items_after_a_blocked_solve(qapp, monkeypatc
         sel = win._scene.selectedItems()
         assert [getattr(i, "node", None).id for i in sel] == [c.id]
     finally:
+        qapp.processEvents()                   # run queued zoom/fit calls while the window still exists
         win._is_dirty = False                  # no "save changes?" prompt on close
+        win.close()
+
+
+# ── results in the tooltips ───────────────────────────────────────────────────
+
+def _solved_cantilever():
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_builder import build_model
+    from ui_qt.model_state import ModelState, NodeLoad, SupportType
+    from ui_qt.solve_actions import solve_engine
+    state = ModelState()
+    a, b = state.add_node(0, 0, 0), state.add_node(4, 0, 0)
+    a.support_type = SupportType.FIXED
+    m = state.add_member(a.id, b.id)
+    m.E, m.A, m.I, m.W_pl, m.fy = 210e9, 0.01, 1e-4, 4e-4, 275e6
+    state.load_cases[0].set_node_load(b.id, NodeLoad(fy=-10e3))     # 10 kN down at the tip
+    sc = StructCanvas()
+    sc.load_state(state)
+    model, emap = build_model(state, state.load_cases[0])
+    return sc, state, solve_engine(model, emap, state), m, a, b
+
+
+def test_tooltips_show_results_only_when_a_solve_is_current(qapp):
+    sc, state, cache, m, a, b = _solved_cantilever()
+    mt, nt = sc._member_items[m.id].tooltip_text, sc._node_items[b.id].tooltip_text
+    assert "current results" not in mt() and "current results" not in nt()      # nothing solved
+    sc.results_provider = lambda: cache
+    text = mt()
+    assert "M max = 40.00 kN·m" in text and "N = 0.0 kN" in text
+    assert "utilisation = 0.36" in text                                          # 40 kN·m / (4e-4·275e6)
+    tip = nt()
+    assert "u = (0.00, -" in tip and "mm" in tip                                 # tip deflects down
+    assert "R =" not in tip                                                      # free node: no reaction
+    assert "R = (0.0, 10.0" in sc._node_items[a.id].tooltip_text()               # fixed support reaction
+    sc.results_provider = lambda: None                                           # edit invalidated the cache
+    assert "current results" not in mt()
+
+
+def test_tooltip_deflection_matches_the_closed_form(qapp):
+    sc, state, cache, m, a, b = _solved_cantilever()
+    sc.results_provider = lambda: cache
+    want_mm = 10e3 * 4 ** 3 / (3 * 210e9 * 1e-4) * 1e3                           # PL^3 / 3EI
+    assert f"-{want_mm:.2f}" in sc._node_items[b.id].tooltip_text()
+
+
+def test_window_feeds_the_canvas_its_solve_cache(qapp, monkeypatch):
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    win = MainWindow()
+    try:
+        assert win._scene.current_results() is None
+        win._solve_cache = {"marker": 1}
+        assert win._scene.current_results() == {"marker": 1}
+        win._solve_cache = None
+        assert win._scene.current_results() is None
+    finally:
         win.close()

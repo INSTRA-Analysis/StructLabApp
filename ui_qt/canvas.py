@@ -24,7 +24,7 @@ from ui_qt.model_state import (
 from ui_qt.canvas_items import (
     PX_PER_M, GRID_STEP, SNAP_PX,
     _GHOST_PEN, m_to_px, px_to_m,
-    NodeItem, MemberItem, _node_pos, group_colour,
+    NodeItem, MemberItem, _node_pos, group_colour, simple_utilisation,
 )
 import ui_qt.projection as _proj
 from ui_qt.projection import (
@@ -137,6 +137,11 @@ class StructCanvas(QGraphicsScene):
 
         # ── groups hidden from the Groups panel (layer-style visibility) ──────
         self._hidden_groups: set[str] = set()
+
+        # The main window sets this to a callable returning its current solve cache (or None),
+        # so tooltips can show results without the canvas knowing about the window.
+        self.results_provider = None
+
         self._sqrt_area_range: tuple[float, float] = (0.0, 0.0)
 
         # ── load graphics visibility ──────────────────────────────────────────
@@ -1625,6 +1630,10 @@ class StructCanvas(QGraphicsScene):
             if item is not None and item.isVisible():
                 item.setSelected(True)
 
+    def current_results(self) -> dict | None:
+        """The solve cache the main window currently holds, or None (unsolved or stale)."""
+        return self.results_provider() if self.results_provider else None
+
     def focus_on(self, node_ids=(), member_ids=()) -> int:
         """Select these nodes / members and zoom the view onto them (e.g. a validation
         finding). Returns how many items were found; ids that no longer exist are ignored."""
@@ -1660,17 +1669,7 @@ class StructCanvas(QGraphicsScene):
             mitem = self._member_items.get(r.element_id)
             if mitem is None or mdata is None:
                 continue
-            fy   = mdata.fy if mdata.fy > 1e3 else 275e6
-            A    = mdata.A
-            W_pl = mdata.W_pl
-            N_Rd = A * fy if A > 0 else 1e20   # γM0 = 1.0
-            M_Rd = W_pl * fy if W_pl > 0 else 0.0
-            N_Ed = max(abs(r.N_i), abs(r.N_j))
-            M_Ed = max(abs(r.M_i), abs(r.M_j))
-            eta_N = N_Ed / N_Rd if N_Rd > 1e-12 else 0.0
-            eta_M = M_Ed / M_Rd if M_Rd > 1e-12 else 0.0
-            eta   = eta_N + eta_M
-            mitem.set_util_colour(eta)
+            mitem.set_util_colour(simple_utilisation(mdata, r))
         self._util_colour_active = True
         self.update()
 

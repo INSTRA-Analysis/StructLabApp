@@ -103,6 +103,17 @@ _GROUP_PALETTE: list[str] = [
 _group_colour_cache: dict[str, QColor] = {}
 
 
+def simple_utilisation(m: "MemberData", r) -> float:
+    """Section utilisation N/(A·fy) + M/(W_pl·fy) with γM0 = 1.0: no buckling, no interaction
+    factors. This is what the member colouring and the hover tooltip show."""
+    fy = m.fy if m.fy > 1e3 else 275e6
+    n_rd = m.A * fy if m.A > 0 else 1e20
+    m_rd = m.W_pl * fy if m.W_pl > 0 else 0.0
+    eta_n = max(abs(r.N_i), abs(r.N_j)) / n_rd if n_rd > 1e-12 else 0.0
+    eta_m = max(abs(r.M_i), abs(r.M_j)) / m_rd if m_rd > 1e-12 else 0.0
+    return eta_n + eta_m
+
+
 def group_colour(group: str) -> QColor:
     """Return a stable QColor for a member group label (case-insensitive).
 
@@ -367,7 +378,26 @@ class NodeItem(QGraphicsEllipseItem):
         else:
             coords = f"x = {n.x:.3f}   y = {n.y:.3f} m"
         support = n.support_type.name.replace("_", " ").capitalize()
-        return f"Node {n.id}\n{coords}\nSupport: {support}"
+        return "\n".join([f"Node {n.id}", coords, f"Support: {support}"] + self._result_lines())
+
+    def _result_lines(self) -> list[str]:
+        """Displacement (mm) and, at supports, reaction (kN) from the current solve, if any."""
+        cache = self._scene.current_results()
+        if not cache:
+            return []
+        dpn = cache["model"].dofs_per_node
+        base = self.node.id * dpn
+        disp, react = cache["displacements"], cache["reactions"]
+        if base + dpn > len(disp):
+            return []
+        u = disp[base:base + dpn] * 1e3
+        n_comp = 3 if dpn == 6 else 2
+        lines = ["─ current results ─",
+                 "u = (" + ", ".join(f"{v:.2f}" for v in u[:n_comp]) + ") mm"]
+        r = react[base:base + n_comp]
+        if self.node.support_type.name != "FREE" and abs(r).max() > 1e-9:
+            lines.append("R = (" + ", ".join(f"{v / 1e3:.1f}" for v in r) + ") kN")
+        return lines
 
     def set_movable(self, movable: bool) -> None:
         if movable and is_3d_model(self._scene.model_state.nodes):
@@ -951,7 +981,24 @@ class MemberItem(QGraphicsLineItem):
                  f"L = {length:.3f} m"]
         if m.A > 0 and m.density > 0:
             lines[-1] += f"   {m.A * length * m.density:.1f} kg"
+        lines += self._result_lines()
         return "\n".join(lines)
+
+    def _result_lines(self) -> list[str]:
+        """Axial force, peak moment and section utilisation from the current solve, if any."""
+        cache = self._scene.current_results()
+        if not cache:
+            return []
+        r = next((r for r in cache["member_results"] if r.element_id == self.member.id), None)
+        if r is None:
+            return []
+        n = max((r.N_i, r.N_j), key=abs)                  # + = compression
+        kind = "compression" if n > 0 else "tension"
+        m_peak = max(abs(r.M_i), abs(r.M_j))
+        return ["─ current results ─",
+                f"N = {abs(n) / 1e3:.1f} kN  ({kind})",
+                f"M max = {m_peak / 1e3:.2f} kN·m",
+                f"utilisation = {simple_utilisation(self.member, r):.2f}   (section only, no buckling)"]
 
     def update_endpoints(self) -> None:
         """Redraw line and load arrows after a connected node has moved."""

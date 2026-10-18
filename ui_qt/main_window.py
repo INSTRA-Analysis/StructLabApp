@@ -12,6 +12,7 @@ directly on the canvas via StructCanvas.update_overlays().
 
 from __future__ import annotations
 
+import weakref
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -156,6 +157,8 @@ class MainWindow(QMainWindow):
         self._view  = StructView(self._scene)
         self.setCentralWidget(self._view)
         self._scene.model_changed.connect(self._on_model_changed)
+        _me = weakref.ref(self)      # weak: a window<->scene reference cycle makes teardown order random
+        self._scene.results_provider = lambda: getattr(_me(), "_solve_cache", None)
         self._scene.view_changed.connect(self._redraw_overlays)
         self._scene.view_preset.connect(self._on_view_preset)
         self._scene.plane_offset_changed.connect(self._on_scene_plane_offset_changed)
@@ -1153,8 +1156,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._groups_dock)
         self.tabifyDockWidget(self._right_dock, self._groups_dock)
         self._right_dock.raise_()
-        self._groups_dock.visibilityChanged.connect(
-            lambda visible: visible and self._groups_panel.refresh())
+        self._groups_dock.visibilityChanged.connect(self._on_groups_visibility)
 
     # ── status bar ────────────────────────────────────────────────────────────
 
@@ -2031,6 +2033,10 @@ class MainWindow(QMainWindow):
         self._do_clear_model()
         self._sb.showMessage("Model closed — ready for new project")
 
+    def _on_groups_visibility(self, visible: bool) -> None:
+        if visible:
+            self._groups_panel.refresh()
+
     def _on_model_changed(self) -> None:
         """Canvas model changed — update dirty flag and status bar."""
         if self._scene.model_state.nodes:
@@ -2078,6 +2084,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self._maybe_save_before_close():
+            # Drop the selection while the panels still exist: tearing down a scene that still
+            # has selected items emits selectionChanged into half-destroyed widgets.
+            self._scene.clearSelection()
             _AUTOSAVE_PATH.unlink(missing_ok=True)
             event.accept()
         else:
