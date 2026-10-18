@@ -42,10 +42,17 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     """Generate EN 1990 Table A1.2(B) combinations — general algorithm.
 
     For N variable load cases this produces:
-      - N × ULS fundamental combinations  (one per leading variable action)
+      - N × ULS fundamental combinations with unfavourable permanent actions (γG,sup)
+      - N × ULS fundamental combinations with favourable permanent actions (γG,inf)
       - N × SLS characteristic combinations
       - 1 × SLS quasi-permanent combination
-    i.e. 2N + 1 total (ψ₂ = 0 cases are excluded from the QP combo).
+    i.e. 3N + 1 total (ψ₂ = 0 cases are excluded from the QP combo). With exclusive
+    alternatives (wind +X / -X) N counts every choice of companions, not just every case.
+
+    The favourable set (EN 1990 Table A1.2(B), γG,inf = 1.00) is what governs uplift and
+    the minimum compression: leg tension in a tower is larger with 1.0G than with 1.35G.
+    Each set applies one factor to ALL permanent cases (EN 1990 A1.3.1(3) allows splitting
+    one permanent action into sup/inf parts; independent factors per case are not generated).
 
     Previously auto-generated combinations (is_auto=True) are removed first so
     re-running after load-case edits gives a clean replacement.
@@ -53,7 +60,7 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     Load cases sharing an ``exclusive_group`` (wind +X / -X) are alternatives and are
     never combined with each other.
 
-    γG = 1.35 (unfavourable permanent)
+    γG = 1.35 (unfavourable permanent, γG,sup) and 1.00 (favourable, γG,inf)
     γQ = 1.50 (leading variable)
     ψ₀ per category: Q=0.7, W=0.6, S=0.5  (default 0.7 for unknown categories)
     ψ₂ per category: Q=0.3, W=0.0, S=0.2  (default 0.3 for unknown categories)
@@ -86,6 +93,7 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
         return f"{factor:g}·{name}"
 
     g_uls = [(g, 1.35) for g in g_cases]
+    g_uls_inf = [(g, 1.00) for g in g_cases]
     g_sls = [(g, 1.00) for g in g_cases]
 
     if not var_cases:
@@ -102,8 +110,10 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
         for companions in _companion_sets(others):
             uls_parts = ["1.35G", _fmt(1.50, leading.name)]
             uls_parts += [_fmt(_psi0(c) * 1.5, c.name) for c in companions]
-            _combo("ULS STR: " + " + ".join(uls_parts), "ULS",
-                   g_uls + [(leading, 1.50)] + [(c, _psi0(c) * 1.5) for c in companions])
+            variable = [(leading, 1.50)] + [(c, _psi0(c) * 1.5) for c in companions]
+            _combo("ULS STR: " + " + ".join(uls_parts), "ULS", g_uls + variable)
+            _combo("ULS STR (γG,inf): " + " + ".join(["G"] + uls_parts[1:]), "ULS",
+                   g_uls_inf + variable)
 
             sls_parts = ["G", _fmt(1.00, leading.name)]
             sls_parts += [_fmt(_psi0(c), c.name) for c in companions]
