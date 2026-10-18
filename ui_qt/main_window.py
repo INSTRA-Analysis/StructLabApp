@@ -364,6 +364,21 @@ class MainWindow(QMainWindow):
         from ui_qt.dialogs import DuplicatesDialog
         DuplicatesDialog(self._scene, self).exec()
 
+    def _on_set_bars(self) -> None:
+        self._set_selection_type(ElementType.BAR, "bars")
+
+    def _on_set_beams(self) -> None:
+        self._set_selection_type(ElementType.BEAM, "beams")
+
+    def _set_selection_type(self, element_type: ElementType, label: str) -> None:
+        ids = [i.member.id for i in self._scene.selectedItems() if hasattr(i, "member")]
+        if not ids:
+            self._sb.showMessage(f"Select members first (Home > Select > By Type), then make them {label}.")
+            return
+        n = self._scene.set_element_type(ids, element_type)
+        self._sb.showMessage(f"{n} member(s) are now {label}; the model must be solved again."
+                             if n else f"The selected members are already {label}.")
+
     def _on_crossing_braces_toggled(self, checked: bool) -> None:
         """Treat crossing bracing as connected at the crossing (buckling length only)."""
         state = self._scene.model_state
@@ -488,6 +503,8 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(a["check_duplicates"])
         tools_menu.addAction(a["crossing_braces"])
+        tools_menu.addAction(a["set_bars"])
+        tools_menu.addAction(a["set_beams"])
         tools_menu.addSeparator()
         tools_menu.addAction(a["console"])
 

@@ -2091,6 +2091,21 @@ class StructCanvas(QGraphicsScene):
         self._suppress_changed = False
         self.model_changed.emit()
 
+    def set_element_type(self, member_ids: list[int], element_type: ElementType) -> int:
+        """Change only the element type (beam / bar / pin-left / pin-right) of these members, as one
+        undo step. Sections, groups, loads and every other property are left as they are. Returns
+        how many members actually changed."""
+        targets = [m for m in (self.model_state.get_member(i) for i in member_ids)
+                   if m is not None and m.element_type != element_type]
+        if not targets:
+            return 0
+        self.save_snapshot()
+        for m in targets:
+            m.element_type = element_type
+        self.redraw()
+        self.model_changed.emit()
+        return len(targets)
+
     def merge_duplicates(self, tol: float):
         """Merge coincident nodes and remove duplicate / zero-length members (one undo step).
         Returns the model_checks.MergeSummary."""

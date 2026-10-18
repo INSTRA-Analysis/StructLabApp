@@ -69,6 +69,12 @@ COMMANDS: tuple[Command, ...] = (
     Command("invert_selection", "Invert Selection", "_on_invert_selection", "", "Ctrl+I"),
     Command("check_duplicates", "Check Duplicates…", "_on_check_duplicates", "scan-search", "",
             "Find coincident nodes and duplicate or zero-length members, then select or merge them"),
+    Command("set_bars", "Selection to Bars", "_on_set_bars", "minus", "",
+            "Make the selected members truss bars (pinned at both ends). Only the element type "
+            "changes; sections, groups and loads are kept."),
+    Command("set_beams", "Selection to Beams", "_on_set_beams", "git-commit-horizontal", "",
+            "Make the selected members beams (continuous, with bending). Only the element type "
+            "changes; sections, groups and loads are kept."),
     Command("crossing_braces", "Crossing Bracing Connected", "_on_crossing_braces_toggled", "split", "",
             "Design assumption: bracing members that cross are connected there, so a compression\n"
             "member is held at the crossing while the one crossing it is in tension (shorter buckling\n"
