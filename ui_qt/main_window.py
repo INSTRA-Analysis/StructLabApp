@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
         self._select_group_menu.aboutToShow.connect(self._rebuild_select_group_menu)
 
         edit_menu.addSeparator()
+        edit_menu.addAction(a["rotate_selection"])
         edit_menu.addAction(a["scale_selection"])
         edit_menu.addAction("  (or press S on the canvas for interactive scale)") \
             .setEnabled(False)
@@ -358,6 +359,21 @@ class MainWindow(QMainWindow):
             action_label = f"{label}   [{count} member{'s' if count != 1 else ''}]"
             menu.addAction(action_label,
                            lambda *args, mids=member_ids: self._on_select_by_member_ids(mids))
+
+    def _on_rotate_selection(self) -> None:
+        """Rotate the selection by an exact angle, optionally keeping the original (copies)."""
+        from ui_qt.dialogs import RotateDialog
+        nodes = self._scene.selected_node_set()
+        if not nodes:
+            self._sb.showMessage("Select nodes or members to rotate first.")
+            return
+        dlg = RotateDialog(self, is_3d=self._scene._is_3d_mode(),
+                           centroid=self._scene.selection_centroid(nodes))
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        if self._scene.rotate_selection(dlg.axis, dlg.angle, dlg.pivot, dlg.copies):
+            what = f"{dlg.copies} rotated cop{'y' if dlg.copies == 1 else 'ies'}" if dlg.copies else "Rotated"
+            self._sb.showMessage(f"{what}: {dlg.angle:g}° about {dlg.axis}.")
 
     def _on_scale_selection(self) -> None:
         """Scale the selected nodes about their centroid (precise dialog path)."""

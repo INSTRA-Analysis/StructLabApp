@@ -67,6 +67,8 @@ COMMANDS: tuple[Command, ...] = (
     Command("select_all", "Select All", "_on_select_all", "square-dashed-mouse-pointer", "Ctrl+A"),
     Command("deselect_all", "Deselect All", "_on_deselect_all", "", "Ctrl+Shift+A"),
     Command("invert_selection", "Invert Selection", "_on_invert_selection", "", "Ctrl+I"),
+    Command("rotate_selection", "Rotate…", "_on_rotate_selection", "rotate-3d", "",
+            "Rotate the selection by an exact angle about X, Y or Z — optionally as copies"),
     Command("scale_selection", "Scale Selection…", "_on_scale_selection", "scaling",
             tip="Scale the selected nodes about their centroid (or press S on the canvas)"),
     # ── drawing modes (exclusive group, see build_actions) ────────────────────

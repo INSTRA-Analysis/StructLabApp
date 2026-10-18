@@ -1945,6 +1945,87 @@ class StructCanvas(QGraphicsScene):
         self._suppress_changed = False
         self.model_changed.emit()
 
+    def rotate_selection(self, axis: str, angle_deg: float,
+                         pivot: tuple[float, float, float] | None = None,
+                         copies: int = 0) -> bool:
+        """Rotate the selection about a global axis through ``pivot``.
+
+        ``copies == 0`` moves the selected nodes (and the end nodes of selected members) in
+        place; members follow, and members with both ends in the selection keep their section
+        orientation. ``copies == n`` leaves the original and adds n rotated copies at angle,
+        2·angle, … n·angle (a polar array); copied nodes keep their supports, copied members
+        keep every property (section, material, group, design data). Loads are not copied.
+        Coincident nodes are reused, so copies that meet join up. Returns False if nothing is
+        selected. One undo step.
+        """
+        from dataclasses import fields
+        from ui_qt.transform import rotated_beta, rotate_point, rotation_matrix
+
+        ms = self.model_state
+        nodes = self.selected_node_set()
+        sel_members = [it.member for it in self.selectedItems() if isinstance(it, MemberItem)]
+        if not nodes:
+            return False
+        if pivot is None:
+            pivot = self.selection_centroid(nodes)
+        coords = {nd.id: (nd.x, nd.y, nd.z) for nd in nodes}
+
+        self.save_snapshot()
+        self._suppress_changed = True
+        try:
+            if copies <= 0:
+                rot = rotation_matrix(axis, angle_deg)
+                for nd in nodes:
+                    nd.x, nd.y, nd.z = rotate_point(coords[nd.id], pivot, rot)
+                    item = self._node_items.get(nd.id)
+                    if item:
+                        item.refresh()
+                for m in ms.members:
+                    if m.node_i in coords and m.node_j in coords:
+                        ni, nj = ms.get_node(m.node_i), ms.get_node(m.node_j)
+                        m.beta_angle = rotated_beta(coords[m.node_i], coords[m.node_j], m.beta_angle,
+                                                    rot, (ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
+            else:
+                skip = {"id", "node_i", "node_j"}
+                member_fields = [f.name for f in fields(MemberData) if f.name not in skip]
+                node_fields = [f.name for f in fields(NodeData) if f.name not in ("id", "x", "y", "z")]
+                for k in range(1, copies + 1):
+                    rot = rotation_matrix(axis, angle_deg * k)
+                    id_map: dict[int, int] = {}
+                    for src in nodes:
+                        q = rotate_point(coords[src.id], pivot, rot)
+                        existing = ms.node_at(*q, tol=1e-4)
+                        if existing is not None:
+                            id_map[src.id] = existing.id
+                            continue
+                        new = ms.add_node(*q)
+                        for name in node_fields:
+                            setattr(new, name, getattr(src, name))
+                        self._add_node_item(new)
+                        id_map[src.id] = new.id
+                    for m in sel_members:
+                        ni_id, nj_id = id_map.get(m.node_i), id_map.get(m.node_j)
+                        if ni_id is None or nj_id is None or ni_id == nj_id:
+                            continue
+                        if any({x.node_i, x.node_j} == {ni_id, nj_id} for x in ms.members):
+                            continue                     # the copy lands on an existing member
+                        nm = ms.add_member(ni_id, nj_id)
+                        if nm is None:
+                            continue
+                        for name in member_fields:
+                            setattr(nm, name, getattr(m, name))
+                        ni, nj = ms.get_node(ni_id), ms.get_node(nj_id)
+                        nm.beta_angle = rotated_beta(coords[m.node_i], coords[m.node_j], m.beta_angle,
+                                                     rot, (ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
+                        self._add_member_item(nm)
+        finally:
+            self._suppress_changed = False
+        self.update_depth_order()
+        self._fit_scene_rect()
+        self.invalidate(self.sceneRect())
+        self.model_changed.emit()
+        return True
+
     def mirror_selection(self, plane: str,
                          offset: float,
                          keep_original: bool) -> None:
@@ -3037,6 +3118,9 @@ class StructView(QGraphicsView):
             act_mir.triggered.connect(
                 lambda _checked=False: self._on_mirror(True)
             )
+            mw_rot = getattr(self.window(), "_act", {}).get("rotate_selection")
+            if mw_rot is not None:
+                menu.addAction(mw_rot)
 
         # ── Paste ─────────────────────────────────────────────────────────────
         mw = self.window()

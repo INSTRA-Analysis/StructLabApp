@@ -421,3 +421,104 @@ class MirrorDialog(QDialog):
     @property
     def keep_original(self) -> bool:
         return self._keep_orig.isChecked()
+
+
+class RotateDialog(QDialog):
+    """Rotate the selection: axis, exact angle, pivot point, and optional duplication.
+
+    ``copies`` is 0 for a plain rotation (the selection moves) and n >= 1 to keep the
+    original and add n rotated copies at angle, 2·angle, … (a polar array).
+    """
+
+    def __init__(self, parent=None, is_3d: bool = True,
+                 centroid: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Rotate Selection")
+        self.setMinimumWidth(320)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        axis_box = QGroupBox("Rotation axis (global, through the pivot)")
+        axis_row = QHBoxLayout(axis_box)
+        self._axis_btns: dict[str, QRadioButton] = {}
+        for ax in (("X", "Y", "Z") if is_3d else ("Z",)):
+            rb = QRadioButton(ax)
+            axis_row.addWidget(rb)
+            self._axis_btns[ax] = rb
+        self._axis_btns["Z"].setChecked(True)
+        layout.addWidget(axis_box)
+
+        form = QFormLayout()
+        self._angle = QDoubleSpinBox()
+        self._angle.setRange(-360.0, 360.0)
+        self._angle.setDecimals(4)
+        self._angle.setSingleStep(15.0)
+        self._angle.setSuffix(" °")
+        self._angle.setValue(90.0)
+        self._angle.setToolTip("Positive = anticlockwise looking down the axis from its + end (right-hand rule)")
+        form.addRow("Angle:", self._angle)
+        layout.addLayout(form)
+
+        pivot_box = QGroupBox("Pivot")
+        pv = QVBoxLayout(pivot_box)
+        self._pivot_centroid = QRadioButton(
+            f"Selection centre  ({centroid[0]:.3g}, {centroid[1]:.3g}, {centroid[2]:.3g}) m")
+        self._pivot_point = QRadioButton("Point:")
+        self._pivot_centroid.setChecked(True)
+        pv.addWidget(self._pivot_centroid)
+        row = QHBoxLayout()
+        row.addWidget(self._pivot_point)
+        self._pivot_spins = []
+        for label, value in zip(("x", "y", "z"), centroid):
+            spin = QDoubleSpinBox()
+            spin.setRange(-10000.0, 10000.0)
+            spin.setDecimals(3)
+            spin.setSingleStep(0.5)
+            spin.setValue(value)
+            spin.setPrefix(f"{label} ")
+            spin.setEnabled(False)
+            if label == "z" and not is_3d:
+                spin.setVisible(False)
+            row.addWidget(spin)
+            self._pivot_spins.append(spin)
+        pv.addLayout(row)
+        self._pivot_point.toggled.connect(lambda on: [s.setEnabled(on) for s in self._pivot_spins])
+        layout.addWidget(pivot_box)
+
+        self._duplicate = QCheckBox("Duplicate — keep the original and add rotated copies")
+        layout.addWidget(self._duplicate)
+        copies_row = QFormLayout()
+        self._copies = QSpinBox()
+        self._copies.setRange(1, 360)
+        self._copies.setValue(1)
+        self._copies.setEnabled(False)
+        self._copies.setToolTip("Copies at angle, 2×angle, 3×angle … (e.g. 3 copies at 90° fill a full turn)")
+        copies_row.addRow("Number of copies:", self._copies)
+        layout.addLayout(copies_row)
+        self._duplicate.toggled.connect(self._copies.setEnabled)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Rotate")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    @property
+    def axis(self) -> str:
+        return next(ax for ax, rb in self._axis_btns.items() if rb.isChecked())
+
+    @property
+    def angle(self) -> float:
+        return self._angle.value()
+
+    @property
+    def pivot(self) -> tuple[float, float, float] | None:
+        """None = the selection centre; else the typed point."""
+        if self._pivot_centroid.isChecked():
+            return None
+        return tuple(s.value() for s in self._pivot_spins)
+
+    @property
+    def copies(self) -> int:
+        return self._copies.value() if self._duplicate.isChecked() else 0

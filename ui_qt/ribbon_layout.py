@@ -82,6 +82,7 @@ def build_ribbon(win) -> RibbonBar:
     mirror.setToolTip("Mirror the selection about a plane")
     mirror.triggered.connect(lambda: win._view._on_mirror(True))
     g.add_small(mirror)
+    g.add_small(a["rotate_selection"])
     g.add_small(a["scale_selection"])
     g = model.add_group("Supports")
     g.add_large(_menu_action(win, "Supports", "support", _supports_menu(win),
