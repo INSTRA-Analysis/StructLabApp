@@ -2608,6 +2608,23 @@ class StructView(QGraphicsView):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, self._fit_now)
 
+    def capture_view(self) -> dict:
+        """The current camera: projection angles, zoom and the scene point at the view centre."""
+        import ui_qt.projection as proj
+        centre = self.mapToScene(self.viewport().rect().center())
+        return {"az": proj.ISO_AZIMUTH, "el": proj.ISO_ELEVATION,
+                "cx": centre.x(), "cy": centre.y(), "scale": self.transform().m11()}
+
+    def restore_view(self, view: dict) -> None:
+        """Return to a camera captured by ``capture_view``."""
+        sc = self.scene()
+        if sc._is_3d_mode():
+            sc.set_view(view["az"], view["el"])
+        self.resetTransform()
+        self.scale(view["scale"], view["scale"])
+        self.centerOn(view["cx"], view["cy"])
+        self._notify_zoom()
+
     def zoom_to_rect(self, rect, min_size: float = 160.0) -> None:
         """Fit ``rect`` (scene units) in the view, never closer than ``min_size`` across."""
         pad = max(80.0, 0.25 * max(rect.width(), rect.height()))

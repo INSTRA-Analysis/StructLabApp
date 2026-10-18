@@ -393,3 +393,71 @@ def test_section_cut_dialog_drives_the_scene_live(qapp):
     dlg.close()                                               # closing restores the full model
     assert sc._section_cut is None
     assert all(it.isVisible() for it in sc._member_items.values())
+
+
+# ── named views ───────────────────────────────────────────────────────────────
+
+def test_named_views_roundtrip_through_the_project_file(qapp, tmp_path):
+    from ui_qt.io import load_model, save_model
+    from ui_qt.model_state import ModelState
+    s = ModelState()
+    s.add_node(0, 0, 0)
+    assert "named_views" not in s.to_dict()                    # empty: file format unchanged
+    s.named_views["Front"] = {"az": 0.0, "el": 0.0, "cx": 12.5, "cy": -40.0, "scale": 1.75}
+    path = tmp_path / "v.slab"
+    save_model(s, path)
+    loaded = load_model(path)
+    assert loaded.named_views == s.named_views
+    s.clear()
+    assert s.named_views == {}
+
+
+def test_capture_and_restore_view_returns_to_the_same_camera(qapp):
+    import ui_qt.projection as proj
+    from ui_qt.canvas import StructView
+    sc, n, ms = _column_scene()
+    sc.model_state.analysis_mode = "3D"
+    view = StructView(sc)
+    view.resize(800, 600)
+    sc.set_view(-30.0, 20.0)
+    view.resetTransform()
+    view.scale(1.6, 1.6)
+    view.centerOn(40.0, -25.0)
+    saved = view.capture_view()
+    assert saved["az"] == -30.0 and saved["el"] == 20.0 and saved["scale"] == pytest.approx(1.6)
+    sc.set_view(10.0, 70.0)                                    # wander off
+    view.resetTransform()
+    view.scale(0.4, 0.4)
+    view.centerOn(-100.0, 100.0)
+    view.restore_view(saved)
+    assert (proj.ISO_AZIMUTH, proj.ISO_ELEVATION) == (-30.0, 20.0)
+    after = view.capture_view()
+    assert after["scale"] == pytest.approx(1.6)
+    assert after["cx"] == pytest.approx(saved["cx"], abs=1.0)   # (centerOn is clamped to the scene rect,
+    assert after["cy"] == pytest.approx(saved["cy"], abs=1.0)   #  so compare with what was captured)
+    sc.set_view(-45.0, 30.0)                                   # leave the module-level default as found
+
+
+def test_window_saves_restores_and_deletes_named_views(qapp, monkeypatch):
+    import ui_qt.projection as proj
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    win = MainWindow()
+    try:
+        win._scene.set_view(-10.0, 25.0)
+        win.save_named_view("Detail")
+        assert "Detail" in win._scene.model_state.named_views and win._is_dirty
+        win._scene.set_view(60.0, 60.0)
+        win.restore_named_view("Detail")
+        assert (proj.ISO_AZIMUTH, proj.ISO_ELEVATION) == (-10.0, 25.0)
+        win._fill_named_views_menu()
+        labels = [a.text() for a in win._named_views_menu.actions()]
+        assert "Save Current View…" in labels and "Detail" in labels
+        win.delete_named_view("Detail")
+        assert win._scene.model_state.named_views == {}
+    finally:
+        win._scene.set_view(-45.0, 30.0)
+        qapp.processEvents()
+        win._is_dirty = False
+        win.close()

@@ -420,6 +420,8 @@ class ModelState:
     members: list[MemberData] = field(default_factory=list)
     load_cases: list[LoadCase] = field(default_factory=list)
     combinations: list[LoadCombination] = field(default_factory=list)
+    # Saved camera positions: name -> {"az", "el", "cx", "cy", "scale"} (scene coordinates).
+    named_views: dict = field(default_factory=dict)
     active_case_id: int = field(default=0)
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
     # "3D" = 6-DOF space model (Z up). "2D" = planar 3-DOF model in the native
@@ -561,6 +563,7 @@ class ModelState:
         self.load_cases.clear()
         self.load_cases.append(LoadCase(id=0, name="Dead load", category="G"))
         self.combinations.clear()
+        self.named_views.clear()
         self.active_case_id = 0
         self.metadata = ProjectMetadata()
         self.mode_3d = True
@@ -615,6 +618,7 @@ class ModelState:
                  "is_auto": c.is_auto}
                 for c in self.combinations
             ],
+            **({"named_views": self.named_views} if self.named_views else {}),
             "analysis_mode": self.analysis_mode,
             "mode_3d": self.mode_3d,
             "_next_node_id": self._next_node_id,
@@ -687,6 +691,7 @@ class ModelState:
                     is_auto=c_data.get("is_auto", False),
                 ))
             s._next_combo_id = d.get("_next_combo_id", len(s.combinations))
+        s.named_views = {str(k): dict(v) for k, v in d.get("named_views", {}).items()}
         s._next_node_id = d.get("_next_node_id", len(s.nodes))
         s._next_member_id = d.get("_next_member_id", len(s.members))
         # Prefer explicit analysis_mode (v4+); else fall back to the legacy

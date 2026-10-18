@@ -552,7 +552,48 @@ class MainWindow(QMainWindow):
         view_menu.addAction(act_groups)
 
         view_menu.addSeparator()
+        self._named_views_menu = view_menu.addMenu("Named Views")
+        self._named_views_menu.aboutToShow.connect(self._fill_named_views_menu)
+        view_menu.addSeparator()
         view_menu.addAction("Reset Panel Layout", self._reset_dock_layout)
+
+    def _fill_named_views_menu(self) -> None:
+        """Rebuild the Named Views submenu: save, jump to, delete."""
+        menu = self._named_views_menu
+        menu.clear()
+        menu.addAction("Save Current View…", self._save_named_view)
+        views = self._scene.model_state.named_views
+        if views:
+            menu.addSeparator()
+            for name in views:
+                menu.addAction(name, lambda _checked=False, n=name: self.restore_named_view(n))
+            menu.addSeparator()
+            delete = menu.addMenu("Delete")
+            for name in views:
+                delete.addAction(name, lambda _checked=False, n=name: self.delete_named_view(n))
+
+    def _save_named_view(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Save View", "Name for this view:")
+        if ok and name.strip():
+            self.save_named_view(name.strip())
+
+    def save_named_view(self, name: str) -> None:
+        """Store the current camera under ``name`` (saved with the project)."""
+        self._scene.model_state.named_views[name] = self._view.capture_view()
+        self._scene.model_changed.emit()                  # marks the project as modified
+        self._sb.showMessage(f"View “{name}” saved.")
+
+    def restore_named_view(self, name: str) -> None:
+        view = self._scene.model_state.named_views.get(name)
+        if view is not None:
+            self._view.restore_view(view)
+            self._on_combo_view_changed(self._combo_view.currentIndex())
+            self._sb.showMessage(f"View “{name}”.")
+
+    def delete_named_view(self, name: str) -> None:
+        if self._scene.model_state.named_views.pop(name, None) is not None:
+            self._scene.model_changed.emit()
 
     def _reset_dock_layout(self) -> None:
         """Return both panels to their default docked positions."""
