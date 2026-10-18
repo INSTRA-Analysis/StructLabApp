@@ -2128,8 +2128,10 @@ class MainWindow(QMainWindow):
         rect = self._export_scene_rect()
         if rect is None:
             return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export PNG", "", "PNG Image (*.png)"
+        transparent_filter = "PNG - transparent background (*.png)"
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export PNG", "",
+            f"{transparent_filter};;PNG - dark background (*.png)",
         )
         if not path:
             return
@@ -2139,7 +2141,7 @@ class MainWindow(QMainWindow):
         scale = 2  # 2× for sharp output on retina / high-DPI screens
         img = QImage(int(rect.width() * scale), int(rect.height() * scale),
                      QImage.Format.Format_ARGB32)
-        img.fill(QColor("#1a1a1e"))
+        img.fill(Qt.GlobalColor.transparent if chosen == transparent_filter else QColor("#1a1a1e"))
 
         painter = QPainter(img)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
