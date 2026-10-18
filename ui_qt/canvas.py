@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsView,
     QGraphicsLineItem, QMenu, QInputDialog,
 )
-from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal, QRect, QPoint
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QTransform, QLinearGradient, QPixmap, QPainterPath
+from PyQt6.QtCore import Qt, QPointF, QLineF, QTimer, pyqtSignal, QRect, QRectF, QPoint
+from PyQt6.QtGui import QPen, QBrush, QColor, QFontMetrics, QPainter, QTransform, QLinearGradient, QPixmap, QPainterPath
 from PyQt6.QtCore import QRectF as _QRectF
 
 from ui_qt.model_state import (
@@ -2307,15 +2307,6 @@ class StructView(QGraphicsView):
         if not scene._hide_welcome and not scene.model_state.nodes:
             return  # nothing to overlay in the empty welcome state
 
-        # Colour legends belong to the whole view, not to the repainted area: a hover only
-        # repaints a small rectangle, and drawing relative to THAT put the legend next to the
-        # pointer. Use the full visible scene rectangle instead (painter is still in scene units).
-        visible = self.mapToScene(self.viewport().rect()).boundingRect()
-        if scene._util_colour_active:
-            self._draw_util_legend(painter, visible)
-        elif scene._colour_by_group:
-            self._draw_group_legend(painter, visible)
-
         painter.save()
         painter.resetTransform()          # switch to viewport pixel coordinates
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2377,12 +2368,11 @@ class StructView(QGraphicsView):
             painter.setFont(z_font)
 
         # ── 4. Branding badge (bottom-right corner) ───────────────────────────
-        margin = 10.0;  pad_x = 7.0;  pad_y = 5.0
+        pad_x = 7.0;  pad_y = 5.0
         logo_h = 26.0;  line_h = 13.0
-        box_h  = logo_h + 2 * pad_y
-        box_w  = 148.0
-        x0 = w - margin - box_w
-        y0 = h - margin - box_h
+        badge = self._branding_rect(w, h)
+        box_h, box_w = badge.height(), badge.width()
+        x0, y0 = badge.left(), badge.top()
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor(18, 18, 22, 160)))
@@ -2411,6 +2401,15 @@ class StructView(QGraphicsView):
         ver_pen = QPen(QColor(130, 130, 130));  ver_pen.setCosmetic(True)
         painter.setPen(ver_pen)
         painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), VERSION_LABEL)
+
+        # ── 4b. Colour legend, fixed in screen pixels just above the badge ──────
+        # (whole-view anchored: a hover repaint of a small area must not move it,
+        #  and the zoom must not scale its text)
+        legend_right, legend_bottom = self._legend_anchor(w, h)
+        if scene._util_colour_active:
+            self._draw_util_legend(painter, legend_right, legend_bottom)
+        elif scene._colour_by_group:
+            self._draw_group_legend(painter, legend_right, legend_bottom)
 
         # ── 5. Selection shortcut HUD (bottom-left, when items are selected) ────
         from ui_qt.canvas_items import NodeItem, MemberItem
@@ -2559,95 +2558,93 @@ class StructView(QGraphicsView):
         lbl_y = rect.bottom() - 14 / scale
         painter.drawText(QPointF(lbl_x, lbl_y), status)
 
-    def _draw_util_legend(self, painter: QPainter, rect) -> None:
-        """Draw a utilization colour bar legend in the bottom-right corner."""
-        from PyQt6.QtCore import QRectF as _QRF
-        scale = self.transform().m11()
+    # ── colour legends (viewport pixels, stacked above the branding badge) ─────
 
-        bar_w = 120 / scale
-        bar_h = 14 / scale
-        margin = 12 / scale
-        x0 = rect.right()  - margin - bar_w
-        y0 = rect.bottom() - margin - bar_h - 22 / scale
+    _LEGEND_MARGIN = 10.0       # px from the viewport edge (same as the branding badge)
+    _LEGEND_GAP = 8.0           # px between the legend and the badge below it
 
-        grad = QLinearGradient(x0, 0, x0 + bar_w, 0)
-        grad.setColorAt(0.00, QColor(0,   200, 80))
-        grad.setColorAt(0.50, QColor(230, 210,  0))
-        grad.setColorAt(1.00, QColor(230,  40,  0))
+    def _branding_rect(self, w: float, h: float) -> QRectF:
+        """Where the bottom-right branding badge sits, in viewport pixels."""
+        box_w, box_h = 148.0, 26.0 + 2 * 5.0
+        return QRectF(w - self._LEGEND_MARGIN - box_w, h - self._LEGEND_MARGIN - box_h, box_w, box_h)
 
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.fillRect(_QRF(x0, y0, bar_w, bar_h), QBrush(grad))
+    def _legend_anchor(self, w: float, h: float) -> tuple[float, float]:
+        """(right, bottom) for a legend: right-aligned with the badge, just above it."""
+        badge = self._branding_rect(w, h)
+        return badge.right(), badge.top() - self._LEGEND_GAP
 
-        border_pen = QPen(QColor(180, 180, 180, 200))
-        border_pen.setCosmetic(True)
-        painter.setPen(border_pen)
-        painter.drawRect(_QRF(x0, y0, bar_w, bar_h))
-
+    @staticmethod
+    def _legend_font(painter: QPainter, size: int = 8, bold: bool = False):
         font = painter.font()
-        font.setPointSize(7)
+        font.setPointSize(size)
+        font.setBold(bold)
         painter.setFont(font)
-        lbl_pen = QPen(QColor(220, 220, 220))
-        lbl_pen.setCosmetic(True)
-        painter.setPen(lbl_pen)
-        tick_y = y0 + bar_h + 9 / scale
-        for label, frac in [("0%", 0.0), ("50%", 0.5), ("100%", 1.0)]:
-            tx = x0 + frac * bar_w
-            painter.drawLine(QPointF(tx, y0 + bar_h),
-                             QPointF(tx, y0 + bar_h + 4 / scale))
-            painter.drawText(QPointF(tx - len(label) * 2.5 / scale, tick_y), label)
+        return QFontMetrics(font)
 
-        title_pen = QPen(QColor(200, 200, 200))
-        title_pen.setCosmetic(True)
-        painter.setPen(title_pen)
-        painter.drawText(QPointF(x0, y0 - 5 / scale), "Utilization η  (N/Npl + M/Mpl)")
-        painter.restore()
+    def group_legend_rect(self, painter: QPainter, groups: list[str], right: float, bottom: float) -> QRectF:
+        """Box of the Member groups legend in viewport pixels (independent of the zoom)."""
+        fm = self._legend_font(painter)
+        row_h = max(18.0, fm.height() + 4.0)
+        text_w = max([fm.horizontalAdvance("Member groups")] +
+                     [12 + 6 + fm.horizontalAdvance(g) for g in groups])
+        box_w = text_w + 16.0
+        box_h = 22.0 + row_h * len(groups) + 4.0
+        return QRectF(right - box_w, bottom - box_h, box_w, box_h)
 
-    def _draw_group_legend(self, painter: QPainter, rect) -> None:
-        """Draw a swatch legend of member groups in the bottom-right corner."""
-        from PyQt6.QtCore import QRectF as _QRF
+    def _draw_group_legend(self, painter: QPainter, right: float, bottom: float) -> QRectF | None:
+        """Swatch legend of member groups; viewport pixels, bottom-right corner at (right, bottom)."""
         groups = self.scene().active_groups()
         if not groups:
-            return
-        scale = self.transform().m11()
-
-        sw = 12 / scale          # swatch size
-        gap = 6 / scale          # swatch → label gap
-        row_h = 18 / scale
-        margin = 12 / scale
-        font_px = 8
-        # widen the box to the longest label so text never clips
-        label_w = max(len(g) for g in groups) * 6.5 / scale
-        box_w = sw + gap + label_w + 16 / scale
-        box_h = row_h * len(groups) + 22 / scale
-        x0 = rect.right()  - margin - box_w
-        y0 = rect.bottom() - margin - box_h
-
+            return None
+        box = self.group_legend_rect(painter, groups, right, bottom)
+        fm = self._legend_font(painter)
+        row_h = max(18.0, fm.height() + 4.0)
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        panel = QColor(30, 30, 36, 210)
         painter.setPen(QPen(QColor(180, 180, 180, 200)))
-        painter.setBrush(QBrush(panel))
-        painter.drawRect(_QRF(x0, y0, box_w, box_h))
-
-        font = painter.font()
-        font.setPointSize(font_px)
-        painter.setFont(font)
-        title_pen = QPen(QColor(210, 210, 210)); title_pen.setCosmetic(True)
-        painter.setPen(title_pen)
-        painter.drawText(QPointF(x0 + 8 / scale, y0 + 14 / scale), "Member groups")
-
-        sx = x0 + 8 / scale
+        painter.setBrush(QBrush(QColor(30, 30, 36, 225)))
+        painter.drawRoundedRect(box, 4.0, 4.0)
+        painter.setPen(QPen(QColor(210, 210, 210)))
+        painter.drawText(QPointF(box.left() + 8, box.top() + 15), "Member groups")
+        sx = box.left() + 8
         for i, g in enumerate(groups):
-            ry = y0 + 20 / scale + i * row_h
+            ry = box.top() + 22 + i * row_h
             painter.setPen(QPen(QColor(120, 120, 120, 200)))
             painter.setBrush(QBrush(group_colour(g)))
-            painter.drawRect(_QRF(sx, ry, sw, sw))
-            lbl_pen = QPen(QColor(225, 225, 225)); lbl_pen.setCosmetic(True)
-            painter.setPen(lbl_pen)
-            painter.drawText(QPointF(sx + sw + gap, ry + sw - 1 / scale), g)
+            painter.drawRect(QRectF(sx, ry + (row_h - 12) / 2 - 2, 12, 12))
+            painter.setPen(QPen(QColor(225, 225, 225)))
+            painter.drawText(QPointF(sx + 18, ry + row_h / 2 + fm.ascent() / 2 - 3), g)
         painter.restore()
+        return box
+
+    def _draw_util_legend(self, painter: QPainter, right: float, bottom: float) -> QRectF:
+        """Utilisation colour bar; viewport pixels, bottom-right corner at (right, bottom)."""
+        title = "Utilization η  (N/Npl + M/Mpl)"
+        fm = self._legend_font(painter, 7)
+        bar_w = max(160.0, fm.horizontalAdvance(title) + 0.0)
+        bar_h = 14.0
+        box = QRectF(right - bar_w - 16, bottom - (bar_h + 44), bar_w + 16, bar_h + 44)
+        x0, y0 = box.left() + 8, box.top() + 20
+
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(30, 30, 36, 225)))
+        painter.drawRoundedRect(box, 4.0, 4.0)
+        grad = QLinearGradient(x0, 0, x0 + bar_w, 0)
+        grad.setColorAt(0.00, QColor(0, 200, 80))
+        grad.setColorAt(0.50, QColor(230, 210, 0))
+        grad.setColorAt(1.00, QColor(230, 40, 0))
+        painter.fillRect(QRectF(x0, y0, bar_w, bar_h), QBrush(grad))
+        painter.setPen(QPen(QColor(180, 180, 180, 200)))
+        painter.drawRect(QRectF(x0, y0, bar_w, bar_h))
+        painter.setPen(QPen(QColor(220, 220, 220)))
+        for label, frac in (("0%", 0.0), ("50%", 0.5), ("100%", 1.0)):
+            tx = x0 + frac * bar_w
+            painter.drawLine(QPointF(tx, y0 + bar_h), QPointF(tx, y0 + bar_h + 4))
+            painter.drawText(QPointF(tx - fm.horizontalAdvance(label) / 2, y0 + bar_h + 6 + fm.ascent()), label)
+        painter.setPen(QPen(QColor(200, 200, 200)))
+        painter.drawText(QPointF(x0, y0 - 6), title)
+        painter.restore()
+        return box
 
     def _draw_flat_grid(self, painter: QPainter, rect) -> None:
         """Standard rectangular 2D grid."""

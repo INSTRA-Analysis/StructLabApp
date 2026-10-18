@@ -544,27 +544,66 @@ def test_window_animation_needs_a_solve_and_restores_the_static_overlays(qapp, m
 
 # ── colour legends are anchored to the view, not to the repainted area ───────
 
-def test_group_legend_uses_the_whole_view_even_when_only_a_small_area_repaints(qapp):
-    from PyQt6.QtCore import QRectF
-    from PyQt6.QtGui import QImage, QPainter
+def _legend_view(qapp, size=(700, 500)):
     from ui_qt.canvas import StructView
     sc, ms = _grouped_scene()
     sc._colour_by_group = True
     view = StructView(sc)
-    view.resize(700, 500)
+    view.resize(*size)
+    return sc, view
+
+
+def test_group_legend_sits_above_the_logo_whatever_area_repaints(qapp):
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QImage, QPainter
+    sc, view = _legend_view(qapp)
     seen = []
-    view._draw_group_legend = lambda painter, rect: seen.append(QRectF(rect))
+    view._draw_group_legend = lambda painter, right, bottom: seen.append((right, bottom))
     image = QImage(700, 500, QImage.Format.Format_ARGB32)
     painter = QPainter(image)
-    small = QRectF(100, 100, 40, 30)                       # what a hover repaint exposes
-    view.drawBackground(painter, small)
-    assert seen == []                                      # the background no longer draws legends
-    view.drawForeground(painter, small)
+    view.drawBackground(painter, QRectF(100, 100, 40, 30))
+    assert seen == []                                      # the background never draws legends
+    view.drawForeground(painter, QRectF(100, 100, 40, 30)) # a small hover repaint
     painter.end()
-    assert len(seen) == 1
-    whole = view.mapToScene(view.viewport().rect()).boundingRect()
-    assert seen[0].width() == pytest.approx(whole.width()) and seen[0].height() == pytest.approx(whole.height())
-    assert seen[0].width() > small.width() * 5
+    w, h = view.viewport().width(), view.viewport().height()
+    badge = view._branding_rect(w, h)
+    assert seen == [(badge.right(), badge.top() - view._LEGEND_GAP)]
+
+
+def test_group_legend_does_not_overlap_the_logo_and_ignores_the_zoom(qapp):
+    from PyQt6.QtGui import QImage, QPainter
+    sc, view = _legend_view(qapp)
+    image = QImage(700, 500, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    w, h = view.viewport().width(), view.viewport().height()
+    right, bottom = view._legend_anchor(w, h)
+    groups = sc.active_groups()
+    before = view.group_legend_rect(painter, groups, right, bottom)
+    view.scale(4.0, 4.0)                                   # zoom in a lot
+    after = view.group_legend_rect(painter, groups, right, bottom)
+    painter.end()
+    assert (after.width(), after.height()) == (before.width(), before.height())
+    assert before.bottom() <= view._branding_rect(w, h).top()
+    assert before.right() <= w and before.width() > 60     # sized to its text, inside the view
+
+
+def test_legends_render_in_screen_pixels(qapp):
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QImage, QPainter
+    sc, view = _legend_view(qapp)
+    image = QImage(700, 500, QImage.Format.Format_ARGB32)
+    for zoom in (1.0, 5.0):
+        view.resetTransform()
+        view.scale(zoom, zoom)
+        painter = QPainter(image)
+        box = view._draw_group_legend(painter, 690.0, 450.0)
+        painter.end()
+        assert box.bottom() == 450.0 and box.right() == 690.0
+    sc._util_colour_active = True
+    painter = QPainter(image)
+    util = view._draw_util_legend(painter, 690.0, 450.0)
+    painter.end()
+    assert util.bottom() == 450.0 and util.right() == 690.0
 
 
 def test_show_loads_toggle_runs_without_error(qapp, monkeypatch):
