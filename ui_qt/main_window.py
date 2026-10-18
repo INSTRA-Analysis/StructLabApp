@@ -375,9 +375,13 @@ class MainWindow(QMainWindow):
                            centroid=self._scene.selection_centroid(nodes))
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
-        if self._scene.rotate_selection(dlg.axis, dlg.angle, dlg.pivot, dlg.copies):
-            what = f"{dlg.copies} rotated cop{'y' if dlg.copies == 1 else 'ies'}" if dlg.copies else "Rotated"
-            self._sb.showMessage(f"{what}: {dlg.angle:g}° about {dlg.axis}.")
+        result = self._scene.rotate_selection(dlg.axis, dlg.angle, dlg.pivot, dlg.copies)
+        if not result:
+            return
+        text = result.message(dlg.angle, dlg.axis, dlg.copies)
+        self._sb.showMessage(text)
+        if result.needs_attention:
+            QMessageBox.information(self, "Rotate", text)
 
     def _on_scale_selection(self) -> None:
         """Scale the selected nodes about their centroid (precise dialog path)."""

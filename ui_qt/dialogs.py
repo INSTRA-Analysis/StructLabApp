@@ -484,6 +484,11 @@ class RotateDialog(QDialog):
         pv.addLayout(row)
         self._pivot_point.toggled.connect(lambda on: [s.setEnabled(on) for s in self._pivot_spins])
         layout.addWidget(pivot_box)
+        hint = QLabel("To copy around a tower or any symmetric structure, use Point on its axis "
+                      "(e.g. 0, 0, 0). Copies that land exactly on existing members are skipped.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888888;")
+        layout.addWidget(hint)
 
         self._duplicate = QCheckBox("Duplicate — keep the original and add rotated copies")
         layout.addWidget(self._duplicate)

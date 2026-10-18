@@ -175,3 +175,41 @@ def test_window_command_runs_the_rotation(qapp, monkeypatch):
         qapp.processEvents()
         win._is_dirty = False
         win.close()
+
+
+# ── rotation feedback on the real tower (four-fold symmetric about its axis) ──
+
+def _tower_with(member_ids):
+    from pathlib import Path
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.io import load_model
+    sc = StructCanvas()
+    sc.load_state(load_model(Path(__file__).resolve().parents[1] / "examples" / "l8c_d30_tower_3d.slab"))
+    for mid in member_ids:
+        sc._member_items[mid].setSelected(True)
+    return sc
+
+
+def test_copy_onto_an_existing_symmetric_leg_is_skipped_and_reported(qapp):
+    sc = _tower_with([108])                                  # front corner leg
+    n0, m0 = len(sc.model_state.nodes), len(sc.model_state.members)
+    result = sc.rotate_selection("Z", 90.0, (0, 0, 0), copies=3)
+    assert (len(sc.model_state.nodes), len(sc.model_state.members)) == (n0, m0)
+    assert result.members_created == 0 and result.members_skipped == 3 and result.nodes_reused == 6
+    assert result.needs_attention
+    assert "skipped" in result.message(90.0, "Z", 3) and "0 new member" in result.message(90.0, "Z", 3)
+
+
+def test_in_place_rotation_onto_existing_geometry_is_reported(qapp):
+    sc = _tower_with([108])
+    result = sc.rotate_selection("Z", 90.0, (0, 0, 0), copies=0)
+    assert result.coincident_nodes == 2 and result.duplicate_members >= 1 and result.needs_attention
+    assert "Check Duplicates" in result.message(90.0, "Z", 0)
+
+
+def test_a_genuinely_new_copy_needs_no_attention(qapp):
+    sc = _tower_with([108])
+    result = sc.rotate_selection("Z", 45.0, (0, 0, 0), copies=1)
+    assert (result.members_created, result.nodes_created, result.members_skipped) == (1, 2, 0)
+    assert not result.needs_attention
+    assert result.message(45.0, "Z", 1).startswith("1 rotated copy at 45° about Z: 1 new member(s), 2 new node(s).")

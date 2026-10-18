@@ -1957,25 +1957,28 @@ class StructCanvas(QGraphicsScene):
 
     def rotate_selection(self, axis: str, angle_deg: float,
                          pivot: tuple[float, float, float] | None = None,
-                         copies: int = 0) -> bool:
-        """Rotate the selection about a global axis through ``pivot``.
+                         copies: int = 0):
+        """Rotate the selection about a global axis through ``pivot``; returns a RotateResult.
 
         ``copies == 0`` moves the selected nodes (and the end nodes of selected members) in
         place; members follow, and members with both ends in the selection keep their section
         orientation. ``copies == n`` leaves the original and adds n rotated copies at angle,
         2·angle, … n·angle (a polar array); copied nodes keep their supports, copied members
         keep every property (section, material, group, design data). Loads are not copied.
-        Coincident nodes are reused, so copies that meet join up. Returns False if nothing is
-        selected. One undo step.
+        Coincident nodes are reused, so copies that meet join up, and a copy that lands
+        exactly on an existing member is skipped (counted in ``members_skipped``). The result
+        is falsy if nothing is selected. One undo step.
         """
         from dataclasses import fields
-        from ui_qt.transform import rotated_beta, rotate_point, rotation_matrix
+        from ui_qt.transform import RotateResult, rotated_beta, rotate_point, rotation_matrix
 
         ms = self.model_state
         nodes = self.selected_node_set()
         sel_members = [it.member for it in self.selectedItems() if isinstance(it, MemberItem)]
+        result = RotateResult()
         if not nodes:
-            return False
+            result.done = False
+            return result
         if pivot is None:
             pivot = self.selection_centroid(nodes)
         coords = {nd.id: (nd.x, nd.y, nd.z) for nd in nodes}
@@ -2007,8 +2010,10 @@ class StructCanvas(QGraphicsScene):
                         existing = ms.node_at(*q, tol=1e-4)
                         if existing is not None:
                             id_map[src.id] = existing.id
+                            result.nodes_reused += 1
                             continue
                         new = ms.add_node(*q)
+                        result.nodes_created += 1
                         for name in node_fields:
                             setattr(new, name, getattr(src, name))
                         self._add_node_item(new)
@@ -2018,10 +2023,12 @@ class StructCanvas(QGraphicsScene):
                         if ni_id is None or nj_id is None or ni_id == nj_id:
                             continue
                         if any({x.node_i, x.node_j} == {ni_id, nj_id} for x in ms.members):
-                            continue                     # the copy lands on an existing member
+                            result.members_skipped += 1  # the copy lands on an existing member
+                            continue
                         nm = ms.add_member(ni_id, nj_id)
                         if nm is None:
                             continue
+                        result.members_created += 1
                         for name in member_fields:
                             setattr(nm, name, getattr(m, name))
                         ni, nj = ms.get_node(ni_id), ms.get_node(nj_id)
@@ -2030,11 +2037,17 @@ class StructCanvas(QGraphicsScene):
                         self._add_member_item(nm)
         finally:
             self._suppress_changed = False
+        if copies <= 0:
+            from ui_qt.model_checks import check_duplicates
+            report = check_duplicates(ms)
+            moved_members = {m.id for m in sel_members}
+            result.coincident_nodes = sum(1 for c in report.node_clusters if set(c) & set(coords))
+            result.duplicate_members = sum(1 for g in report.member_groups if set(g) & moved_members)
         self.update_depth_order()
         self._fit_scene_rect()
         self.invalidate(self.sceneRect())
         self.model_changed.emit()
-        return True
+        return result
 
     def mirror_selection(self, plane: str,
                          offset: float,

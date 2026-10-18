@@ -13,10 +13,47 @@ re-derived for the section to turn with the structure rather than snap to the ne
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
 AXES = ("X", "Y", "Z")
+
+
+@dataclass
+class RotateResult:
+    """What a rotation actually did, so the UI can say so (truthy when something was selected)."""
+    done: bool = True
+    nodes_created: int = 0
+    members_created: int = 0
+    members_skipped: int = 0     # copies that landed exactly on an existing member
+    nodes_reused: int = 0        # copied nodes that landed on an existing node
+    coincident_nodes: int = 0    # in place: moved nodes now lying on other nodes
+    duplicate_members: int = 0   # in place: moved members now lying on other members
+
+    def __bool__(self) -> bool:
+        return self.done
+
+    def message(self, angle: float, axis: str, copies: int) -> str:
+        if copies:
+            text = (f"{copies} rotated cop{'y' if copies == 1 else 'ies'} at {angle:g}° about {axis}: "
+                    f"{self.members_created} new member(s), {self.nodes_created} new node(s).")
+            if self.members_skipped:
+                text += (f" {self.members_skipped} member cop{'y' if self.members_skipped == 1 else 'ies'} "
+                         "skipped — they landed exactly on existing members.")
+            return text
+        text = f"Rotated {angle:g}° about {axis}."
+        if self.coincident_nodes or self.duplicate_members:
+            text += (f" The rotated selection now lies on existing geometry: {self.coincident_nodes} "
+                     f"coincident node(s), {self.duplicate_members} duplicate member(s) — use "
+                     "Check Duplicates to merge them, or undo.")
+        return text
+
+    @property
+    def needs_attention(self) -> bool:
+        """Nothing new was created by a copy, or an in-place move landed on existing geometry."""
+        return (self.members_skipped > 0 and self.members_created == 0 and self.nodes_created == 0) \
+            or self.coincident_nodes > 0 or self.duplicate_members > 0
 
 
 def rotation_matrix(axis: str, angle_deg: float) -> np.ndarray:
