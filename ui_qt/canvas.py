@@ -1945,6 +1945,16 @@ class StructCanvas(QGraphicsScene):
         self._suppress_changed = False
         self.model_changed.emit()
 
+    def merge_duplicates(self, tol: float):
+        """Merge coincident nodes and remove duplicate / zero-length members (one undo step).
+        Returns the model_checks.MergeSummary."""
+        from ui_qt.model_checks import merge_duplicates
+        self.save_snapshot()
+        summary = merge_duplicates(self.model_state, tol)
+        self.redraw()
+        self.model_changed.emit()
+        return summary
+
     def rotate_selection(self, axis: str, angle_deg: float,
                          pivot: tuple[float, float, float] | None = None,
                          copies: int = 0) -> bool:

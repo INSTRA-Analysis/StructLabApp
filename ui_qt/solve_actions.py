@@ -90,6 +90,23 @@ def validate_model_issues(state) -> list[Issue]:
                     nodes=[m.node_i, m.node_j], members=[m.id],
                 )
 
+    # Coincident nodes / duplicate members (e.g. left by rotate, mirror or paste)
+    from ui_qt.model_checks import DEFAULT_TOL, check_duplicates
+    dup = check_duplicates(state, DEFAULT_TOL)
+    if dup.node_clusters:
+        warnings.append(
+            f"{dup.extra_nodes} node(s) coincide with another node (closer than "
+            f"{DEFAULT_TOL * 1e3:g} mm) without being the same node — the structure is not "
+            "connected there.\nUse Check Duplicates (Model tab, or Tools menu) to merge them.",
+            nodes=dup.node_ids(),
+        )
+    if dup.member_groups:
+        warnings.append(
+            f"{dup.extra_members} duplicate member(s) join the same two points as another "
+            "member — their stiffness is counted twice.\nUse Check Duplicates (Model tab, or Tools menu) to remove them.",
+            members=[m for g in dup.member_groups for m in g],
+        )
+
     # No loads in the active case
     lc = state.active_case
     has_node_loads = any(not lc.get_node_load(n.id).is_zero() for n in state.nodes)

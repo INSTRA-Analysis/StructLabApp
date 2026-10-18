@@ -67,6 +67,8 @@ COMMANDS: tuple[Command, ...] = (
     Command("select_all", "Select All", "_on_select_all", "square-dashed-mouse-pointer", "Ctrl+A"),
     Command("deselect_all", "Deselect All", "_on_deselect_all", "", "Ctrl+Shift+A"),
     Command("invert_selection", "Invert Selection", "_on_invert_selection", "", "Ctrl+I"),
+    Command("check_duplicates", "Check Duplicates…", "_on_check_duplicates", "scan-search", "",
+            "Find coincident nodes and duplicate or zero-length members, then select or merge them"),
     Command("rotate_selection", "Rotate…", "_on_rotate_selection", "rotate-3d", "",
             "Rotate the selection by an exact angle about X, Y or Z — optionally as copies"),
     Command("scale_selection", "Scale Selection…", "_on_scale_selection", "scaling",

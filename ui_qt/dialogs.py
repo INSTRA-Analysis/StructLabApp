@@ -13,7 +13,7 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHeaderView,
     QHBoxLayout, QLabel, QLineEdit, QComboBox, QDoubleSpinBox,
-    QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QPushButton, QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QTextEdit, QVBoxLayout,
 )
 
@@ -522,3 +522,89 @@ class RotateDialog(QDialog):
     @property
     def copies(self) -> int:
         return self._copies.value() if self._duplicate.isChecked() else 0
+
+
+class DuplicatesDialog(QDialog):
+    """Check the model for coincident nodes, duplicate and zero-length members; select or fix them."""
+
+    def __init__(self, scene, parent=None) -> None:
+        super().__init__(parent)
+        from ui_qt.model_checks import DEFAULT_TOL
+        self.setWindowTitle("Check Duplicates")
+        self.setMinimumWidth(420)
+        self._scene = scene
+        self.report = None
+        self.summary = None
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self._tol = QDoubleSpinBox()
+        self._tol.setRange(0.001, 1000.0)
+        self._tol.setDecimals(3)
+        self._tol.setSuffix(" mm")
+        self._tol.setValue(DEFAULT_TOL * 1e3)
+        self._tol.setToolTip("Nodes closer than this are treated as the same point")
+        self._tol.valueChanged.connect(lambda _v: self.run_check())
+        form.addRow("Tolerance:", self._tol)
+        layout.addLayout(form)
+
+        self._result = QLabel("")
+        self._result.setWordWrap(True)
+        self._result.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(self._result)
+
+        row = QHBoxLayout()
+        self._btn_select = QPushButton("Select && Zoom")
+        self._btn_select.setToolTip("Select the coincident nodes and duplicate members on the canvas")
+        self._btn_select.clicked.connect(self.select_found)
+        self._btn_fix = QPushButton("Merge && Remove")
+        self._btn_fix.setToolTip("Merge coincident nodes and remove duplicate / zero-length members (undoable)")
+        self._btn_fix.clicked.connect(self.fix)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        row.addWidget(self._btn_select)
+        row.addWidget(self._btn_fix)
+        row.addStretch()
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.run_check()
+
+    @property
+    def tolerance(self) -> float:
+        return self._tol.value() / 1e3
+
+    def run_check(self) -> None:
+        from ui_qt.model_checks import check_duplicates
+        self.report = r = check_duplicates(self._scene.model_state, self.tolerance)
+        if r.is_clean:
+            self._result.setText("<b style='color:#2ecc71'>No duplicates found.</b><br>"
+                                 f"{len(self._scene.model_state.nodes)} nodes and "
+                                 f"{len(self._scene.model_state.members)} members checked.")
+        else:
+            lines = []
+            if r.node_clusters:
+                lines.append(f"<b>{r.extra_nodes}</b> coincident node(s) in {len(r.node_clusters)} location(s)")
+            if r.member_groups:
+                lines.append(f"<b>{r.extra_members}</b> duplicate member(s) in {len(r.member_groups)} location(s)")
+            if r.zero_length:
+                lines.append(f"<b>{len(r.zero_length)}</b> zero-length member(s)")
+            self._result.setText("<br>".join(lines))
+        self._btn_select.setEnabled(not r.is_clean)
+        self._btn_fix.setEnabled(not r.is_clean)
+
+    def select_found(self) -> None:
+        if self.report is not None:
+            self._scene.focus_on(self.report.node_ids(), self.report.member_ids())
+
+    def fix(self) -> None:
+        self.summary = s = self._scene.merge_duplicates(self.tolerance)
+        self.run_check()
+        notes = [f"Merged {s.nodes_merged} node(s), removed {s.members_removed} duplicate and "
+                 f"{s.zero_length_removed} zero-length member(s)."]
+        if s.kept_reversed_with_loads:
+            notes.append("Kept (reversed duplicates carrying loads — review by hand): members "
+                         + ", ".join(map(str, s.kept_reversed_with_loads)))
+        if s.support_conflicts:
+            notes.append("Different supports met at node(s) "
+                         + ", ".join(map(str, s.support_conflicts)) + " — check the support kept.")
+        self._result.setText(self._result.text() + "<br><br>" + "<br>".join(notes))

@@ -360,6 +360,10 @@ class MainWindow(QMainWindow):
             menu.addAction(action_label,
                            lambda *args, mids=member_ids: self._on_select_by_member_ids(mids))
 
+    def _on_check_duplicates(self) -> None:
+        from ui_qt.dialogs import DuplicatesDialog
+        DuplicatesDialog(self._scene, self).exec()
+
     def _on_rotate_selection(self) -> None:
         """Rotate the selection by an exact angle, optionally keeping the original (copies)."""
         from ui_qt.dialogs import RotateDialog
@@ -456,6 +460,8 @@ class MainWindow(QMainWindow):
         tools_menu = mb.addMenu("Tools")
         for key in ("show_loads", "colour_group", "thickness", "animate", "section_cut"):
             tools_menu.addAction(a[key])
+        tools_menu.addSeparator()
+        tools_menu.addAction(a["check_duplicates"])
         tools_menu.addSeparator()
         tools_menu.addAction(a["console"])
 
