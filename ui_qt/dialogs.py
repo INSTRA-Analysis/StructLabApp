@@ -6,6 +6,8 @@ No dependency on MainWindow internals.
 """
 from __future__ import annotations
 
+from ui_qt.version import VERSION_LABEL
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
@@ -126,7 +128,7 @@ def show_about(parent) -> None:
     title.setStyleSheet("color:#00ACC1;")
     layout.addWidget(title)
 
-    layout.addWidget(_lbl("V1.2", "color:#888; font-size:11px;"))
+    layout.addWidget(_lbl(VERSION_LABEL, "color:#888; font-size:11px;"))
 
     line = QLabel(); line.setFixedHeight(1)
     line.setStyleSheet("background:#2a2a34;")

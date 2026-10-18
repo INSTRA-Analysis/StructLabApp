@@ -5,6 +5,8 @@ NodeItem and MemberItem visual classes live in canvas_items.py.
 
 from __future__ import annotations
 
+from ui_qt.version import VERSION_LABEL
+
 import math
 from enum import Enum, auto
 
@@ -2198,7 +2200,7 @@ class StructView(QGraphicsView):
         painter.setFont(font)
         ver_pen = QPen(QColor(130, 130, 130));  ver_pen.setCosmetic(True)
         painter.setPen(ver_pen)
-        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), "V 1.2")
+        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 1.90), VERSION_LABEL)
 
         # ── 5. Selection shortcut HUD (bottom-left, when items are selected) ────
         from ui_qt.canvas_items import NodeItem, MemberItem

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ui_qt.version import VERSION_LABEL
+
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -2298,7 +2300,7 @@ class BrandingFooter(QWidget):
         name_lbl = QLabel("StructLab")
         name_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #d0d0d0;")
 
-        ver_lbl = QLabel("V 1.2")
+        ver_lbl = QLabel(VERSION_LABEL)
         ver_lbl.setStyleSheet("font-size: 10px; color: #787878;")
 
         copy_lbl = QLabel("© 2025 INSTRA")

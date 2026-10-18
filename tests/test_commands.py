@@ -100,3 +100,9 @@ def test_interface_preference_reads_the_environment_override(monkeypatch):
     assert MainWindow._interface_preference() == "classic"
     monkeypatch.setenv("STRUCTLAB_UI", "ribbon")
     assert MainWindow._interface_preference() == "ribbon"
+
+
+def test_version_is_shown_consistently(win):
+    from ui_qt.version import APP_VERSION, VERSION_LABEL
+    assert APP_VERSION == "2.0" and VERSION_LABEL == "V2.0"
+    assert "StructLab V2.0" in win.windowTitle()
