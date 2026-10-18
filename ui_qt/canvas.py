@@ -137,6 +137,7 @@ class StructCanvas(QGraphicsScene):
 
         # ── groups hidden from the Groups panel (layer-style visibility) ──────
         self._hidden_groups: set[str] = set()
+        self._section_cut = None                  # a section_cut.SectionCut, or None
 
         # The main window sets this to a callable returning its current solve cache (or None),
         # so tooltips can show results without the canvas knowing about the window.
@@ -1580,6 +1581,16 @@ class StructCanvas(QGraphicsScene):
         (self._hidden_groups.add if hidden else self._hidden_groups.discard)(group)
         self._apply_group_visibility()
 
+    def set_section_cut(self, cut) -> None:
+        """Hide everything on the removed side of ``cut`` (a section_cut.SectionCut)."""
+        self._section_cut = cut
+        self._apply_group_visibility()
+
+    def clear_section_cut(self) -> None:
+        if self._section_cut is not None:
+            self._section_cut = None
+            self._apply_group_visibility()
+
     def show_all_groups(self) -> None:
         self._hidden_groups.clear()
         self._apply_group_visibility()
@@ -1589,6 +1600,9 @@ class StructCanvas(QGraphicsScene):
             return                      # isolation owns visibility; re-applied when it ends
         members = self.model_state.members
         hidden = {m.id for m in members if (m.group or "").strip() in self._hidden_groups}
+        if self._section_cut is not None:
+            from ui_qt.section_cut import members_beyond
+            hidden |= members_beyond(self.model_state, self._section_cut)
         shown_nodes = {n for m in members if m.id not in hidden for n in (m.node_i, m.node_j)}
         used_nodes = {n for m in members for n in (m.node_i, m.node_j)}
         for mid, item in self._member_items.items():
@@ -1751,6 +1765,7 @@ class StructCanvas(QGraphicsScene):
         self.model_state.clear()
         self._isolated = False
         self._hidden_groups.clear()
+        self._section_cut = None
         self._fit_scene_rect()   # back to the default size for the empty model
 
     def load_state(self, state: ModelState) -> None:

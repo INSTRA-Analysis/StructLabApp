@@ -323,3 +323,73 @@ def test_window_feeds_the_canvas_its_solve_cache(qapp, monkeypatch):
         assert win._scene.current_results() is None
     finally:
         win.close()
+
+
+# ── section cut ───────────────────────────────────────────────────────────────
+
+def _column_scene():
+    """A 2-storey column: nodes at z = 0, 3, 6; one beam off the middle node."""
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_state import ModelState
+    state = ModelState()
+    n = [state.add_node(0, 0, 0), state.add_node(0, 0, 3), state.add_node(0, 0, 6), state.add_node(4, 0, 3)]
+    ms = [state.add_member(n[0].id, n[1].id), state.add_member(n[1].id, n[2].id),
+          state.add_member(n[1].id, n[3].id)]
+    sc = StructCanvas()
+    sc.load_state(state)
+    return sc, n, ms
+
+
+def test_members_beyond_cuts_only_members_entirely_on_the_removed_side(qapp):
+    from ui_qt.section_cut import SectionCut, members_beyond
+    sc, n, ms = _column_scene()
+    state = sc.model_state
+    assert members_beyond(state, SectionCut("Z", 4.0, True)) == {ms[0].id, ms[2].id}   # keep z >= 4
+    assert members_beyond(state, SectionCut("Z", 2.0, True)) == set()                  # nothing wholly below z=2
+    assert members_beyond(state, SectionCut("Z", 3.0, False)) == set()                 # touching the plane stays
+    assert members_beyond(state, SectionCut("Z", 2.9, False)) == {ms[1].id, ms[2].id}  # keep z <= 2.9
+    assert members_beyond(state, SectionCut("X", 1.0, False)) == set()                 # beam crosses x=1
+    assert members_beyond(state, SectionCut("X", 1.0, True)) == {ms[0].id, ms[1].id}   # both columns at x=0
+
+
+def test_scene_hides_the_cut_members_and_orphaned_nodes_then_restores(qapp):
+    from ui_qt.section_cut import SectionCut
+    sc, n, ms = _column_scene()
+    sc.set_section_cut(SectionCut("Z", 4.0, True))
+    assert [sc._member_items[m.id].isVisible() for m in ms] == [False, True, False]
+    assert not sc._node_items[n[0].id].isVisible() and not sc._node_items[n[3].id].isVisible()
+    assert sc._node_items[n[1].id].isVisible() and sc._node_items[n[2].id].isVisible()
+    sc.clear_section_cut()
+    assert all(it.isVisible() for it in list(sc._member_items.values()) + list(sc._node_items.values()))
+
+
+def test_section_cut_and_hidden_groups_combine(qapp):
+    from ui_qt.section_cut import SectionCut
+    sc, n, ms = _column_scene()
+    ms[1].group = "Upper"
+    sc.set_group_hidden("Upper", True)
+    sc.set_section_cut(SectionCut("Z", 4.0, True))           # also cuts members 0 and 2
+    assert not any(sc._member_items[m.id].isVisible() for m in ms)
+    sc.clear_section_cut()
+    assert [sc._member_items[m.id].isVisible() for m in ms] == [True, False, True]   # group stays hidden
+
+
+def test_section_cut_dialog_drives_the_scene_live(qapp):
+    from ui_qt.section_cut import SectionCutDialog
+    sc, n, ms = _column_scene()
+    dlg = SectionCutDialog(sc)
+    assert dlg._axis.currentText() == "Z"
+    dlg._pos.setValue(4.5)
+    assert sc._section_cut.axis == "Z" and sc._section_cut.position == 4.5
+    assert not sc._member_items[ms[0].id].isVisible() and sc._member_items[ms[1].id].isVisible()
+    assert "2 of 3" in dlg._info.text()
+    dlg._keep.setCurrentIndex(1)                              # keep below instead: nothing wholly above 4.5
+    assert all(it.isVisible() for it in sc._member_items.values())
+    dlg._pos.setValue(2.0)                                    # wholly above z=2: the upper column and the beam
+    assert sc._member_items[ms[0].id].isVisible() and not sc._member_items[ms[1].id].isVisible()
+    assert not sc._member_items[ms[2].id].isVisible()
+    dlg._slider.setValue(0)                                   # slider moves the plane to the model bottom
+    assert dlg._pos.value() == 0.0
+    dlg.close()                                               # closing restores the full model
+    assert sc._section_cut is None
+    assert all(it.isVisible() for it in sc._member_items.values())

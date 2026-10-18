@@ -454,6 +454,9 @@ class MainWindow(QMainWindow):
             "Draw members thicker the larger their cross-section area (Ctrl+T)")
         self._thickness_act.toggled.connect(self._on_thickness_toggled)
 
+        self._section_cut_act = tools_menu.addAction("Section Cut…", self._open_section_cut)
+        self._section_cut_act.setToolTip("Hide everything on one side of a plane to look inside the model")
+
         tools_menu.addSeparator()
 
         act = tools_menu.addAction("Python Console", self._open_console)
@@ -466,6 +469,16 @@ class MainWindow(QMainWindow):
 
     def _on_colour_by_group_toggled(self, checked: bool) -> None:
         self._scene.set_colour_by_group(checked)
+
+    def _open_section_cut(self) -> None:
+        from ui_qt.section_cut import SectionCutDialog
+        if not self._scene.model_state.nodes:
+            self._sb.showMessage("Add some geometry before cutting a section.")
+            return
+        if getattr(self, "_section_cut_dialog", None) is not None:
+            self._section_cut_dialog.close()
+        self._section_cut_dialog = SectionCutDialog(self._scene, self)
+        self._section_cut_dialog.show()
 
     def _on_thickness_toggled(self, checked: bool) -> None:
         self._scene.set_thickness_by_section(checked)
