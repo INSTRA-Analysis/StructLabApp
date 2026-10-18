@@ -22,12 +22,13 @@ from PyQt6.QtWidgets import (
     QLabel, QDoubleSpinBox, QComboBox, QGraphicsView,
     QScrollArea, QVBoxLayout, QHBoxLayout,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QSettings, QSize, QTimer
+from PyQt6.QtGui import QAction, QActionGroup, QColor
 
 from ui_qt.canvas import StructCanvas, StructView, CanvasMode, WorkingPlane
 from ui_qt.model_state import ElementType
 from ui_qt.panels import PropertiesPanel, ResultsPanel, BrandingFooter
+from ui_qt.icons import icon
 
 _AUTOSAVE_PATH = Path.home() / ".structlab" / "autosave.slab"
 
@@ -134,12 +135,10 @@ class MainWindow(QMainWindow):
         self._clipboard: dict | None = None
 
         self._build_canvas()
+        self._build_actions()
+        self._build_widgets()
         self._build_menu()
-        self._build_toolbar()
-        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
-        self._build_overlay_toolbar()
-        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
-        self._build_view_toolbar()
+        self._build_classic_toolbars()
         self._build_docks()
         self._build_view_menu()
         self._build_shortcuts_menu()
@@ -166,25 +165,29 @@ class MainWindow(QMainWindow):
     # ── menu bar ─────────────────────────────────────────────────────────────
 
     def _build_menu(self) -> None:
+        """Classic menu bar. Built from the shared actions (ui_qt/commands.py); in ribbon
+        mode it is hidden, but its dynamic sub-menus still feed the ribbon buttons."""
+        a = self._act
         mb = self.menuBar()
 
         file_menu = mb.addMenu("File")
-        file_menu.addAction("New",      "Ctrl+N",       self._on_new)
-        file_menu.addAction("Open…",   "Ctrl+O",       self._on_open)
-        file_menu.addAction("Save",    "Ctrl+S",       self._on_save)
-        file_menu.addAction("Save As…","Ctrl+Shift+S", self._on_save_as)
+        self._file_menu = file_menu
+        for key in ("new", "open", "save", "save_as"):
+            file_menu.addAction(a[key])
         file_menu.addSeparator()
-        file_menu.addAction("Project Info…", self._on_project_info)
+        file_menu.addAction(a["project_info"])
         file_menu.addSeparator()
-        self._recent_menu = file_menu.addMenu("Recent Files")
+        self._recent_menu = file_menu.addMenu(icon("history"), "Recent Files")
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         file_menu.addSeparator()
-        import_menu = file_menu.addMenu("Import")
-        import_menu.addAction("From CSV…", self._on_import_csv)
-        export_menu = file_menu.addMenu("Export")
-        export_menu.addAction("PNG Image…",  self._on_export_png)
-        export_menu.addAction("SVG Vector…", self._on_export_svg)
-        export_menu.addAction("PDF Report…", self._on_export_pdf)
+        import_menu = file_menu.addMenu(icon("import"), "Import")
+        import_menu.addAction(a["import_csv"])
+        export_menu = file_menu.addMenu(icon("file-output"), "Export")
+        self._export_menu = export_menu
+        for key in ("export_png", "export_svg", "export_pdf"):
+            export_menu.addAction(a[key])
+        file_menu.addSeparator()
+        file_menu.addAction(a["close_model"])
 
         self._build_edit_menu(mb)
         self._build_selection_menu(mb)
@@ -192,24 +195,23 @@ class MainWindow(QMainWindow):
         self._build_help_menu(mb)
 
         preset_menu = mb.addMenu("Presets")
-        preset_menu.addAction("Beam Wizard…",         self._on_beam_wizard)
-        preset_menu.addAction("Portal Frame Wizard…", self._on_portal_wizard)
-        preset_menu.addAction("Truss Wizard…",        self._on_truss_wizard)
-        preset_menu.addAction("Frame Wizard…",        self._on_frame_wizard)
+        self._wizards_menu = preset_menu
+        for key in ("beam_wizard", "portal_wizard", "truss_wizard", "frame_wizard"):
+            preset_menu.addAction(a[key])
 
     # ── Edit menu ─────────────────────────────────────────────────────────────
 
     def _build_edit_menu(self, mb) -> None:
+        a = self._act
         edit_menu = mb.addMenu("Edit")
-        edit_menu.addAction("Undo",      "Ctrl+Z", self._scene.undo)
-        edit_menu.addAction("Redo",      "Ctrl+Y", self._scene.redo)
+        edit_menu.addAction(a["undo"])
+        edit_menu.addAction(a["redo"])
         edit_menu.addSeparator()
-        edit_menu.addAction("Copy",      "Ctrl+C", self._on_copy)
-        edit_menu.addAction("Paste",     "Ctrl+V", self._on_paste)
-        edit_menu.addAction("Duplicate", "Ctrl+D", self._on_duplicate)
+        for key in ("copy", "paste", "duplicate", "delete"):
+            edit_menu.addAction(a[key])
         edit_menu.addSeparator()
-        edit_menu.addAction("Solve",        "F5", self._on_solve)
-        edit_menu.addAction("Zoom to Fit",  "F",  self._view.zoom_to_fit)
+        edit_menu.addAction(a["solve"])
+        edit_menu.addAction(a["zoom_fit"])
 
     # ── Selection menu ────────────────────────────────────────────────────────
 
@@ -224,15 +226,15 @@ class MainWindow(QMainWindow):
             self._on_selection_changed()
 
     def _build_selection_menu(self, mb) -> None:
+        a = self._act
         edit_menu = mb.addMenu("Selection")
-
-        edit_menu.addAction("Select All",      "Ctrl+A",        self._on_select_all)
-        edit_menu.addAction("Deselect All",    "Ctrl+Shift+A",  self._on_deselect_all)
-        edit_menu.addAction("Invert Selection","Ctrl+I",        self._on_invert_selection)
+        for key in ("select_all", "deselect_all", "invert_selection"):
+            edit_menu.addAction(a[key])
         edit_menu.addSeparator()
 
         # ── Select by Element Type submenu ─────────────────────────────────
         type_menu = edit_menu.addMenu("Select by Element Type")
+        self._select_type_menu = type_menu
         from ui_qt.model_state import ElementType as ET
         for et in ET:
             label = et.name.replace("_", " ").title()
@@ -247,7 +249,7 @@ class MainWindow(QMainWindow):
         self._select_group_menu.aboutToShow.connect(self._rebuild_select_group_menu)
 
         edit_menu.addSeparator()
-        edit_menu.addAction("Scale Selection…", self._on_scale_selection)
+        edit_menu.addAction(a["scale_selection"])
         edit_menu.addAction("  (or press S on the canvas for interactive scale)") \
             .setEnabled(False)
 
@@ -423,49 +425,34 @@ class MainWindow(QMainWindow):
 
     def _build_help_menu(self, mb) -> None:
         help_menu = mb.addMenu("Help")
-        help_menu.addAction("Keyboard Shortcuts…", self._on_keyboard_shortcuts)
+        help_menu.addAction(self._act["keyboard_shortcuts"])
         help_menu.addSeparator()
-        help_menu.addAction("About StructLab…", self._on_about)
+        help_menu.addAction(self._act["about"])
 
     def _build_tools_menu(self, mb) -> None:
-        from PyQt6.QtGui import QKeySequence
+        a = self._act
         tools_menu = mb.addMenu("Tools")
-
-        self._show_loads_act = tools_menu.addAction("Show Loads")
-        self._show_loads_act.setCheckable(True)
-        self._show_loads_act.setChecked(True)
-        self._show_loads_act.setShortcut(QKeySequence("L"))
-        self._show_loads_act.setToolTip("Toggle visibility of load arrows and labels (L)")
-        self._show_loads_act.toggled.connect(self._on_show_loads_toggled)
-
-        self._colour_group_act = tools_menu.addAction("Colour by Group")
-        self._colour_group_act.setCheckable(True)
-        self._colour_group_act.setChecked(False)
-        self._colour_group_act.setShortcut(QKeySequence("Ctrl+G"))
-        self._colour_group_act.setToolTip(
-            "Tint members by their group label, with a legend (Ctrl+G)")
-        self._colour_group_act.toggled.connect(self._on_colour_by_group_toggled)
-
-        self._thickness_act = tools_menu.addAction("Thickness by Section")
-        self._thickness_act.setCheckable(True)
-        self._thickness_act.setChecked(False)
-        self._thickness_act.setShortcut(QKeySequence("Ctrl+T"))
-        self._thickness_act.setToolTip(
-            "Draw members thicker the larger their cross-section area (Ctrl+T)")
-        self._thickness_act.toggled.connect(self._on_thickness_toggled)
-
-        self._animate_act = tools_menu.addAction("Animate Deformed Shape")
-        self._animate_act.setCheckable(True)
-        self._animate_act.setToolTip("Loop the deformed shape from undeformed to full size (needs a solved model)")
-        self._animate_act.toggled.connect(self._on_animate_toggled)
-
-        self._section_cut_act = tools_menu.addAction("Section Cut…", self._open_section_cut)
-        self._section_cut_act.setToolTip("Hide everything on one side of a plane to look inside the model")
-
+        for key in ("show_loads", "colour_group", "thickness", "animate", "section_cut"):
+            tools_menu.addAction(a[key])
         tools_menu.addSeparator()
+        tools_menu.addAction(a["console"])
 
-        act = tools_menu.addAction("Python Console", self._open_console)
-        act.setShortcut(QKeySequence("Ctrl+`"))
+    # ── interface preference ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _interface_preference() -> str:
+        """"ribbon" (default) or "classic"; STRUCTLAB_UI overrides the saved setting."""
+        env = os.environ.get("STRUCTLAB_UI", "").strip().lower()
+        if env in ("ribbon", "classic"):
+            return env
+        value = QSettings("INSTRA Analysis", "StructLab").value("ui/interface", "ribbon")
+        return value if value in ("ribbon", "classic") else "ribbon"
+
+    def _on_interface_toggled(self, use_ribbon: bool) -> None:
+        QSettings("INSTRA Analysis", "StructLab").setValue(
+            "ui/interface", "ribbon" if use_ribbon else "classic")
+        self._sb.showMessage(
+            f"{'Ribbon' if use_ribbon else 'Classic menus'} will be used the next time StructLab starts.")
 
     def _on_show_loads_toggled(self, checked: bool) -> None:
         self._scene.set_loads_visible(checked)
@@ -573,37 +560,36 @@ class MainWindow(QMainWindow):
     # ── view menu (built after docks exist) ───────────────────────────────────
 
     def _build_view_menu(self) -> None:
-        """Add a View menu that toggles the two dock panels.
+        """Add a View menu that toggles the dock panels.
 
-        Must be called after _build_docks() so self._left_dock / _right_dock exist.
+        Must be called after _build_docks() so the dock toggle actions exist.
         """
         mb = self.menuBar()
         view_menu = mb.addMenu("View")
 
-        act_props = self._left_dock.toggleViewAction()
-        act_props.setText("Properties Panel")
-        act_props.setShortcut("Alt+1")
-        view_menu.addAction(act_props)
-
-        act_res = self._right_dock.toggleViewAction()
-        act_res.setText("Results Panel")
-        act_res.setShortcut("Alt+2")
-        view_menu.addAction(act_res)
-
-        act_groups = self._groups_dock.toggleViewAction()
-        act_groups.setText("Groups Panel")
-        act_groups.setShortcut("Alt+3")
-        view_menu.addAction(act_groups)
+        for dock, text, key, ico in ((self._left_dock, "Properties Panel", "Alt+1", "panel-left"),
+                                      (self._right_dock, "Results Panel", "Alt+2", "panel-right"),
+                                      (self._groups_dock, "Groups Panel", "Alt+3", "layers")):
+            act = dock.toggleViewAction()
+            act.setText(text)
+            act.setShortcut(key)
+            act.setIcon(icon(ico))
+            view_menu.addAction(act)
+        self._act["panel_properties"] = self._left_dock.toggleViewAction()
+        self._act["panel_results"] = self._right_dock.toggleViewAction()
+        self._act["panel_groups"] = self._groups_dock.toggleViewAction()
 
         view_menu.addSeparator()
-        self._named_views_menu = view_menu.addMenu("Named Views")
+        self._named_views_menu = view_menu.addMenu(icon("camera"), "Named Views")
         self._named_views_menu.aboutToShow.connect(self._fill_named_views_menu)
         view_menu.addSeparator()
-        view_menu.addAction("Reset Panel Layout", self._reset_dock_layout)
+        view_menu.addAction(self._act["reset_layout"])
+        view_menu.addSeparator()
+        view_menu.addAction(self._act["ribbon_interface"])
 
-    def _fill_named_views_menu(self) -> None:
-        """Rebuild the Named Views submenu: save, jump to, delete."""
-        menu = self._named_views_menu
+    def _fill_named_views_menu(self, menu=None) -> None:
+        """Rebuild a Named Views menu (the View menu's, or the ribbon drop-down): save, jump to, delete."""
+        menu = menu if menu is not None else self._named_views_menu
         menu.clear()
         menu.addAction("Save Current View…", self._save_named_view)
         views = self._scene.model_state.named_views
@@ -860,312 +846,125 @@ class MainWindow(QMainWindow):
         spacer2.setFixedWidth(8)
         toolbar.addWidget(spacer2)
 
-    # ── main toolbar ──────────────────────────────────────────────────────────
+    # ── shared actions and input widgets ──────────────────────────────────────
 
-    def _build_toolbar(self) -> None:
-        tb = QToolBar("Main")
-        tb.setMovable(True)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+    def _build_actions(self) -> None:
+        """Create every command once (ui_qt/commands.py) plus the view/plane actions,
+        and keep the attribute names the rest of the window uses."""
+        from ui_qt.commands import build_actions
+        self._act = build_actions(self)
+        a = self._act
+        self._mode_buttons = {CanvasMode.SELECT: a["mode_select"], CanvasMode.ADD_NODE: a["mode_node"],
+                              CanvasMode.ADD_MEMBER: a["mode_member"], CanvasMode.MEASURE: a["mode_measure"]}
+        self._overlay_btns = {"BMD": a["ov_bmd"], "SFD": a["ov_sfd"], "AFD": a["ov_afd"],
+                              "Def": a["ov_def"], "Labels": a["ov_labels"]}
+        self._force_colour_btn = a["force_colours"]
+        self._util_colour_btn = a["util_colours"]
+        self._sw_btn = a["self_weight"]
+        self._remove_lc_btn = a["remove_lc"]
+        self._local_axes_btn = a["local_axes"]
+        self._show_loads_act = a["show_loads"]
+        self._colour_group_act = a["colour_group"]
+        self._thickness_act = a["thickness"]
+        self._animate_act = a["animate"]
+        self._section_cut_act = a["section_cut"]
+        a["ribbon_interface"].blockSignals(True)
+        a["ribbon_interface"].setChecked(self._interface_preference() == "ribbon")
+        a["ribbon_interface"].blockSignals(False)
 
-        # ── file buttons ─────────────────────────────────────────────────────
-        for label, slot in [("New", self._on_new), ("Open", self._on_open),
-                             ("Save", self._on_save)]:
-            btn = QPushButton(label)
-            btn.clicked.connect(slot)
-            tb.addWidget(btn)
-
-        close_btn = QPushButton("✕ Close")
-        close_btn.setToolTip("Close current model (prompts to save if unsaved)")
-        close_btn.clicked.connect(self._on_close_model)
-        close_btn.setStyleSheet(
-            "QPushButton { color: #e74c3c; }"
-            "QPushButton:hover { background: #c0392b; color: white; }"
-        )
-        tb.addWidget(close_btn)
-
-        tb.addSeparator()
-
-        # ── mode toggle buttons ───────────────────────────────────────────────
-        self._mode_buttons: dict[CanvasMode, QPushButton] = {}
-        self._mode_group = QButtonGroup(self)
-        self._mode_group.setExclusive(True)
-
-        mode_defs = [
-            (CanvasMode.SELECT,     "Select",    "S"),
-            (CanvasMode.ADD_NODE,   "Add Node",  "N"),
-            (CanvasMode.ADD_MEMBER, "Add Member","M"),
-            (CanvasMode.MEASURE,    "Measure",   "R"),
-        ]
-        for mode, label, shortcut in mode_defs:
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setShortcut(shortcut)
-            btn.clicked.connect(lambda _checked, m=mode: self._set_mode(m))
-            self._mode_group.addButton(btn)
-            self._mode_buttons[mode] = btn
-            tb.addWidget(btn)
-
-        self._mode_buttons[CanvasMode.SELECT].setChecked(True)
         self._scene.set_mode(CanvasMode.SELECT)
         self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
 
-        # ── member type selector ───────────────────────────────────────────────
-        tb.addWidget(QLabel(" Type:"))
+        # Camera presets: (key, label, azimuth, elevation, tooltip, working plane)
+        self._view_actions: dict[str, QAction] = {}
+        for key, label, az, el, tip, plane in (
+            ("view_top",   "Top",    0.0,   87.0, "Plan view — looking from above",          WorkingPlane.XY),
+            ("view_front", "Front",  0.0,    2.0, "Front elevation — XZ plane",              WorkingPlane.XZ),
+            ("view_left",  "Left",  -90.0,   2.0, "Left side elevation — YZ plane",          WorkingPlane.YZ),
+            ("view_right", "Right",  90.0,   2.0, "Right side elevation — YZ plane",         WorkingPlane.YZ),
+            ("view_sw",    "↙ SW",  -45.0,  30.0, "Isometric — camera from SW (default)",    WorkingPlane.FREE),
+            ("view_se",    "↘ SE",   45.0,  30.0, "Isometric — camera from SE",              WorkingPlane.FREE),
+            ("view_nw",    "↖ NW", -135.0,  30.0, "Isometric — camera from NW",              WorkingPlane.FREE),
+            ("view_ne",    "↗ NE",  135.0,  30.0, "Isometric — camera from NE",              WorkingPlane.FREE),
+        ):
+            act = QAction(label, self)
+            act.setToolTip(tip + f"\n  Az={az:.0f}°  El={el:.0f}°")
+            act.triggered.connect(lambda _c=False, z=az, e=el, p=plane: self._on_set_view(z, e, p))
+            self._view_actions[key] = act
+            a[key] = act
+
+        # Working planes (exclusive)
+        self._plane_btns: dict[WorkingPlane, QAction] = {}
+        plane_group = QActionGroup(self)
+        plane_group.setExclusive(True)
+        for plane, label, tip in (
+            (WorkingPlane.XY,   "XY",   "Lock Z — place nodes on the horizontal X-Y plane"),
+            (WorkingPlane.XZ,   "XZ",   "Lock Y — place nodes on the vertical X-Z plane"),
+            (WorkingPlane.YZ,   "YZ",   "Lock X — place nodes on the vertical Y-Z plane"),
+            (WorkingPlane.FREE, "Free", "No plane lock — nodes project to XY ground (Z=0)"),
+        ):
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setToolTip(tip)
+            act.triggered.connect(lambda _c=False, p=plane: self._set_working_plane(p))
+            plane_group.addAction(act)
+            self._plane_btns[plane] = act
+            a[f"plane_{label.lower()}"] = act
+        self._plane_btns[WorkingPlane.XY].setChecked(True)
+
+        # Named views and dynamic selection menus, as actions with drop-down menus
+        self._named_views_popup = QMenu(self)
+        self._named_views_popup.aboutToShow.connect(
+            lambda: self._fill_named_views_menu(self._named_views_popup))
+        nv = QAction(icon("camera"), "Named Views", self)
+        nv.setMenu(self._named_views_popup)
+        nv.setToolTip("Save the current camera or jump to a saved one")
+        a["named_views"] = nv
+
+    def _build_widgets(self) -> None:
+        """Input controls shared by both layouts (they live in the ribbon or the toolbars)."""
         self._member_type_combo = QComboBox()
         self._member_type_combo.addItems([et.name for et in ElementType])
         self._member_type_combo.setCurrentIndex(0)  # default BEAM
+        self._member_type_combo.setToolTip("Element type for new members")
         self._member_type_combo.currentTextChanged.connect(self._on_member_type_changed)
-        tb.addWidget(self._member_type_combo)
 
-        tb.addSeparator()
-
-        # ── load case selector ─────────────────────────────────────────────────
-        tb.addWidget(QLabel(" Case:"))
         self._lc_combo = QComboBox()
         self._lc_combo.setMinimumWidth(140)
+        self._lc_combo.setToolTip("Active load case")
         self._lc_combo.currentIndexChanged.connect(self._on_lc_changed)
-        tb.addWidget(self._lc_combo)
 
-        _btn_base = (
-            "QPushButton {{"
-            "  font-weight: bold; color: white;"
-            "  border-radius: 3px; padding: 3px 6px;"
-            "  background-color: {bg};"
-            "}}"
-            "QPushButton:hover {{ background-color: {hover}; }}"
-            "QPushButton:pressed {{ background-color: {pressed}; }}"
-            "QPushButton:disabled {{ background-color: #555555; color: #888888; }}"
-        )
-
-        add_lc_btn = QPushButton("+")
-        add_lc_btn.setFixedWidth(26)
-        add_lc_btn.setToolTip("Add new load case")
-        add_lc_btn.setStyleSheet(
-            _btn_base.format(bg="#27ae60", hover="#2ecc71", pressed="#1e8449")
-        )
-        add_lc_btn.clicked.connect(self._on_add_lc)
-        tb.addWidget(add_lc_btn)
-
-        self._remove_lc_btn = QPushButton("−")
-        self._remove_lc_btn.setFixedWidth(26)
-        self._remove_lc_btn.setToolTip("Remove active load case")
-        self._remove_lc_btn.setStyleSheet(
-            _btn_base.format(bg="#c0392b", hover="#e74c3c", pressed="#922b21")
-        )
-        self._remove_lc_btn.clicked.connect(self._on_remove_lc)
-        tb.addWidget(self._remove_lc_btn)
-
-        self._sw_btn = QPushButton("SW")
-        self._sw_btn.setCheckable(True)
-        self._sw_btn.setToolTip(
-            "Self-weight: include member self-weight in this load case.\n"
-            "Only one case can carry self-weight at a time.\n"
-            "Requires member density > 0 (set in Member Properties)."
-        )
-        self._sw_btn.toggled.connect(self._on_sw_toggle)
-        tb.addWidget(self._sw_btn)
-
-        self._refresh_lc_combo()
-
-        tb.addSeparator()
-
-        # ── solve ─────────────────────────────────────────────────────────────
-        solve_btn = QPushButton("Solve")
-        solve_btn.setShortcut("F5")
-        solve_btn.setToolTip("Solve active load case (F5)")
-        solve_btn.setStyleSheet(
-            "QPushButton { "
-            "  font-weight: bold; "
-            "  background-color: #2196F3; "
-            "  color: white; "
-            "  padding: 6px 16px; "
-            "  border-radius: 3px; "
-            "} "
-            "QPushButton:hover { background-color: #1976D2; } "
-            "QPushButton:pressed { background-color: #0D47A1; }"
-        )
-        solve_btn.clicked.connect(self._on_solve)
-        tb.addWidget(solve_btn)
-
-        combs_btn = QPushButton("Combinations…")
-        combs_btn.setToolTip("Manage EN 1990 load combinations and solve")
-        combs_btn.setStyleSheet(
-            "QPushButton { "
-            "  font-weight: bold; "
-            "  background-color: #6A1B9A; "
-            "  color: white; "
-            "  padding: 6px 14px; "
-            "  border-radius: 3px; "
-            "} "
-            "QPushButton:hover { background-color: #7B1FA2; } "
-            "QPushButton:pressed { background-color: #4A148C; }"
-        )
-        combs_btn.clicked.connect(self._on_combinations)
-        tb.addWidget(combs_btn)
-
-    # ── overlay toolbar ───────────────────────────────────────────────────────
-
-    def _build_overlay_toolbar(self) -> None:
-        tb = QToolBar("Visualization")
-        tb.setMovable(True)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
-
-        # ── clear results ─────────────────────────────────────────────────────
-        clr_btn = QPushButton("Clear Results")
-        clr_btn.clicked.connect(self._on_clear_results)
-        tb.addWidget(clr_btn)
-
-        tb.addSeparator()
-
-        # 5 checkable layer-toggle buttons
-        layers = [
-            ('BMD',    True),
-            ('SFD',    False),
-            ('AFD',    False),
-            ('Def',    True),
-            ('Labels', False),
-        ]
-        self._overlay_btns: dict[str, QPushButton] = {}
-        for name, default in layers:
-            btn = QPushButton(name)
-            btn.setCheckable(True)
-            btn.setChecked(default)
-            key = 'Deformed' if name == 'Def' else name
-            btn.toggled.connect(lambda checked, k=key: self._on_overlay_toggle(k, checked))
-            self._overlay_btns[name] = btn
-            tb.addWidget(btn)
-
-        tb.addSeparator()
-
-        # Force colour toggle
-        self._force_colour_btn = QPushButton("Force colours")
-        self._force_colour_btn.setCheckable(True)
-        self._force_colour_btn.setChecked(False)
-        self._force_colour_btn.toggled.connect(self._on_force_colour_toggle)
-        tb.addWidget(self._force_colour_btn)
-
-        # Utilization colour toggle
-        self._util_colour_btn = QPushButton("Util %")
-        self._util_colour_btn.setCheckable(True)
-        self._util_colour_btn.setChecked(False)
-        self._util_colour_btn.setToolTip(
-            "Colour members by EC3 utilization ratio η = N/Npl + M/Mpl\n"
-            "Green < 50%  ·  Yellow = 50–100%  ·  Red > 100%"
-        )
-        self._util_colour_btn.toggled.connect(self._on_util_colour_toggle)
-        tb.addWidget(self._util_colour_btn)
-
-        tb.addSeparator()
-
-        # Diagram scale spinbox
-        tb.addWidget(QLabel("  Diag ×:"))
         self._diag_scale_spin = QDoubleSpinBox()
         self._diag_scale_spin.setRange(0.01, 10000.0)
         self._diag_scale_spin.setValue(30.0)
         self._diag_scale_spin.setSingleStep(10.0)
         self._diag_scale_spin.setDecimals(2)
         self._diag_scale_spin.setFixedWidth(95)
+        self._diag_scale_spin.setToolTip("Diagram scale multiplier")
         self._diag_scale_spin.valueChanged.connect(self._redraw_overlays)
-        tb.addWidget(self._diag_scale_spin)
 
-        # Deformed scale spinbox
-        tb.addWidget(QLabel("  Def ×:"))
         self._def_scale_spin = QDoubleSpinBox()
         self._def_scale_spin.setRange(0.01, 100000.0)
         self._def_scale_spin.setValue(5.0)
         self._def_scale_spin.setSingleStep(1.0)
         self._def_scale_spin.setDecimals(1)
         self._def_scale_spin.setFixedWidth(95)
+        self._def_scale_spin.setToolTip("Deformed-shape scale multiplier")
         self._def_scale_spin.valueChanged.connect(self._redraw_overlays)
-        tb.addWidget(self._def_scale_spin)
-
-        # ── combo view selector ────────────────────────────────────────────────
-        tb.addSeparator()
 
         self._combo_view = QComboBox()
-        self._combo_view.setMinimumWidth(300)
-        self._combo_view.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents
-        )
+        self._combo_view.setMinimumWidth(220)
+        self._combo_view.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._combo_view.addItem("Active case", userData="active")
         self._combo_view.setEnabled(False)   # enabled after Solve All & Envelope
+        self._combo_view.setToolTip("Which result set the diagrams show")
         self._combo_view.currentIndexChanged.connect(self._on_combo_view_changed)
-        tb.addWidget(self._combo_view)
-
-        # All overlay controls disabled until after a successful solve
-        self._set_overlay_controls_enabled(False)
-
-    # ── 3D view preset toolbar ────────────────────────────────────────────────
-
-    def _build_view_toolbar(self) -> None:
-        """Preset view buttons + working plane controls — visible only in 3D mode."""
-        self._view_tb = QToolBar("3D View Presets")
-        self._view_tb.setMovable(False)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self._view_tb)
-
-        # ── Camera preset buttons ──────────────────────────────────────────────
-        self._view_tb.addWidget(QLabel(" View: "))
-
-        _VIEWS = [
-            ("Top",    0.0,    87.0, "Plan view — looking from above",               WorkingPlane.XY),
-            ("Front",  0.0,     2.0, "Front elevation — XZ plane (Ctrl+drag orbit)", WorkingPlane.XZ),
-            ("Left",  -90.0,    2.0, "Left side elevation — YZ plane",               WorkingPlane.YZ),
-            ("Right",  90.0,    2.0, "Right side elevation — YZ plane",              WorkingPlane.YZ),
-            ("|",     None,   None, "",                                               None),
-            ("↙ SW",  -45.0,  30.0, "Isometric — camera from SW (default)",         WorkingPlane.FREE),
-            ("↘ SE",   45.0,  30.0, "Isometric — camera from SE",                   WorkingPlane.FREE),
-            ("↖ NW", -135.0,  30.0, "Isometric — camera from NW",                   WorkingPlane.FREE),
-            ("↗ NE",  135.0,  30.0, "Isometric — camera from NE",                   WorkingPlane.FREE),
-        ]
-
-        for label, az, el, tip, view_plane in _VIEWS:
-            if az is None:
-                self._view_tb.addSeparator()
-                continue
-            btn = QPushButton(label)
-            btn.setFixedSize(70, 28)
-            btn.setToolTip(tip + f"\n  Az={az:.0f}°  El={el:.0f}°")
-            btn.clicked.connect(
-                lambda _c=False, a=az, e=el, p=view_plane: self._on_set_view(a, e, p)
-            )
-            self._view_tb.addWidget(btn)
-
-        # ── Working plane controls ─────────────────────────────────────────────
-        self._view_tb.addSeparator()
-        self._view_tb.addWidget(QLabel(" Plane: "))
-
-        self._plane_btns: dict[WorkingPlane, QPushButton] = {}
-        plane_group = QButtonGroup(self)
-        plane_group.setExclusive(True)
-
-        for plane, lbl, tip in [
-            (WorkingPlane.XY,   "XY",   "Lock Z — place nodes on the horizontal X-Y plane"),
-            (WorkingPlane.XZ,   "XZ",   "Lock Y — place nodes on the vertical X-Z plane"),
-            (WorkingPlane.YZ,   "YZ",   "Lock X — place nodes on the vertical Y-Z plane"),
-            (WorkingPlane.FREE, "Free", "No plane lock — nodes project to XY ground (Z=0)"),
-        ]:
-            btn = QPushButton(lbl)
-            btn.setCheckable(True)
-            btn.setFixedSize(52 if lbl == "Free" else 48, 28)
-            btn.setToolTip(tip)
-            plane_group.addButton(btn)
-            self._plane_btns[plane] = btn
-            self._view_tb.addWidget(btn)
-            btn.clicked.connect(
-                lambda _c=False, p=plane: self._set_working_plane(p)
-            )
-
-        self._plane_btns[WorkingPlane.XY].setChecked(True)  # default
 
         # Per-plane offset memory — each plane remembers its own locked coordinate
         self._plane_offsets: dict[WorkingPlane, float] = {
-            WorkingPlane.XY: 0.0,
-            WorkingPlane.XZ: 0.0,
-            WorkingPlane.YZ: 0.0,
+            WorkingPlane.XY: 0.0, WorkingPlane.XZ: 0.0, WorkingPlane.YZ: 0.0,
         }
         self._active_plane: WorkingPlane = WorkingPlane.XY
-
-        # Dynamic axis label + offset spinbox
         self._plane_label = QLabel(" Z =")
         self._plane_spin = QDoubleSpinBox()
         self._plane_spin.setRange(-1000.0, 1000.0)
@@ -1175,22 +974,75 @@ class MainWindow(QMainWindow):
         self._plane_spin.setFixedWidth(100)
         self._plane_spin.setToolTip("Fixed coordinate on the locked axis (per-plane memory)")
         self._plane_spin.valueChanged.connect(self._on_plane_offset_changed)
+
+        self._refresh_lc_combo()
+        self._set_overlay_controls_enabled(False)   # until a successful solve
+
+    # ── classic toolbars ──────────────────────────────────────────────────────
+
+    def _build_classic_toolbars(self) -> None:
+        """The pre-ribbon layout: three text toolbars built from the same actions/widgets."""
+        a = self._act
+
+        def toolbar(title: str) -> QToolBar:
+            tb = QToolBar(title)
+            tb.setMovable(True)
+            tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+            return tb
+
+        tb = toolbar("Main")
+        for key in ("new", "open", "save", "close_model"):
+            tb.addAction(a[key])
+        tb.addSeparator()
+        for key in ("mode_select", "mode_node", "mode_member", "mode_measure"):
+            tb.addAction(a[key])
+        tb.addWidget(QLabel(" Type:"))
+        tb.addWidget(self._member_type_combo)
+        tb.addSeparator()
+        tb.addWidget(QLabel(" Case:"))
+        tb.addWidget(self._lc_combo)
+        for key in ("add_lc", "remove_lc", "self_weight"):
+            tb.addAction(a[key])
+        tb.addSeparator()
+        tb.addAction(a["solve"])
+        tb.addAction(a["combinations"])
+        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+
+        tb = toolbar("Visualization")
+        tb.addAction(a["clear_results"])
+        tb.addSeparator()
+        for key in ("ov_bmd", "ov_sfd", "ov_afd", "ov_def", "ov_labels"):
+            tb.addAction(a[key])
+        tb.addSeparator()
+        tb.addAction(a["force_colours"])
+        tb.addAction(a["util_colours"])
+        tb.addSeparator()
+        tb.addWidget(QLabel("  Diag ×:"))
+        tb.addWidget(self._diag_scale_spin)
+        tb.addWidget(QLabel("  Def ×:"))
+        tb.addWidget(self._def_scale_spin)
+        tb.addSeparator()
+        tb.addWidget(self._combo_view)
+        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+
+        self._view_tb = toolbar("3D View Presets")
+        self._view_tb.setMovable(False)
+        self._view_tb.addWidget(QLabel(" View: "))
+        for key in ("view_top", "view_front", "view_left", "view_right"):
+            self._view_tb.addAction(a[key])
+        self._view_tb.addSeparator()
+        for key in ("view_sw", "view_se", "view_nw", "view_ne"):
+            self._view_tb.addAction(a[key])
+        self._view_tb.addSeparator()
+        self._view_tb.addWidget(QLabel(" Plane: "))
+        for plane in self._plane_btns.values():
+            self._view_tb.addAction(plane)
         self._view_tb.addWidget(self._plane_label)
         self._view_tb.addWidget(self._plane_spin)
-
         self._view_tb.addSeparator()
-        self._local_axes_btn = QPushButton("⊕ Axes")
-        self._local_axes_btn.setCheckable(True)
-        self._local_axes_btn.setFixedSize(62, 28)
-        self._local_axes_btn.setToolTip(
-            "Show local axis triad on all members\n"
-            "Red = x̂ (along member)  Green = ŷ (strong axis)  Blue = ẑ (weak axis)\n"
-            "Triad is always shown on selected members regardless of this toggle."
-        )
-        self._local_axes_btn.toggled.connect(self._on_toggle_local_axes)
-        self._view_tb.addWidget(self._local_axes_btn)
-
-        self._view_tb.setVisible(False)  # shown only in 3D mode
+        self._view_tb.addAction(a["local_axes"])
+        self._view_tb.setVisible(False)  # (unchanged: the classic layout kept this bar hidden)
 
     # ── docks ─────────────────────────────────────────────────────────────────
 
@@ -1393,7 +1245,6 @@ class MainWindow(QMainWindow):
             self._sw_btn.blockSignals(True)
             self._sw_btn.setChecked(sw_active)
             self._sw_btn.blockSignals(False)
-            self._update_sw_btn_style()
 
     def _on_lc_changed(self, index: int) -> None:
         """Switch the active load case and refresh canvas load displays."""
@@ -1502,17 +1353,6 @@ class MainWindow(QMainWindow):
             state.set_self_weight_case(None)
             self._sb.showMessage("Self-weight OFF")
         self._refresh_lc_combo()
-        self._update_sw_btn_style()
-
-    def _update_sw_btn_style(self) -> None:
-        if self._sw_btn.isChecked():
-            self._sw_btn.setStyleSheet(
-                "QPushButton { font-weight:bold; background:#27ae60; color:white;"
-                " border-radius:3px; padding:3px 4px; }"
-                "QPushButton:hover { background:#2ecc71; }"
-            )
-        else:
-            self._sw_btn.setStyleSheet("")
 
     # ── combinations ─────────────────────────────────────────────────────────
 
