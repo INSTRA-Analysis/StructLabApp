@@ -1006,7 +1006,10 @@ class MemberItem(QGraphicsLineItem):
         state = self._scene.model_state
         ni, nj = state.get_node(self.member.node_i), state.get_node(self.member.node_j)
         length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
-        eta, basis = display_utilisation(self.member, r, length)
+        lcr = self._scene.buckling_lengths(cache["member_results"]).get(self.member.id, length)
+        eta, basis = display_utilisation(self.member, r, lcr)
+        if lcr < length - 1e-9:
+            basis += f", Lcr = {lcr:.2f} m (held at crossing)"
         util = (f"utilisation = {eta:.2f}   ({basis})" if eta is not None
                 else f"utilisation: not checked ({basis})")
         return ["─ current results ─",

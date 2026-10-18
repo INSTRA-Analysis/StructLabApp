@@ -422,6 +422,10 @@ class ModelState:
     combinations: list[LoadCombination] = field(default_factory=list)
     # Saved camera positions: name -> {"az", "el", "cx", "cy", "scale"} (scene coordinates).
     named_views: dict = field(default_factory=dict)
+    # Design assumption: where two bracing members cross, they are connected there, so a
+    # compression member is held at the crossing while the other one is in tension
+    # (design_checks.buckling_length). It does not change the analysis model.
+    crossing_braces: bool = False
     active_case_id: int = field(default=0)
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
     # "3D" = 6-DOF space model (Z up). "2D" = planar 3-DOF model in the native
@@ -564,6 +568,7 @@ class ModelState:
         self.load_cases.append(LoadCase(id=0, name=LOAD_CATEGORIES["G"], category="G"))
         self.combinations.clear()
         self.named_views.clear()
+        self.crossing_braces = False
         self.active_case_id = 0
         self.metadata = ProjectMetadata()
         self.mode_3d = True
@@ -619,6 +624,7 @@ class ModelState:
                 for c in self.combinations
             ],
             **({"named_views": self.named_views} if self.named_views else {}),
+            **({"crossing_braces": True} if self.crossing_braces else {}),
             "analysis_mode": self.analysis_mode,
             "mode_3d": self.mode_3d,
             "_next_node_id": self._next_node_id,
@@ -692,6 +698,7 @@ class ModelState:
                 ))
             s._next_combo_id = d.get("_next_combo_id", len(s.combinations))
         s.named_views = {str(k): dict(v) for k, v in d.get("named_views", {}).items()}
+        s.crossing_braces = bool(d.get("crossing_braces", False))
         s._next_node_id = d.get("_next_node_id", len(s.nodes))
         s._next_member_id = d.get("_next_member_id", len(s.members))
         # Prefer explicit analysis_mode (v4+); else fall back to the legacy

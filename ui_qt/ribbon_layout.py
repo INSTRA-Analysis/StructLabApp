@@ -86,6 +86,7 @@ def build_ribbon(win) -> RibbonBar:
     g.add_small(a["scale_selection"])
     g = model.add_group("Check")
     g.add_large(a["check_duplicates"])
+    g.add_small(a["crossing_braces"])
     g = model.add_group("Supports")
     g.add_large(_menu_action(win, "Supports", "support", _supports_menu(win),
                              "Assign a support to the selected nodes"))

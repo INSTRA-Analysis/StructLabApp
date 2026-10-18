@@ -69,6 +69,10 @@ COMMANDS: tuple[Command, ...] = (
     Command("invert_selection", "Invert Selection", "_on_invert_selection", "", "Ctrl+I"),
     Command("check_duplicates", "Check Duplicates…", "_on_check_duplicates", "scan-search", "",
             "Find coincident nodes and duplicate or zero-length members, then select or merge them"),
+    Command("crossing_braces", "Crossing Bracing Connected", "_on_crossing_braces_toggled", "split", "",
+            "Design assumption: bracing members that cross are connected there, so a compression\n"
+            "member is held at the crossing while the one crossing it is in tension (shorter buckling\n"
+            "length). The analysis model is unchanged.", True),
     Command("rotate_selection", "Rotate…", "_on_rotate_selection", "rotate-3d", "",
             "Rotate the selection by an exact angle about X, Y or Z — optionally as copies"),
     Command("scale_selection", "Scale Selection…", "_on_scale_selection", "scaling",

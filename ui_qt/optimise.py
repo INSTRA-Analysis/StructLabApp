@@ -11,8 +11,9 @@ below a heavier one. Only groups whose members are all recognised library angles
 rest are reported as skipped.
 
 Limits worth knowing (they are the limits of the check, see ``design_checks``): buckling length is
-the member length between nodes, there is no net-section or connection check, and the slenderness
-limit is the one you pass in, not one taken from a code.
+the member length between nodes — or, when ``state.crossing_braces`` is set, the stretch to a
+crossing held by a member in tension — there is no net-section or connection check, and the
+slenderness limit is the one you pass in, not one taken from a code.
 """
 
 from __future__ import annotations
@@ -101,19 +102,26 @@ def combination_forces(state: ModelState, case_forces: dict[int, np.ndarray], co
 
 
 def group_utilisation(state: ModelState, members: list[MemberData], sec, forces: list[np.ndarray],
-                      lengths: dict[int, float], index: dict[int, int]) -> tuple[float | None, str, float]:
+                      lengths: dict[int, float], index: dict[int, int],
+                      restraints: dict | None = None) -> tuple[float | None, str, float]:
     """(worst η, governing check, worst slenderness) of ``members`` if they all had ``sec``.
 
-    ``forces`` is one (members × end-forces) array per ULS combination. Returns η None when the
-    section cannot be checked for some member (class 4 outstand with ρ < 1)."""
-    from ui_qt.design_checks import member_forces
+    ``forces`` is one (members × end-forces) array per ULS combination. ``restraints`` (from
+    ``model_checks.crossing_restraints``) shortens the buckling length of a member that a tension
+    member crosses, combination by combination. Returns η None when the section cannot be
+    checked for some member (class 4 outstand with ρ < 1)."""
+    from ui_qt.design_checks import buckling_length, member_forces
     worst, gov, slender = 0.0, "", 0.0
     for m in members:
-        L = lengths[m.id]
-        slender = max(slender, L / math.sqrt(sec.I_v / sec.A))
         has_bending = m.element_type != ElementType.BAR
         for arr in forces:
             n, mom = member_forces(SimpleNamespace(end_forces=arr[index[m.id]]))
+            L = lengths[m.id]
+            if restraints and m.id in restraints:
+                L = buckling_length(L, restraints[m.id],
+                                    lambda pid, arr=arr: member_forces(SimpleNamespace(
+                                        end_forces=arr[index[pid]]))[0])
+            slender = max(slender, L / math.sqrt(sec.I_v / sec.A))
             c = check_angle(sec, n, mom if has_bending else 0.0, L, m.fy, m.E, has_bending)
             if c.eta is None:
                 return None, c.notes[0], slender
@@ -158,6 +166,10 @@ def optimise_groups(state: ModelState, combinations: list, *, target: float = 0.
             continue
         todo[g] = ms
     lengths = {m.id: _length(state, m) for m in state.members}
+    restraints = None
+    if state.crossing_braces:
+        from ui_qt.model_checks import crossing_restraints
+        restraints = crossing_restraints(state)
     index = {m.id: i for i, m in enumerate(state.members)}
     name = lambda ms: identify_angle(ms[0].A, ms[0].I, ms[0].I_y if ms[0].I_y else ms[0].I).name  # noqa: E731
     before = {g: name(ms) for g, ms in todo.items()}
@@ -172,9 +184,9 @@ def optimise_groups(state: ModelState, combinations: list, *, target: float = 0.
         for g, ms in todo.items():
             if rnd == 1:
                 cur = identify_angle(ms[0].A, ms[0].I, ms[0].I_y if ms[0].I_y else ms[0].I)
-                eta_first[g] = group_utilisation(state, ms, cur, forces, lengths, index)[0]
+                eta_first[g] = group_utilisation(state, ms, cur, forces, lengths, index, restraints)[0]
             for sec in candidates:
-                eta, _, slender = group_utilisation(state, ms, sec, forces, lengths, index)
+                eta, _, slender = group_utilisation(state, ms, sec, forces, lengths, index, restraints)
                 if eta is not None and eta <= target and (max_slenderness is None or slender <= max_slenderness):
                     picks[g] = sec
                     break
@@ -198,7 +210,7 @@ def optimise_groups(state: ModelState, combinations: list, *, target: float = 0.
     forces = [combination_forces(state, cf, c) for c in combos]
     for g, ms in todo.items():
         sec = identify_angle(ms[0].A, ms[0].I, ms[0].I_y if ms[0].I_y else ms[0].I)
-        eta, gov, slender = group_utilisation(state, ms, sec, forces, lengths, index)
+        eta, gov, slender = group_utilisation(state, ms, sec, forces, lengths, index, restraints)
         note = "" if eta is not None and eta <= target + 1e-9 else "ABOVE TARGET with the largest section"
         result.groups.append(GroupResult(g, before[g], sec.name, eta_first.get(g), eta, gov, slender, note))
     result.mass_after = _mass(state, lengths)

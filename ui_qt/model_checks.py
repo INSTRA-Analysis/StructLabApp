@@ -240,3 +240,73 @@ def merge_duplicates(state: ModelState, tol: float = DEFAULT_TOL) -> MergeSummar
             state.remove_member(dup.id)
             summary.members_removed += 1
     return summary
+
+
+# ── Crossing members (X-bracing) ──────────────────────────────────────────────
+
+@dataclass
+class Crossing:
+    """Two members whose axes meet in the interior of both, with no node there."""
+    member_a: int
+    member_b: int
+    point: tuple[float, float, float]
+    param_a: float          # 0..1 along member_a from its node_i
+    param_b: float
+
+
+def find_crossings(state: ModelState, tol: float = DEFAULT_TOL,
+                   member_ids: set[int] | None = None) -> list[Crossing]:
+    """Pairs of members that cross within ``tol`` at a point interior to both and share no node.
+
+    Parallel members are ignored (collinear overlaps are ``check_duplicates``' job). A crossing
+    within ``tol`` of an end of either member is a node-meets-member contact, not an X, and is
+    not reported. ``member_ids`` limits the search to those members (both of a pair must be in it).
+    """
+    import numpy as np
+
+    coords = {n.id: (n.x, n.y, n.z) for n in state.nodes}
+    members = [m for m in state.members if m.node_i != m.node_j
+               and (member_ids is None or m.id in member_ids)]
+    if len(members) < 2:
+        return []
+    p = np.array([coords[m.node_i] for m in members], dtype=float)
+    q = np.array([coords[m.node_j] for m in members], dtype=float)
+    d = q - p
+    length = np.linalg.norm(d, axis=1)
+    found: list[Crossing] = []
+    for i in range(len(members) - 1):
+        j = np.arange(i + 1, len(members))
+        r = p[i] - p[j]
+        a = float(d[i] @ d[i])
+        e = np.einsum("ij,ij->i", d[j], d[j])
+        b = d[j] @ d[i]
+        c = d[i] @ r.T
+        f = np.einsum("ij,ij->i", d[j], r)
+        den = a * e - b * b
+        ok = den > 1e-9 * a * e                            # not parallel
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = np.where(ok, (b * f - c * e) / den, 0.0)
+            t = np.where(ok, (a * f - b * c) / den, 0.0)   # parameter along member j
+        # interior of both, farther than tol from every end
+        eps_i, eps_j = tol / max(length[i], 1e-12), tol / np.maximum(length[j], 1e-12)
+        inside = ok & (s > eps_i) & (s < 1 - eps_i) & (t > eps_j) & (t < 1 - eps_j)
+        gap = np.linalg.norm((p[i] + np.outer(s, d[i])) - (p[j] + t[:, None] * d[j]), axis=1)
+        for k in np.nonzero(inside & (gap <= tol))[0]:
+            mi, mj = members[i], members[j[k]]
+            if {mi.node_i, mi.node_j} & {mj.node_i, mj.node_j}:
+                continue
+            pt = p[i] + s[k] * d[i]
+            found.append(Crossing(mi.id, mj.id, (float(pt[0]), float(pt[1]), float(pt[2])),
+                                  float(s[k]), float(t[k])))
+    return found
+
+
+def crossing_restraints(state: ModelState, tol: float = DEFAULT_TOL) -> dict[int, list[tuple[float, int]]]:
+    """For every member, the crossings along it as (parameter 0..1, crossing member id)."""
+    out: dict[int, list[tuple[float, int]]] = {}
+    for c in find_crossings(state, tol):
+        out.setdefault(c.member_a, []).append((c.param_a, c.member_b))
+        out.setdefault(c.member_b, []).append((c.param_b, c.member_a))
+    for lst in out.values():
+        lst.sort()
+    return out

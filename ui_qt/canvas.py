@@ -1804,6 +1804,38 @@ class StructCanvas(QGraphicsScene):
                 seen.append(g)
         return seen
 
+    def crossing_restraints(self) -> dict:
+        """{member id: [(parameter, crossing member id)]} for the current geometry (cached)."""
+        ms = self.model_state
+        key = (tuple((n.id, n.x, n.y, n.z) for n in ms.nodes),
+               tuple((m.id, m.node_i, m.node_j) for m in ms.members))
+        cached = getattr(self, "_crossing_cache", None)
+        if cached is None or cached[0] != key:
+            from ui_qt.model_checks import crossing_restraints
+            cached = (key, crossing_restraints(ms))
+            self._crossing_cache = cached
+        return cached[1]
+
+    def buckling_lengths(self, member_results: list) -> dict[int, float]:
+        """Buckling length of every member for these results. Member lengths, unless the model
+        says crossing bracing is connected, in which case a member crossed by one in tension
+        is held at the crossing (design_checks.buckling_length)."""
+        from ui_qt.design_checks import buckling_length, member_forces
+        ms = self.model_state
+        nodes = {n.id: n for n in ms.nodes}
+        lengths = {}
+        for m in ms.members:
+            a, b = nodes.get(m.node_i), nodes.get(m.node_j)
+            lengths[m.id] = math.dist((a.x, a.y, a.z), (b.x, b.y, b.z)) if a and b else 0.0
+        if not ms.crossing_braces:
+            return lengths
+        by_id = {r.element_id: r for r in member_results}
+        axial = lambda pid: member_forces(by_id[pid])[0] if pid in by_id else None   # noqa: E731
+        for mid, crossings in self.crossing_restraints().items():
+            if mid in lengths:
+                lengths[mid] = buckling_length(lengths[mid], crossings, axial)
+        return lengths
+
     def update_member_util_colours(self, member_results: list,
                                    members: list) -> None:
         """Colour members by utilisation η: buckling / tension / bending for steel angles
@@ -1811,15 +1843,13 @@ class StructCanvas(QGraphicsScene):
         Members that cannot be checked keep their normal colour."""
         from ui_qt.design_checks import display_utilisation
         mem_map = {m.id: m for m in members}
-        state = self.model_state
+        lengths = self.buckling_lengths(member_results)
         for r in member_results:
             mdata = mem_map.get(r.element_id)
             mitem = self._member_items.get(r.element_id)
             if mitem is None or mdata is None:
                 continue
-            ni, nj = state.get_node(mdata.node_i), state.get_node(mdata.node_j)
-            length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
-            eta, _ = display_utilisation(mdata, r, length)
+            eta, _ = display_utilisation(mdata, r, lengths.get(r.element_id, 0.0))
             if eta is None:
                 mitem._update_pen()
             else:

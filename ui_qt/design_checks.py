@@ -346,3 +346,28 @@ def display_utilisation(member, result, length: float) -> tuple[float | None, st
         return (c.eta, "EN 1992-1-1 §6.1, slenderness not checked") if c.eta is not None \
             else (None, "reinforcement / section data not set")
     return None, "no check for this material"
+
+
+# ── buckling length of crossing bracing ───────────────────────────────────────
+
+def buckling_length(length: float, crossings: list[tuple[float, int]], partner_axial) -> float:
+    """Buckling length of a compression member whose axis is crossed by other members.
+
+    ``crossings`` lists (parameter 0..1 along the member, id of the member crossing it).
+    ``partner_axial(id)`` returns that member's axial force (compression positive) or None.
+    A crossing holds the member only while the member crossing it is in TENSION (a
+    compressed partner buckles together with it and gives no support), and it is assumed
+    connected there (ModelState.crossing_braces). The buckling length is the longest stretch
+    between the member's ends and its holding crossings; with none it is the member length.
+
+    This is the usual lattice-tower practice for crossed bracing, applied to the plane of the
+    X. It gives no restraint against buckling out of that plane; check that against
+    EN 1993-3-1 where it matters.
+    """
+    points = [0.0, 1.0]
+    for param, partner in crossings:
+        n = partner_axial(partner)
+        if n is not None and n < 0:
+            points.append(param)
+    points.sort()
+    return max(b - a for a, b in zip(points, points[1:])) * length

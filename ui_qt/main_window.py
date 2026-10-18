@@ -364,6 +364,27 @@ class MainWindow(QMainWindow):
         from ui_qt.dialogs import DuplicatesDialog
         DuplicatesDialog(self._scene, self).exec()
 
+    def _on_crossing_braces_toggled(self, checked: bool) -> None:
+        """Treat crossing bracing as connected at the crossing (buckling length only)."""
+        state = self._scene.model_state
+        if state.crossing_braces == checked:
+            return
+        state.crossing_braces = checked
+        self._is_dirty = True
+        self._update_title()
+        if self._solve_cache is not None and self._scene._util_colour_active:
+            self._scene.update_member_util_colours(self._solve_cache["member_results"], state.members)
+        self._sb.showMessage(
+            "Crossing bracing is treated as connected: a compression member is held at a crossing "
+            "while the member crossing it is in tension. Re-solve to refresh the Design table."
+            if checked else "Crossing bracing no longer holds compression members at the crossing.")
+
+    def _sync_crossing_action(self) -> None:
+        act = self._act["crossing_braces"]
+        act.blockSignals(True)
+        act.setChecked(self._scene.model_state.crossing_braces)
+        act.blockSignals(False)
+
     def _on_rotate_selection(self) -> None:
         """Rotate the selection by an exact angle, optionally keeping the original (copies)."""
         from ui_qt.dialogs import RotateDialog
@@ -466,6 +487,7 @@ class MainWindow(QMainWindow):
             tools_menu.addAction(a[key])
         tools_menu.addSeparator()
         tools_menu.addAction(a["check_duplicates"])
+        tools_menu.addAction(a["crossing_braces"])
         tools_menu.addSeparator()
         tools_menu.addAction(a["console"])
 
@@ -786,6 +808,7 @@ class MainWindow(QMainWindow):
             state = load_model(path)
             self._scene.load_state(state)
             self._scene._hide_welcome = True
+            self._sync_crossing_action()
             self._props_panel.set_model_state(self._scene.model_state)
             self._refresh_lc_combo()
             self._results_panel.clear()
@@ -2036,6 +2059,7 @@ class MainWindow(QMainWindow):
         if self._scene.model_state.nodes:
             self._scene._hide_welcome = True  # user has started building
         self._is_dirty = True
+        self._sync_crossing_action()
         # Discard stale solve results — node IDs in the cache may no longer
         # match the current model after deletions or duplications.
         self._solve_cache = None

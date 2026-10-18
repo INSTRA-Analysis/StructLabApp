@@ -347,7 +347,7 @@ from ui_qt.design_checks import (
     member_forces as _member_forces,
 )
 
-def _angle_rows(member, model_state, M_Ed: float, N_Ed: float):
+def _angle_rows(member, model_state, M_Ed: float, N_Ed: float, lcr: float | None = None):
     """Buckling / tension / bending rows when the member is a library steel angle (EN 1993-1-1),
     else None so the cross-section rows are used."""
     from ui_qt.design_checks import check_member, identify_angle
@@ -355,7 +355,7 @@ def _angle_rows(member, model_state, M_Ed: float, N_Ed: float):
         return None
     ni, nj = model_state.get_node(member.node_i), model_state.get_node(member.node_j)
     length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
-    check = check_member(member, N_Ed, M_Ed, length)
+    check = check_member(member, N_Ed, M_Ed, lcr if lcr is not None else length)
     if check.rows:
         return check.rows
     return [{"check": "Axial N (buckling)", "demand": N_Ed, "capacity": None, "eta": None,
@@ -1984,6 +1984,22 @@ class ResultsPanel(QWidget):
         finally:
             self._syncing = False
 
+    @staticmethod
+    def _design_buckling_lengths(m_ed_data, model_state) -> dict[int, float]:
+        """Buckling length per member when the model treats crossing bracing as connected."""
+        if not getattr(model_state, "crossing_braces", False):
+            return {}
+        from ui_qt.design_checks import buckling_length
+        from ui_qt.model_checks import crossing_restraints
+        axial = {mid: n for mid, _m, n in m_ed_data}
+        out = {}
+        for mid, crossings in crossing_restraints(model_state).items():
+            md = model_state.get_member(mid)
+            ni, nj = model_state.get_node(md.node_i), model_state.get_node(md.node_j)
+            length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z))
+            out[mid] = buckling_length(length, crossings, axial.get)
+        return out
+
     def _populate_design_table(
         self, m_ed_data: list[tuple[int, float, float]], model_state
     ) -> None:
@@ -1997,6 +2013,7 @@ class ResultsPanel(QWidget):
         self._design_row_to_member = []
         flat_rows: list[dict] = []
 
+        lcr_of = self._design_buckling_lengths(m_ed_data, model_state)
         for mid, M_Ed, N_Ed in m_ed_data:
             md = model_state.get_member(mid)
             fk   = md.fy      if md else 275e6
@@ -2021,7 +2038,8 @@ class ResultsPanel(QWidget):
             fyk_v = md.fyk        if md else 500e6
 
             estimated = mat == "concrete" and bool(md and md.reinforcement_estimated)
-            rows = _angle_rows(md, model_state, M_Ed, N_Ed) if mat == "steel" and md else None
+            rows = (_angle_rows(md, model_state, M_Ed, N_Ed, lcr_of.get(mid))
+                    if mat == "steel" and md else None)
             if rows is None:
                 rows = _compute_member_design_rows(
                     etype, mat, fk, A, W_pl, W_el, b, d, As, fyk_v, M_Ed, N_Ed,
