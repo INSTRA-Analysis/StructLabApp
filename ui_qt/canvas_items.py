@@ -78,9 +78,17 @@ _UDL_PEN   = QPen(QColor("#cc2200"), 1)
 _LAT_PEN   = QPen(QColor("#E65100"), 1.5)   # orange — lateral (global X) loads
 
 _LABEL_COLOR = QColor("#cc2200")
-_LABEL_FONT  = QFont()
-_LABEL_FONT.setPointSize(7)
-_LABEL_FONT.setBold(True)
+
+
+def _label_font() -> QFont:
+    """Bold 7 pt load-label font. Built on first use, NOT at import: a QFont made before the
+    QApplication exists does not pick up the application's default family, and on Windows
+    falls back to the legacy bitmap "MS Sans Serif", which DirectWrite cannot render
+    (qt.qpa.fonts: CreateFontFaceFromHDC() failed)."""
+    font = QFont()
+    font.setPointSize(7)
+    font.setBold(True)
+    return font
 
 
 # ── member group colouring ("Colour by Group" view mode) ──────────────────────
@@ -150,7 +158,7 @@ def _fmt(value: float, unit: str) -> str:
 def _make_label(text: str, sx: float, sy: float, z: float = 1.8,
                 color: QColor | None = None) -> QGraphicsSimpleTextItem:
     lbl = QGraphicsSimpleTextItem(text)
-    lbl.setFont(_LABEL_FONT)
+    lbl.setFont(_label_font())
     lbl.setBrush(QBrush(color if color else _LABEL_COLOR))
     lbl.setPos(sx, sy)
     lbl.setZValue(z)

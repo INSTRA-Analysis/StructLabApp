@@ -59,3 +59,27 @@ def test_icon_colour_follows_the_theme_and_disabled_state_is_dimmer(qapp):
     def brightest(img):
         return max(img.pixelColor(x, 12).lightness() for x in range(24) if img.pixelColor(x, 12).alpha() > 200)
     assert brightest(normal) > brightest(disabled)
+
+
+def test_label_font_uses_the_application_font_even_when_imported_before_the_app():
+    """Regression: a QFont built at import time resolved to the bitmap 'MS Sans Serif' on Windows
+    (qt.qpa.fonts: DirectWrite CreateFontFaceFromHDC() failed). Fresh process: the import must
+    happen before QApplication exists, as in ui_qt/main.py."""
+    import subprocess
+    import sys
+    code = (
+        "import sys; sys.path.insert(0, '.')\n"
+        "import ui_qt.main_window\n"
+        "from PyQt6.QtWidgets import QApplication\n"
+        "from PyQt6.QtGui import QFontInfo\n"
+        "app = QApplication([])\n"
+        "import ui_qt.canvas_items as ci\n"
+        "print(QFontInfo(ci._label_font()).family() == QFontInfo(QApplication.font()).family())\n"
+    )
+    # The fallback only happens with the native platform plugin, not "offscreen".
+    env = {k: v for k, v in os.environ.items() if k != "QT_QPA_PLATFORM"}
+    if sys.platform != "win32":
+        env["QT_QPA_PLATFORM"] = "offscreen"
+    out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True,
+                         env=env, timeout=60)
+    assert out.stdout.strip().splitlines()[-1] == "True", out.stderr
