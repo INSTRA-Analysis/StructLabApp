@@ -461,3 +461,82 @@ def test_window_saves_restores_and_deletes_named_views(qapp, monkeypatch):
         qapp.processEvents()
         win._is_dirty = False
         win.close()
+
+
+# ── deformed-shape animation ──────────────────────────────────────────────────
+
+def test_animation_factor_loops_zero_to_one_to_zero():
+    from ui_qt.canvas_overlay import animation_factor
+    n = 24
+    assert animation_factor(0, n) == pytest.approx(0.0)
+    assert animation_factor(n // 2, n) == pytest.approx(1.0)
+    assert animation_factor(n, n) == pytest.approx(0.0)                     # wraps
+    values = [animation_factor(i, n) for i in range(n)]
+    assert all(0.0 <= v <= 1.0 for v in values)
+    assert values[:13] == sorted(values[:13]) and values[12:] == sorted(values[12:], reverse=True)
+
+
+def _deformed_tip_x(items):
+    """Screen x of the free end of the deformed polyline(s): the item with the largest extent."""
+    return max(i.path().boundingRect().right() for i in items)
+
+
+def test_update_deformed_layer_redraws_only_that_layer_at_the_given_scale(qapp):
+    from ui_qt.canvas_overlay import compute_auto_scales
+    sc, state, cache, m, a, b = _solved_cantilever()
+    sc.update_overlays(cache["model"], cache["sub_results"], cache["displacements"],
+                       cache["member_el_map"])
+    bmd_before = list(sc._overlay_items["BMD"])
+    _, auto = compute_auto_scales(cache["model"], cache["sub_results"], cache["displacements"])
+
+    def heights(scale):
+        sc.update_deformed_layer(cache["model"], cache["displacements"], cache["member_el_map"], scale)
+        deformed = [i for i in sc._overlay_items["Deformed"] if i.pen().style().name == "DashLine"]
+        return max(i.path().boundingRect().height() for i in deformed)
+
+    small, large = heights(auto), heights(auto * 4)
+    assert large > small > 0
+    assert sc._overlay_items["BMD"] == bmd_before                       # untouched
+    n_items = len(sc._overlay_items["Deformed"])
+    heights(auto * 2)
+    assert len(sc._overlay_items["Deformed"]) == n_items                # replaced, not accumulated
+    uids = [i.data(0) for lst in sc._member_overlay_items.values() for i in lst
+            if i in sc._overlay_items["Deformed"]]
+    assert len(uids) == n_items                                         # still tagged per member
+
+
+def test_window_animation_needs_a_solve_and_restores_the_static_overlays(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    for name in ("question", "warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name,
+                            lambda *a, _n=name, **k: pytest.fail(f"unexpected {_n} dialog: {a[1:3]}"))
+    sc0, state, cache0, m, a, b = _solved_cantilever()
+    win = MainWindow()
+    try:
+        win._animate_act.setChecked(True)                               # nothing solved yet
+        assert not win._animate_act.isChecked() and not hasattr(win, "_anim_timer")
+        win._scene.load_state(state)
+        win._on_solve()
+        assert win._solve_cache is not None
+        win._animate_act.setChecked(True)
+        assert win._anim_timer.isActive()
+        shapes = []
+        for _ in range(win._ANIM_FRAMES // 2):
+            win._anim_tick()
+            shapes.append(max(i.path().boundingRect().height()
+                              for i in win._scene._overlay_items["Deformed"]
+                              if i.pen().style().name == "DashLine"))
+        assert shapes[-1] > shapes[0]                                   # grows towards the half-cycle peak
+        win._animate_act.setChecked(False)
+        assert not win._anim_timer.isActive()
+        assert win._scene._overlay_items["BMD"]                         # static overlays are back
+    finally:
+        if hasattr(win, "_anim_timer"):
+            win._anim_timer.stop()
+        win._scene.clearSelection()
+        qapp.processEvents()
+        win._is_dirty = False
+        win.close()

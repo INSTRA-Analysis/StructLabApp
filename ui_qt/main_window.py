@@ -454,6 +454,11 @@ class MainWindow(QMainWindow):
             "Draw members thicker the larger their cross-section area (Ctrl+T)")
         self._thickness_act.toggled.connect(self._on_thickness_toggled)
 
+        self._animate_act = tools_menu.addAction("Animate Deformed Shape")
+        self._animate_act.setCheckable(True)
+        self._animate_act.setToolTip("Loop the deformed shape from undeformed to full size (needs a solved model)")
+        self._animate_act.toggled.connect(self._on_animate_toggled)
+
         self._section_cut_act = tools_menu.addAction("Section Cut…", self._open_section_cut)
         self._section_cut_act.setToolTip("Hide everything on one side of a plane to look inside the model")
 
@@ -469,6 +474,47 @@ class MainWindow(QMainWindow):
 
     def _on_colour_by_group_toggled(self, checked: bool) -> None:
         self._scene.set_colour_by_group(checked)
+
+    # ── deformed-shape animation ──────────────────────────────────────────────
+
+    _ANIM_FRAMES = 24          # frames per cycle (undeformed -> full -> undeformed)
+    _ANIM_INTERVAL_MS = 80
+
+    def _on_animate_toggled(self, checked: bool) -> None:
+        if checked:
+            if self._solve_cache is None:
+                self._sb.showMessage("Solve the model first, then animate the deformed shape.")
+                self._animate_act.blockSignals(True)
+                self._animate_act.setChecked(False)
+                self._animate_act.blockSignals(False)
+                return
+            from ui_qt.canvas_overlay import compute_auto_scales
+            c = self._solve_cache
+            _, self._anim_base_scale = compute_auto_scales(c['model'], c['sub_results'], c['displacements'])
+            self._anim_frame = 0
+            if "Def" in self._overlay_btns:
+                self._overlay_btns["Def"].setChecked(True)      # make the deformed layer visible
+            if not hasattr(self, "_anim_timer"):
+                self._anim_timer = QTimer(self)
+                self._anim_timer.timeout.connect(self._anim_tick)
+            self._anim_timer.start(self._ANIM_INTERVAL_MS)
+        else:
+            if hasattr(self, "_anim_timer"):
+                self._anim_timer.stop()
+            if self._solve_cache is not None:
+                self._redraw_overlays()                          # back to the static overlays
+
+    def _anim_tick(self) -> None:
+        cache = self._solve_cache
+        if cache is None:                                        # an edit invalidated the results
+            self._animate_act.setChecked(False)
+            return
+        from ui_qt.canvas_overlay import animation_factor
+        self._anim_frame = (self._anim_frame + 1) % self._ANIM_FRAMES
+        factor = animation_factor(self._anim_frame, self._ANIM_FRAMES)
+        self._scene.update_deformed_layer(
+            cache['model'], cache['displacements'], cache['member_el_map'],
+            self._anim_base_scale * self._def_scale_spin.value() * factor)
 
     def _open_section_cut(self) -> None:
         from ui_qt.section_cut import SectionCutDialog

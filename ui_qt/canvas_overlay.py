@@ -126,8 +126,8 @@ def compute_auto_scales(
     # Collect element spans in pixels
     spans_px: list[float] = []
     for el in model.elements:
-        ni = next(n for n in model.nodes if n.id == el.node_i.id)
-        nj = next(n for n in model.nodes if n.id == el.node_j.id)
+        ni = _nodes_by_id(model)[el.node_i.id]
+        nj = _nodes_by_id(model)[el.node_j.id]
         ix_s, iy_s = _node_to_scene(ni, model)
         jx_s, jy_s = _node_to_scene(nj, model)
         L_px = math.hypot(jx_s - ix_s, jy_s - iy_s)
@@ -142,8 +142,8 @@ def compute_auto_scales(
         el = _find_element(model, res.element_id)
         if el is None:
             continue
-        ni = next(n for n in model.nodes if n.id == el.node_i.id)
-        nj = next(n for n in model.nodes if n.id == el.node_j.id)
+        ni = _nodes_by_id(model)[el.node_i.id]
+        nj = _nodes_by_id(model)[el.node_j.id]
         L  = math.hypot(nj.x - ni.x, nj.y - ni.y)
         # Sample M(x) at 20 points to find true maximum (UDL produces mid-span peak)
         xs = np.linspace(0.0, L, 20)
@@ -594,8 +594,8 @@ def draw_afd(
         if el is None:
             continue
 
-        ni = next(n for n in model.nodes if n.id == el.node_i.id)
-        nj = next(n for n in model.nodes if n.id == el.node_j.id)
+        ni = _nodes_by_id(model)[el.node_i.id]
+        nj = _nodes_by_id(model)[el.node_j.id]
 
         ix_s, iy_s = _node_to_scene(ni, model)
         jx_s, jy_s = _node_to_scene(nj, model)
@@ -622,6 +622,16 @@ def draw_afd(
 # ─────────────────────────────────────────────────────────────────────────────
 # Public: draw_deformed
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _nodes_by_id(model: "Model") -> dict:
+    """{node id: node} for ``model``, built once per model (the linear lookup it replaces
+    made every overlay redraw quadratic in the number of nodes)."""
+    cached = getattr(model, "_nodes_by_id_cache", None)
+    if cached is None or cached[0] != len(model.nodes):
+        cached = (len(model.nodes), {n.id: n for n in model.nodes})
+        model._nodes_by_id_cache = cached
+    return cached[1]
+
 
 def draw_deformed(
     model: "Model",
@@ -651,8 +661,8 @@ def draw_deformed(
     items: list[QGraphicsItem] = []
 
     for el in model.elements:
-        ni = next(n for n in model.nodes if n.id == el.node_i.id)
-        nj = next(n for n in model.nodes if n.id == el.node_j.id)
+        ni = _nodes_by_id(model)[el.node_i.id]
+        nj = _nodes_by_id(model)[el.node_j.id]
 
         ix_s, iy_s = _node_to_scene(ni, model)
         jx_s, jy_s = _node_to_scene(nj, model)
@@ -683,7 +693,7 @@ def draw_deformed(
             return float(displacements[idx]) if idx < n_dofs else 0.0
 
         L = el.length
-        N_pts = 30
+        N_pts = 30 if len(model.elements) <= 400 else 10   # big models: short elements, fewer points
         ts = np.linspace(0.0, 1.0, N_pts)
 
         N1 = 1.0 - 3.0 * ts ** 2 + 2.0 * ts ** 3
@@ -913,8 +923,8 @@ def compute_auto_scales_envelope(
 
     spans_px: list[float] = []
     for el in model.elements:
-        ni = next(n for n in model.nodes if n.id == el.node_i.id)
-        nj = next(n for n in model.nodes if n.id == el.node_j.id)
+        ni = _nodes_by_id(model)[el.node_i.id]
+        nj = _nodes_by_id(model)[el.node_j.id]
         ix_s, iy_s = _node_to_scene(ni, model)
         jx_s, jy_s = _node_to_scene(nj, model)
         L_px = math.hypot(jx_s - ix_s, jy_s - iy_s)
@@ -1148,3 +1158,8 @@ def draw_sfd_all_combos(
             ))
 
     return items
+
+
+def animation_factor(frame: int, frames: int) -> float:
+    """Deformation fraction at ``frame`` of a ``frames``-long loop: 0 -> 1 -> 0, smooth at the ends."""
+    return 0.5 * (1.0 - math.cos(2.0 * math.pi * (frame % frames) / frames))

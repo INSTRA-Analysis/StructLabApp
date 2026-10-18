@@ -1305,6 +1305,28 @@ class StructCanvas(QGraphicsScene):
             self._overlay_items[layer] = items
         self._apply_labels_visibility()
 
+    def update_deformed_layer(self, model, displacements, member_el_map, def_scale: float) -> None:
+        """Redraw ONLY the deformed-shape layer at an absolute ``def_scale`` (used by the
+        animation; the diagrams and labels stay as they are)."""
+        from ui_qt.canvas_overlay import draw_deformed
+        for item in self._overlay_items.get('Deformed', []):
+            self.removeItem(item)
+            uid = item.data(0)
+            if uid is not None and item in self._member_overlay_items.get(uid, []):
+                self._member_overlay_items[uid].remove(item)
+        member_ids = [m.id for m in self.model_state.members]
+        el_to_member = {eid: member_ids[mi] for mi, ids in enumerate(member_el_map)
+                        if mi < len(member_ids) for eid in ids}
+        items = draw_deformed(model, displacements, def_scale, el_id_to_member_id=el_to_member)
+        visible = self._overlay_visible.get('Deformed', True)
+        for item in items:
+            self.addItem(item)
+            item.setVisible(visible)
+            uid = item.data(0)
+            if uid is not None:
+                self._member_overlay_items.setdefault(uid, []).append(item)
+        self._overlay_items['Deformed'] = items
+
     def update_overlays_single_combo(
         self,
         run: dict,
