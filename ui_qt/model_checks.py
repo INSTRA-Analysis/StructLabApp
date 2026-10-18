@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from ui_qt.model_state import ModelState, NodeLoad, SupportType
+from ui_qt.model_state import MemberData, ModelState, NodeLoad, SupportType
 
 DEFAULT_TOL = 1e-3          # m — nodes closer than 1 mm are the same point
 
@@ -239,4 +239,138 @@ def merge_duplicates(state: ModelState, tol: float = DEFAULT_TOL) -> MergeSummar
                     lc.member_loads[keep.id] = target
             state.remove_member(dup.id)
             summary.members_removed += 1
+    return summary
+
+
+# ── Crossing members (X-bracing drawn without a node at the crossing) ──────────
+
+@dataclass
+class Crossing:
+    """Two members whose axes meet in the interior of both, with no node there."""
+    member_a: int
+    member_b: int
+    point: tuple[float, float, float]
+    param_a: float          # 0..1 along member_a from its node_i
+    param_b: float
+
+
+@dataclass
+class SplitSummary:
+    crossings: int = 0
+    nodes_created: int = 0
+    members_split: int = 0
+    members_created: int = 0
+    skipped_loaded: list[int] = field(default_factory=list)   # members with member loads, left alone
+
+    def message(self) -> str:
+        if not self.crossings:
+            if self.skipped_loaded:
+                return (f"{len(self.skipped_loaded)} member(s) cross without a node but carry member "
+                        "loads, so they were left alone.")
+            return "No crossing members without a node were found."
+        text = (f"Split {self.members_split} member(s) at {self.nodes_created} crossing node(s): "
+                f"{self.members_created} new member(s).")
+        if self.skipped_loaded:
+            text += (f" {len(self.skipped_loaded)} member(s) carry member loads and were left alone "
+                     f"(ids {', '.join(map(str, self.skipped_loaded[:8]))}"
+                     f"{'…' if len(self.skipped_loaded) > 8 else ''}).")
+        return text
+
+
+def find_crossings(state: ModelState, tol: float = DEFAULT_TOL,
+                   member_ids: set[int] | None = None) -> list[Crossing]:
+    """Pairs of members that cross within ``tol`` at a point interior to both and share no node.
+
+    Parallel members are ignored (collinear overlaps are ``check_duplicates``' job). A crossing
+    within ``tol`` of an end of either member is a node-meets-member contact, not an X, and is
+    not reported. ``member_ids`` limits the search to those members (both of a pair must be in it).
+    """
+    import numpy as np
+
+    coords = {n.id: (n.x, n.y, n.z) for n in state.nodes}
+    members = [m for m in state.members if m.node_i != m.node_j
+               and (member_ids is None or m.id in member_ids)]
+    if len(members) < 2:
+        return []
+    p = np.array([coords[m.node_i] for m in members], dtype=float)
+    q = np.array([coords[m.node_j] for m in members], dtype=float)
+    d = q - p
+    length = np.linalg.norm(d, axis=1)
+    found: list[Crossing] = []
+    for i in range(len(members) - 1):
+        j = np.arange(i + 1, len(members))
+        r = p[i] - p[j]
+        a = float(d[i] @ d[i])
+        e = np.einsum("ij,ij->i", d[j], d[j])
+        b = d[j] @ d[i]
+        c = d[i] @ r.T
+        f = np.einsum("ij,ij->i", d[j], r)
+        den = a * e - b * b
+        ok = den > 1e-9 * a * e                            # not parallel
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = np.where(ok, (b * f - c * e) / den, 0.0)
+            t = np.where(ok, (a * f - b * c) / den, 0.0)   # parameter along member j
+        # interior of both, farther than tol from every end
+        eps_i, eps_j = tol / max(length[i], 1e-12), tol / np.maximum(length[j], 1e-12)
+        inside = ok & (s > eps_i) & (s < 1 - eps_i) & (t > eps_j) & (t < 1 - eps_j)
+        gap = np.linalg.norm((p[i] + np.outer(s, d[i])) - (p[j] + t[:, None] * d[j]), axis=1)
+        for k in np.nonzero(inside & (gap <= tol))[0]:
+            mi, mj = members[i], members[j[k]]
+            if {mi.node_i, mi.node_j} & {mj.node_i, mj.node_j}:
+                continue
+            pt = p[i] + s[k] * d[i]
+            found.append(Crossing(mi.id, mj.id, (float(pt[0]), float(pt[1]), float(pt[2])),
+                                  float(s[k]), float(t[k])))
+    return found
+
+
+def split_crossings(state: ModelState, tol: float = DEFAULT_TOL,
+                    member_ids: set[int] | None = None) -> SplitSummary:
+    """Put a node at every crossing and split the crossing members there (X-bracing becomes joined).
+
+    Crossings that fall on the same point (three members through one point) share one node, and a
+    member crossed several times is cut into as many pieces. The pieces keep every property of the
+    original (section, material, group, design data, orientation). A member that carries member
+    loads in any load case is NOT split — its loads would need re-distributing — and is listed in
+    ``skipped_loaded``; a crossing that involves one is skipped as a whole.
+    """
+    import dataclasses
+
+    summary = SplitSummary()
+    loaded = {mid for lc in state.load_cases for mid, ml in lc.member_loads.items() if not ml.is_zero()}
+    crossings = [c for c in find_crossings(state, tol, member_ids)]
+    skipped = sorted({m for c in crossings for m in (c.member_a, c.member_b) if m in loaded})
+    crossings = [c for c in crossings if c.member_a not in loaded and c.member_b not in loaded]
+    summary.skipped_loaded = skipped
+    summary.crossings = len(crossings)
+    if not crossings:
+        return summary
+
+    by_id = {m.id: m for m in state.members}
+    node_at: dict[tuple[int, int, int], int] = {}
+
+    def node_for(point: tuple[float, float, float]) -> int:
+        key = tuple(round(v / (2 * tol)) for v in point)        # points within ~tol share a node
+        if key not in node_at:
+            node_at[key] = state.add_node(*point).id
+            summary.nodes_created += 1
+        return node_at[key]
+
+    cuts: dict[int, dict[int, float]] = {}          # member -> {node id: parameter along it}
+    for c in crossings:
+        nid = node_for(c.point)                     # a member crossed by two others at one point
+        cuts.setdefault(c.member_a, {})[nid] = c.param_a     # meets the same node twice: keep one
+        cuts.setdefault(c.member_b, {})[nid] = c.param_b
+
+    keep = [f.name for f in dataclasses.fields(MemberData) if f.name not in ("id", "node_i", "node_j")]
+    for mid, pieces in cuts.items():
+        old = by_id[mid]
+        chain = [old.node_i] + [nid for nid, _ in sorted(pieces.items(), key=lambda kv: kv[1])] + [old.node_j]
+        state.remove_member(mid)
+        summary.members_split += 1
+        for a, b in zip(chain, chain[1:]):
+            new = state.add_member(a, b)
+            for name in keep:
+                setattr(new, name, getattr(old, name))
+            summary.members_created += 1
     return summary

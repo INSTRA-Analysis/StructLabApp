@@ -2071,6 +2071,20 @@ class StructCanvas(QGraphicsScene):
         self.model_changed.emit()
         return summary
 
+    def split_crossings(self, tol: float = 1e-3, only_selected: bool = False):
+        """Put a node at every crossing of two members and split them there (one undo step).
+        Returns the model_checks.SplitSummary; ``only_selected`` limits it to the selected members."""
+        from ui_qt.model_checks import split_crossings
+        ids = {i.member.id for i in self.selectedItems() if hasattr(i, "member")} if only_selected else None
+        self.save_snapshot()
+        summary = split_crossings(self.model_state, tol, ids)
+        if summary.crossings:
+            self.redraw()
+            self.model_changed.emit()
+        else:
+            self._undo_stack.pop()          # nothing changed: do not leave an empty undo step
+        return summary
+
     def rotate_selection(self, axis: str, angle_deg: float,
                          pivot: tuple[float, float, float] | None = None,
                          copies: int = 0):

@@ -364,6 +364,27 @@ class MainWindow(QMainWindow):
         from ui_qt.dialogs import DuplicatesDialog
         DuplicatesDialog(self._scene, self).exec()
 
+    def _on_split_crossings(self) -> None:
+        """Join X-bracing: node at every crossing of two members, both split there (one undo step)."""
+        from ui_qt.model_checks import find_crossings
+        scene = self._scene
+        selected = {i.member.id for i in scene.selectedItems() if hasattr(i, "member")}
+        only_selected = len(selected) >= 2
+        found = find_crossings(scene.model_state, member_ids=selected if only_selected else None)
+        if not found:
+            self._sb.showMessage("No crossing members without a node were found"
+                                 + (" among the selected members." if only_selected else "."))
+            return
+        scope = f"among the {len(selected)} selected members" if only_selected else "in the model"
+        reply = QMessageBox.question(
+            self, "Split at Crossings",
+            f"{len(found)} crossing(s) {scope} have no node. Add a node at each crossing and "
+            "split the members there?\n\nMembers that carry member loads are left alone.")
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        summary = scene.split_crossings(only_selected=only_selected)
+        self._sb.showMessage(summary.message())
+
     def _on_rotate_selection(self) -> None:
         """Rotate the selection by an exact angle, optionally keeping the original (copies)."""
         from ui_qt.dialogs import RotateDialog
@@ -466,6 +487,7 @@ class MainWindow(QMainWindow):
             tools_menu.addAction(a[key])
         tools_menu.addSeparator()
         tools_menu.addAction(a["check_duplicates"])
+        tools_menu.addAction(a["split_crossings"])
         tools_menu.addSeparator()
         tools_menu.addAction(a["console"])
 
