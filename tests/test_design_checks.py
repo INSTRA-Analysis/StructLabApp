@@ -193,7 +193,7 @@ def test_populate_preserves_axial_sign_through_the_full_solve_path(qapp):
 
     N_tension = -_AS * (_FYK / 1.15) * 1.2   # 20% over the steel-only tension capacity
     res = ElementResult(element_id=0, end_forces=np.array(
-        [N_tension, 0.0, 5e3, N_tension, 0.0, -5e3]))
+        [N_tension, 0.0, 5e3, -N_tension, 0.0, -5e3]))   # j end carries the opposite sign
 
     panel = ResultsPanel()
     panel.populate(

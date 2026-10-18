@@ -97,7 +97,8 @@ COMMANDS: tuple[Command, ...] = (
     Command("force_colours", "Force Colours", "_on_force_colour_toggle", "palette", "",
             "Colour members by axial force: red = compression, blue = tension", True),
     Command("util_colours", "Utilisation", "_on_util_colour_toggle", "gauge", "",
-            "Colour members by section utilisation η = N/Npl + M/Mpl (no buckling)\n"
+            "Colour members by utilisation η: steel angles by EN 1993-1-1 buckling / tension,\n"
+            "other steel by cross-section only (no buckling), concrete by EN 1992-1-1 §6.1\n"
             "Green < 50%  ·  Yellow 50–100%  ·  Red > 100%", True),
     Command("animate", "Animate", "_on_animate_toggled", "clapperboard", "",
             "Loop the deformed shape from undeformed to full size (needs a solved model)", True),

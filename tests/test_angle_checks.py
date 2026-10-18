@@ -175,3 +175,73 @@ def test_member_without_capacity_data_is_not_checked():
 
 def test_zero_length_is_not_checked():
     assert not dc.check_angle(angle_properties("L 50×5"), 1e3, 0.0, 0.0, 275e6, E, False).checked
+
+
+# ── forces from solver results ───────────────────────────────────────────────
+
+def test_member_forces_take_the_opposite_end_sign_into_account():
+    import numpy as np
+    from solver.postprocessor import ElementResult
+    tension = ElementResult(0, np.array([-100e3, 0, 2e3, 100e3, 0, -3e3]))
+    comp = ElementResult(0, np.array([100e3, 0, 2e3, -100e3, 0, -3e3]))
+    assert dc.member_forces(tension) == (-100e3, 3e3)
+    assert dc.member_forces(comp) == (100e3, 3e3)
+    # a distributed axial load makes the ends differ: the larger of the two governs, sign kept
+    udl = ElementResult(0, np.array([100e3, 0, 0, -101e3, 0, 0]))
+    assert dc.member_forces(udl)[0] == 101e3
+
+
+def test_member_forces_3d_uses_the_resultant_moment():
+    import numpy as np
+    from solver.postprocessor import ElementResult
+    f = np.zeros(12); f[0], f[6] = 50e3, -50e3
+    f[4], f[5] = 3e3, 4e3
+    assert dc.member_forces(ElementResult(0, f)) == (50e3, 5e3)
+
+
+def test_display_utilisation_labels_what_it_computed():
+    import numpy as np
+    from solver.postprocessor import ElementResult
+    sec = angle_properties("L 100×10")
+    m = _member(sec, fy=355e6)
+    f = np.zeros(12); f[0], f[6] = 150e3, -150e3
+    eta, basis = dc.display_utilisation(m, ElementResult(0, f), 2.0)
+    assert basis.startswith("buckling") and eta > 150e3 / (sec.A * 355e6)
+    plain = MemberData(id=2, node_i=0, node_j=1)
+    plain.E, plain.fy, plain.A, plain.W_pl = E, 275e6, 0.005, 5e-4
+    eta, basis = dc.display_utilisation(plain, ElementResult(0, f), 2.0)
+    assert basis == "section only, no buckling" and eta == pytest.approx(150e3 / (0.005 * 275e6))
+
+
+# ── wiring: tooltip and colouring ────────────────────────────────────────────
+
+def test_tooltip_and_colouring_use_the_angle_check():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])      # keep a reference: it must outlive the scene
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.model_builder import build_model
+    from ui_qt.model_state import ModelState, NodeLoad, SupportType
+    from ui_qt.solve_actions import solve_engine
+
+    sec = angle_properties("L 80×8")
+    state = ModelState()
+    a, b = state.add_node(0, 0, 0), state.add_node(3, 0, 0)
+    a.support_type = SupportType.PIN
+    b.support_type = SupportType.ROLLER
+    m = state.add_member(a.id, b.id)
+    m.element_type, m.E, m.fy, m.A, m.I, m.I_y = ElementType.BAR, E, 275e6, sec.A, sec.I_v, sec.I_v
+    state.load_cases[0].set_node_load(b.id, NodeLoad(fx=-60e3))            # push: compression
+    model, emap = build_model(state, state.load_cases[0])
+    cache = solve_engine(model, emap, state)
+
+    sc = StructCanvas()
+    sc.load_state(state)
+    sc.results_provider = lambda: cache
+    text = sc._member_items[m.id].tooltip_text()
+    assert "(compression)" in text and "buckling, EN 1993-1-1" in text
+    eta, _ = dc.display_utilisation(m, cache["member_results"][0], 3.0)
+    assert f"utilisation = {eta:.2f}" in text and eta > 60e3 / (sec.A * 275e6)   # buckling beats squash
+    sc.update_member_util_colours(cache["member_results"], state.members)
+    assert sc._util_colour_active

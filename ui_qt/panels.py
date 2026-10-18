@@ -344,7 +344,23 @@ from ui_qt.design_checks import (
     bending_row as _design_bending_row,
     infer_material as _infer_mat_type,
     member_design_rows as _compute_member_design_rows,
+    member_forces as _member_forces,
 )
+
+def _angle_rows(member, model_state, M_Ed: float, N_Ed: float):
+    """Buckling / tension / bending rows when the member is a library steel angle (EN 1993-1-1),
+    else None so the cross-section rows are used."""
+    from ui_qt.design_checks import check_member, identify_angle
+    if identify_angle(member.A, member.I, member.I_y if member.I_y else member.I) is None:
+        return None
+    ni, nj = model_state.get_node(member.node_i), model_state.get_node(member.node_j)
+    length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
+    check = check_member(member, N_Ed, M_Ed, length)
+    if check.rows:
+        return check.rows
+    return [{"check": "Axial N (buckling)", "demand": N_Ed, "capacity": None, "eta": None,
+             "status": "not checked: " + check.notes[0], "unit": "kN"}]
+
 
 _MAT_TYPE_LABELS = {"steel": "fy (MPa):", "concrete": "fck (MPa):", "timber": "fk (MPa):"}
 
@@ -1748,7 +1764,7 @@ class ResultsPanel(QWidget):
             col_vals[7].append(Mm_kNm)
             xL_plus.append(xL_p);    xL_minus.append(xL_m)
             design_data.append((mid, max(abs(M_plus), abs(M_minus)),
-                               max((res.N_i, res.N_j), key=abs)))   # sign kept: + = compression
+                               _member_forces(res)[0]))   # sign kept: + = compression
 
         # Footer Max / Min rows
         if n_members > 0:
@@ -1887,7 +1903,7 @@ class ResultsPanel(QWidget):
                 if r.element_id == md.id
             ]
             if all_res:
-                N = max((max(r.N_i, r.N_j, key=abs) for r in all_res), key=abs)
+                N = max((_member_forces(r)[0] for r in all_res), key=abs)
                 V = max((max(r.V_i, r.V_j, key=abs) for r in all_res), key=abs)
                 M = max((max(r.M_i, r.M_j, key=abs) for r in all_res), key=abs)
             else:
@@ -2005,9 +2021,12 @@ class ResultsPanel(QWidget):
             fyk_v = md.fyk        if md else 500e6
 
             estimated = mat == "concrete" and bool(md and md.reinforcement_estimated)
-            for check_row in _compute_member_design_rows(
-                etype, mat, fk, A, W_pl, W_el, b, d, As, fyk_v, M_Ed, N_Ed,
-            ):
+            rows = _angle_rows(md, model_state, M_Ed, N_Ed) if mat == "steel" and md else None
+            if rows is None:
+                rows = _compute_member_design_rows(
+                    etype, mat, fk, A, W_pl, W_el, b, d, As, fyk_v, M_Ed, N_Ed,
+                )
+            for check_row in rows:
                 if estimated and check_row["eta"] is not None:
                     check_row["status"] += "  (min. reinf. — refine)"
                 flat_rows.append({"mid": mid, **check_row})

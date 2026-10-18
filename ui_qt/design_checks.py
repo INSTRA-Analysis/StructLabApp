@@ -290,3 +290,59 @@ def check_member(member, N_Ed: float, M_Ed: float, length: float) -> MemberCheck
         return MemberCheck(None, rows=rows, notes=notes or ["no capacity data set"])
     worst = max(rows, key=lambda r: r["eta"] if r["eta"] is not None else -1)
     return MemberCheck(max(etas) / 100.0, worst["check"], rows, notes)
+
+
+# ── from solver results to a displayed utilisation ────────────────────────────
+
+def member_forces(result) -> tuple[float, float]:
+    """(N_Ed, M_Ed) of a member from its ElementResult, for design checks.
+
+    The solver reports the axial force on each end with opposite signs (compression positive at
+    node i, so the j-end value is −N for a member in compression), so the compression and the
+    tension demand are max(N_i, −N_j) and max(−N_i, N_j); the larger governs and keeps its sign.
+    M_Ed is the largest resultant end moment (both bending planes in 3D), in N·m.
+    """
+    f = result.end_forces
+    if len(f) == 12:
+        n_i, n_j = f[0], f[6]
+        m = max(math.hypot(f[4], f[5]), math.hypot(f[10], f[11]))
+    else:
+        n_i, n_j = f[0], f[3]
+        m = max(abs(f[2]), abs(f[5]))
+    compression = max(n_i, -n_j)
+    tension = max(-n_i, n_j)
+    return (compression if compression >= tension else -tension), m
+
+
+def section_utilisation(member, N_Ed: float, M_Ed: float) -> float:
+    """Cross-section utilisation N/(A·fy) + M/(W_pl·fy), γM0 = 1.0 — no buckling, no interaction
+    factors. Used for sections the buckling check does not cover."""
+    fy = member.fy if member.fy > 1e3 else 275e6
+    n_rd = member.A * fy if member.A > 0 else 1e20
+    m_rd = member.W_pl * fy if member.W_pl > 0 else 0.0
+    eta_n = abs(N_Ed) / n_rd if n_rd > 1e-12 else 0.0
+    eta_m = M_Ed / m_rd if m_rd > 1e-12 else 0.0
+    return eta_n + eta_m
+
+
+def display_utilisation(member, result, length: float) -> tuple[float | None, str]:
+    """(η, basis) for the colouring and the tooltip. ``basis`` says what the number is, so a
+    cross-section-only value is never mistaken for a buckling check.
+
+    η is None when nothing can be checked (and the basis says why)."""
+    n_ed, m_ed = member_forces(result)
+    mat = infer_material(member.E)
+    if mat == "steel":
+        angle = identify_angle(member.A, member.I, member.I_y if member.I_y else member.I)
+        if angle is not None:
+            c = check_angle(angle, n_ed, m_ed if member.element_type != ElementType.BAR else 0.0,
+                            length, member.fy, member.E, member.element_type != ElementType.BAR)
+            if c.eta is None:
+                return None, c.notes[0]
+            return c.eta, f"{c.governing.lower()}, EN 1993-1-1"
+        return section_utilisation(member, n_ed, m_ed), "section only, no buckling"
+    if mat == "concrete":
+        c = check_member(member, n_ed, m_ed, length)
+        return (c.eta, "EN 1992-1-1 §6.1, slenderness not checked") if c.eta is not None \
+            else (None, "reinforcement / section data not set")
+    return None, "no check for this material"

@@ -26,7 +26,7 @@ from ui_qt.model_state import (
 from ui_qt.canvas_items import (
     PX_PER_M, GRID_STEP, SNAP_PX,
     _GHOST_PEN, m_to_px, px_to_m,
-    NodeItem, MemberItem, _node_pos, group_colour, simple_utilisation,
+    NodeItem, MemberItem, _node_pos, group_colour,
 )
 import ui_qt.projection as _proj
 from ui_qt.projection import (
@@ -1806,14 +1806,24 @@ class StructCanvas(QGraphicsScene):
 
     def update_member_util_colours(self, member_results: list,
                                    members: list) -> None:
-        """Colour members by EC3 utilization ratio η (combined N + M)."""
+        """Colour members by utilisation η: buckling / tension / bending for steel angles
+        (EN 1993-1-1), cross-section only for other steel, EN 1992-1-1 §6.1 for concrete.
+        Members that cannot be checked keep their normal colour."""
+        from ui_qt.design_checks import display_utilisation
         mem_map = {m.id: m for m in members}
+        state = self.model_state
         for r in member_results:
             mdata = mem_map.get(r.element_id)
             mitem = self._member_items.get(r.element_id)
             if mitem is None or mdata is None:
                 continue
-            mitem.set_util_colour(simple_utilisation(mdata, r))
+            ni, nj = state.get_node(mdata.node_i), state.get_node(mdata.node_j)
+            length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
+            eta, _ = display_utilisation(mdata, r, length)
+            if eta is None:
+                mitem._update_pen()
+            else:
+                mitem.set_util_colour(eta)
         self._util_colour_active = True
         self.update()
 
@@ -2618,7 +2628,7 @@ class StructView(QGraphicsView):
 
     def _draw_util_legend(self, painter: QPainter, right: float, bottom: float) -> QRectF:
         """Utilisation colour bar; viewport pixels, bottom-right corner at (right, bottom)."""
-        title = "Utilization η  (N/Npl + M/Mpl)"
+        title = "Utilization η  (capacity ratio)"
         fm = self._legend_font(painter, 7)
         bar_w = max(160.0, fm.horizontalAdvance(title) + 0.0)
         bar_h = 14.0

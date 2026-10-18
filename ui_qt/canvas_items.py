@@ -1000,13 +1000,19 @@ class MemberItem(QGraphicsLineItem):
         r = next((r for r in cache["member_results"] if r.element_id == self.member.id), None)
         if r is None:
             return []
-        n = max((r.N_i, r.N_j), key=abs)                  # + = compression
+        from ui_qt.design_checks import display_utilisation, member_forces
+        n, m_peak = member_forces(r)                      # n: + = compression, larger of both ends
         kind = "compression" if n > 0 else "tension"
-        m_peak = max(abs(r.M_i), abs(r.M_j))
+        state = self._scene.model_state
+        ni, nj = state.get_node(self.member.node_i), state.get_node(self.member.node_j)
+        length = math.dist((ni.x, ni.y, ni.z), (nj.x, nj.y, nj.z)) if ni and nj else 0.0
+        eta, basis = display_utilisation(self.member, r, length)
+        util = (f"utilisation = {eta:.2f}   ({basis})" if eta is not None
+                else f"utilisation: not checked ({basis})")
         return ["─ current results ─",
                 f"N = {abs(n) / 1e3:.1f} kN  ({kind})",
                 f"M max = {m_peak / 1e3:.2f} kN·m",
-                f"utilisation = {simple_utilisation(self.member, r):.2f}   (section only, no buckling)"]
+                util]
 
     def update_endpoints(self) -> None:
         """Redraw line and load arrows after a connected node has moved."""
