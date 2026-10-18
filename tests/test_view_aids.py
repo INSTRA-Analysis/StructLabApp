@@ -540,3 +540,28 @@ def test_window_animation_needs_a_solve_and_restores_the_static_overlays(qapp, m
         qapp.processEvents()
         win._is_dirty = False
         win.close()
+
+
+# ── colour legends are anchored to the view, not to the repainted area ───────
+
+def test_group_legend_uses_the_whole_view_even_when_only_a_small_area_repaints(qapp):
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QImage, QPainter
+    from ui_qt.canvas import StructView
+    sc, ms = _grouped_scene()
+    sc._colour_by_group = True
+    view = StructView(sc)
+    view.resize(700, 500)
+    seen = []
+    view._draw_group_legend = lambda painter, rect: seen.append(QRectF(rect))
+    image = QImage(700, 500, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    small = QRectF(100, 100, 40, 30)                       # what a hover repaint exposes
+    view.drawBackground(painter, small)
+    assert seen == []                                      # the background no longer draws legends
+    view.drawForeground(painter, small)
+    painter.end()
+    assert len(seen) == 1
+    whole = view.mapToScene(view.viewport().rect()).boundingRect()
+    assert seen[0].width() == pytest.approx(whole.width()) and seen[0].height() == pytest.approx(whole.height())
+    assert seen[0].width() > small.width() * 5

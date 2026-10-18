@@ -2083,11 +2083,6 @@ class StructView(QGraphicsView):
         if self.scene()._scale_active:
             self._draw_scale_status(painter, rect)
 
-        if self.scene()._util_colour_active:
-            self._draw_util_legend(painter, rect)
-        elif self.scene()._colour_by_group:
-            self._draw_group_legend(painter, rect)
-
     def drawForeground(self, painter: QPainter, rect) -> None:
         """Viewport-pinned overlays drawn above all scene content.
 
@@ -2099,6 +2094,15 @@ class StructView(QGraphicsView):
         scene = self.scene()
         if not scene._hide_welcome and not scene.model_state.nodes:
             return  # nothing to overlay in the empty welcome state
+
+        # Colour legends belong to the whole view, not to the repainted area: a hover only
+        # repaints a small rectangle, and drawing relative to THAT put the legend next to the
+        # pointer. Use the full visible scene rectangle instead (painter is still in scene units).
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        if scene._util_colour_active:
+            self._draw_util_legend(painter, visible)
+        elif scene._colour_by_group:
+            self._draw_group_legend(painter, visible)
 
         painter.save()
         painter.resetTransform()          # switch to viewport pixel coordinates
