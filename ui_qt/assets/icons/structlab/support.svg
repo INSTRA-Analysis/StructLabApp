@@ -1,0 +1,10 @@
+<!-- StructLab original icon (GPL-3.0, same as the application) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="6" r="2" />
+  <path d="M12 8 L6 17 H18 Z" />
+  <line x1="4" y1="20" x2="20" y2="20" />
+  <line x1="6" y1="20" x2="4.5" y2="22" />
+  <line x1="10" y1="20" x2="8.5" y2="22" />
+  <line x1="14" y1="20" x2="12.5" y2="22" />
+  <line x1="18" y1="20" x2="16.5" y2="22" />
+</svg>
