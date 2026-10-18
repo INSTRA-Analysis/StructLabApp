@@ -24,9 +24,9 @@ def test_tabs_switch_pages_and_find_by_title(qapp):
     from ui_qt.ribbon import RibbonBar
     bar = RibbonBar()
     home, model = bar.add_tab("Home"), bar.add_tab("Model")
-    assert bar.tabs.count() == 2 and bar.pages.currentWidget() is home
+    assert bar.tabs.count() == 2 and bar.current_page() is home
     bar.set_current_tab("Model")
-    assert bar.pages.currentWidget() is model
+    assert bar.current_page() is model
     assert bar.page("Home") is home and bar.page("Nope") is None
 
 
@@ -110,3 +110,99 @@ def test_action_with_menu_gets_an_instant_popup(qapp):
     act.setMenu(menu)
     btn = RibbonBar().add_tab("View").add_group("Camera").add_large(act)
     assert btn.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+
+
+# ── the ribbon in the main window ─────────────────────────────────────────────
+
+def _window(qapp, monkeypatch, mode):
+    from PyQt6.QtWidgets import QMessageBox
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setenv("STRUCTLAB_UI", mode)
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    for name in ("question", "warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name,
+                            lambda *a, _n=name, **k: pytest.fail(f"unexpected {_n} dialog: {a[1:3]}"))
+    return MainWindow()
+
+
+def _close(qapp, win):
+    win._scene.clearSelection()
+    qapp.processEvents()
+    win._is_dirty = False
+    win.close()
+
+
+def test_window_uses_the_ribbon_and_hides_the_menu_bar(qapp, monkeypatch):
+    win = _window(qapp, monkeypatch, "ribbon")
+    try:
+        bar = win._ribbon
+        tabs = [bar.tabs.tabText(i) for i in range(bar.tabs.count())]
+        assert tabs == ["Home", "Model", "Loads", "Analysis", "Results", "View", "Tools"]
+        assert win.menuBar().isHidden()
+        assert bar.file_button.menu() is win._file_menu
+        # the ribbon's Solve button and the menu's Solve are the same action
+        group = bar.page("Analysis").groups[0]
+        assert group.buttons[0].defaultAction() is win._act["solve"]
+        texts = {b.defaultAction().text() for p in bar._page_list for g in p.groups for b in g.buttons}
+        for wanted in ("Paste", "Select", "Self-weight", "Solve", "BMD", "Animate", "Named Views",
+                       "Section Cut…", "Python Console", "Supports", "Wizards"):
+            assert wanted in texts, wanted
+    finally:
+        _close(qapp, win)
+
+
+def test_ribbon_widgets_are_the_shared_inputs(qapp, monkeypatch):
+    win = _window(qapp, monkeypatch, "ribbon")
+    try:
+        assert win._lc_combo.window() is win and win._lc_combo.isVisibleTo(win._ribbon.page("Loads"))
+        win._ribbon.set_current_tab("Loads")
+        assert win._ribbon.current_page().isAncestorOf(win._lc_combo)
+        assert win._ribbon.page("Home").isAncestorOf(win._member_type_combo)
+        assert win._ribbon.page("Results").isAncestorOf(win._diag_scale_spin)
+    finally:
+        _close(qapp, win)
+
+
+def test_supports_drop_down_assigns_to_the_selected_nodes(qapp, monkeypatch):
+    from ui_qt.model_state import ModelState, SupportType
+    win = _window(qapp, monkeypatch, "ribbon")
+    try:
+        s = ModelState()
+        a, b = s.add_node(0, 0, 0), s.add_node(3, 0, 0)
+        s.add_member(a.id, b.id)
+        win._apply_model_state(s, "t")
+        win._scene._node_items[a.id].setSelected(True)
+        support_btn = next(btn for p in win._ribbon._page_list for g in p.groups for btn in g.buttons
+                           if btn.defaultAction().text() == "Supports")
+        menu = support_btn.defaultAction().menu()
+        next(x for x in menu.actions() if x.text() == "Pinned").trigger()
+        assert win._scene.model_state.get_node(a.id).support_type == SupportType.PIN
+        assert win._scene.model_state.get_node(b.id).support_type == SupportType.FREE
+    finally:
+        _close(qapp, win)
+
+
+def test_ctrl_f1_collapses_and_dock_shortcuts_survive_the_hidden_menu_bar(qapp, monkeypatch):
+    win = _window(qapp, monkeypatch, "ribbon")
+    try:
+        win._act["collapse_ribbon"].trigger()
+        assert win._ribbon.is_collapsed()
+        win._act["collapse_ribbon"].trigger()
+        assert not win._ribbon.is_collapsed()
+        shortcuts = {act.shortcut().toString() for act in win.actions()}
+        assert {"Alt+1", "Alt+2", "Alt+3", "Ctrl+F1"} <= shortcuts
+    finally:
+        _close(qapp, win)
+
+
+def test_classic_mode_keeps_menus_and_toolbars(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QToolBar
+    win = _window(qapp, monkeypatch, "classic")
+    try:
+        assert not hasattr(win, "_ribbon")
+        assert not win.menuBar().isHidden()
+        titles = [tb.windowTitle() for tb in win.findChildren(QToolBar)]
+        assert "Main" in titles and "Visualization" in titles
+    finally:
+        _close(qapp, win)

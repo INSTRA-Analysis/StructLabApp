@@ -22,7 +22,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy, QStackedWidget, QTabBar,
+    QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea, QSizePolicy, QStackedWidget, QTabBar,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -48,7 +48,11 @@ QToolButton#ribbon_file {{
 QToolButton#ribbon_file::menu-indicator {{ image: none; }}
 QStackedWidget#ribbon_pages {{ background: {SURFACE}; border-top: 1px solid {BORDER};
     border-bottom: 1px solid {BORDER}; }}
-QFrame#ribbon_group {{ border-right: 1px solid {BORDER}; }}
+QFrame#ribbon_divider {{ color: {BORDER}; }}
+QScrollArea#ribbon_scroll, QWidget#ribbon_page {{ background: {SURFACE}; border: none; }}
+QScrollArea#ribbon_scroll QScrollBar:horizontal {{ height: 6px; background: {SURFACE}; }}
+QScrollArea#ribbon_scroll QScrollBar::handle:horizontal {{ background: {BORDER}; border-radius: 3px; }}
+QScrollArea#ribbon_scroll QScrollBar::add-line, QScrollArea#ribbon_scroll QScrollBar::sub-line {{ width: 0; }}
 QLabel#ribbon_group_title {{ color: {TEXT_DIM}; font-size: 8pt; padding-top: 1px; }}
 QToolButton#ribbon_large, QToolButton#ribbon_small, QToolButton#ribbon_quick {{
     background: transparent; color: {TEXT}; border: 1px solid transparent; border-radius: 3px;
@@ -159,6 +163,7 @@ class RibbonPage(QWidget):
 
     def __init__(self, title: str) -> None:
         super().__init__()
+        self.setObjectName("ribbon_page")
         self.title = title
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(2, 2, 2, 2)
@@ -167,6 +172,12 @@ class RibbonPage(QWidget):
         self.groups: list[RibbonGroup] = []
 
     def add_group(self, title: str) -> RibbonGroup:
+        if self.groups:
+            divider = QFrame()
+            divider.setObjectName("ribbon_divider")
+            divider.setFrameShape(QFrame.Shape.VLine)
+            divider.setFrameShadow(QFrame.Shadow.Plain)
+            self._layout.insertWidget(self._layout.count() - 1, divider)
         group = RibbonGroup(title)
         self._layout.insertWidget(self._layout.count() - 1, group)
         self.groups.append(group)
@@ -186,6 +197,7 @@ class RibbonBar(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(STYLESHEET)
         self._collapsed = False
+        self._page_list: list[RibbonPage] = []
 
         top = QWidget()
         top.setObjectName("ribbon_top")
@@ -237,16 +249,24 @@ class RibbonBar(QWidget):
 
     def add_tab(self, title: str) -> RibbonPage:
         page = RibbonPage(title)
-        self.pages.addWidget(page)
+        scroll = QScrollArea()
+        scroll.setObjectName("ribbon_scroll")
+        scroll.setWidget(page)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.pages.addWidget(scroll)
         self.tabs.addTab(title)
+        self._page_list.append(page)
         return page
 
     def page(self, title: str) -> RibbonPage | None:
-        for i in range(self.pages.count()):
-            page = self.pages.widget(i)
-            if page.title == title:
-                return page
-        return None
+        return next((p for p in self._page_list if p.title == title), None)
+
+    def current_page(self) -> RibbonPage | None:
+        i = self.pages.currentIndex()
+        return self._page_list[i] if 0 <= i < len(self._page_list) else None
 
     def set_file_menu(self, menu: QMenu) -> None:
         self.file_button.setMenu(menu)

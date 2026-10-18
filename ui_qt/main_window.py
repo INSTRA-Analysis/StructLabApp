@@ -138,10 +138,14 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_widgets()
         self._build_menu()
-        self._build_classic_toolbars()
+        use_ribbon = self._interface_preference() == "ribbon"
+        if not use_ribbon:
+            self._build_classic_toolbars()
         self._build_docks()
         self._build_view_menu()
         self._build_shortcuts_menu()
+        if use_ribbon:
+            self._install_ribbon()
         self._build_status_bar()
         self._wire_selection()
         self._setup_autosave()
@@ -575,6 +579,7 @@ class MainWindow(QMainWindow):
             act.setShortcut(key)
             act.setIcon(icon(ico))
             view_menu.addAction(act)
+            self.addAction(act)            # shortcut keeps working when the menu bar is hidden
         self._act["panel_properties"] = self._left_dock.toggleViewAction()
         self._act["panel_results"] = self._right_dock.toggleViewAction()
         self._act["panel_groups"] = self._groups_dock.toggleViewAction()
@@ -977,6 +982,29 @@ class MainWindow(QMainWindow):
 
         self._refresh_lc_combo()
         self._set_overlay_controls_enabled(False)   # until a successful solve
+
+    # ── ribbon ────────────────────────────────────────────────────────────────
+
+    def _install_ribbon(self) -> None:
+        """Put the ribbon across the top of the window and hide the classic menu bar.
+
+        The menu bar is hidden, not removed: its File, selection and wizard menus are the
+        drop-downs the ribbon buttons open."""
+        from PyQt6.QtWidgets import QSizePolicy
+        from ui_qt.ribbon_layout import build_ribbon
+        self._ribbon = build_ribbon(self)
+        self._ribbon.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        holder = QToolBar("Ribbon")
+        holder.setObjectName("ribbon_holder")
+        holder.setMovable(False)
+        holder.setFloatable(False)
+        holder.toggleViewAction().setVisible(False)
+        holder.setStyleSheet("QToolBar#ribbon_holder { border: 0; padding: 0; spacing: 0; }")
+        holder.layout().setContentsMargins(0, 0, 0, 0)
+        holder.addWidget(self._ribbon)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, holder)
+        self._ribbon_holder = holder
+        self.menuBar().setVisible(False)
 
     # ── classic toolbars ──────────────────────────────────────────────────────
 
