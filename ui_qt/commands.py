@@ -69,9 +69,6 @@ COMMANDS: tuple[Command, ...] = (
     Command("invert_selection", "Invert Selection", "_on_invert_selection", "", "Ctrl+I"),
     Command("check_duplicates", "Check Duplicates…", "_on_check_duplicates", "scan-search", "",
             "Find coincident nodes and duplicate or zero-length members, then select or merge them"),
-    Command("split_crossings", "Split at Crossings", "_on_split_crossings", "split", "",
-            "Put a node where two members cross (X-bracing) and split both there; with members "
-            "selected, only those are considered"),
     Command("rotate_selection", "Rotate…", "_on_rotate_selection", "rotate-3d", "",
             "Rotate the selection by an exact angle about X, Y or Z — optionally as copies"),
     Command("scale_selection", "Scale Selection…", "_on_scale_selection", "scaling",
