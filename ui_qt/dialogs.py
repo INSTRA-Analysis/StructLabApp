@@ -59,6 +59,7 @@ _SHORTCUTS = [
     ("Colour by Group",          "Ctrl+G"),
     ("Thickness by Section",     "Ctrl+T"),
     ("Groups Panel",             "Alt+3"),
+    ("Collapse / Expand Ribbon", "Ctrl+F1"),
     ("Python Console",           "Ctrl+`"),
 ]
 
