@@ -436,7 +436,7 @@ class ModelState:
 
     def __post_init__(self) -> None:
         if not self.load_cases:
-            self.load_cases.append(LoadCase(id=0, name="Dead load", category="G"))
+            self.load_cases.append(LoadCase(id=0, name=LOAD_CATEGORIES["G"], category="G"))
 
     # ── analysis-mode accessors ───────────────────────────────────────────────
 
@@ -561,7 +561,7 @@ class ModelState:
         self.nodes.clear()
         self.members.clear()
         self.load_cases.clear()
-        self.load_cases.append(LoadCase(id=0, name="Dead load", category="G"))
+        self.load_cases.append(LoadCase(id=0, name=LOAD_CATEGORIES["G"], category="G"))
         self.combinations.clear()
         self.named_views.clear()
         self.active_case_id = 0

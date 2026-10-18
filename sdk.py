@@ -56,7 +56,7 @@ class Model:
     def __init__(self, mode_3d: bool = False) -> None:
         self._state = ModelState()
         self._state.mode_3d = mode_3d
-        # Rename the auto-created "Dead load" case to 'default'
+        # Rename the auto-created "Permanent (G)" case to 'default'
         self._state.load_cases[0].name = "default"
         self._lc_name_to_id: dict[str, int] = {"default": 0}
 
