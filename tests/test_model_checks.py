@@ -154,3 +154,60 @@ def test_dialog_checks_selects_and_fixes(qapp):
     assert not dlg._btn_fix.isEnabled()
     dlg._tol.setValue(0.01)                                   # re-check runs on a tolerance change
     assert dlg.report.is_clean
+
+
+# ── overlapping collinear members ─────────────────────────────────────────────
+
+def _chain_with_full_member():
+    """A member divided into two (a–b–c) plus a member drawn over it end to end (a–c)."""
+    s = ModelState()
+    a, b, c = s.add_node(0, 0, 0), s.add_node(2, 0, 1.5), s.add_node(4, 0, 3)
+    m1, m2, full = s.add_member(a.id, b.id), s.add_member(b.id, c.id), s.add_member(c.id, a.id)
+    return s, m1, m2, full
+
+
+def test_member_drawn_over_a_divided_member_is_found():
+    s, m1, m2, full = _chain_with_full_member()
+    r = check_duplicates(s)
+    assert r.overlaps == [(m1.id, full.id), (m2.id, full.id)]
+    assert r.member_groups == [] and not r.is_clean and not r.fixable
+    assert full.id in r.member_ids()
+
+
+def test_segments_that_only_touch_are_not_overlaps():
+    s, m1, m2, full = _chain_with_full_member()
+    s.remove_member(full.id)
+    assert check_duplicates(s).is_clean
+
+
+def test_partial_overlap_and_parallel_lines():
+    s = ModelState()
+    n = [s.add_node(0, 0, 0), s.add_node(3, 0, 0), s.add_node(2, 0, 0), s.add_node(5, 0, 0),
+         s.add_node(0, 0.5, 0), s.add_node(5, 0.5, 0)]
+    a = s.add_member(n[0].id, n[1].id)           # 0..3
+    b = s.add_member(n[2].id, n[3].id)           # 2..5 overlaps 2..3 with a
+    s.add_member(n[4].id, n[5].id)               # parallel, 0.5 m away: not an overlap
+    assert check_duplicates(s).overlaps == [(a.id, b.id)]
+
+
+def test_overlaps_are_reported_not_merged_and_warned_before_solving():
+    from ui_qt.solve_actions import validate_model_issues
+    s, m1, m2, full = _chain_with_full_member()
+    summary = merge_duplicates(s)
+    assert summary.members_removed == 0 and len(s.members) == 3
+    warn = next(i for i in validate_model_issues(s) if "overlap" in i.text)
+    assert set(warn.member_ids) == {m1.id, m2.id, full.id}
+
+
+def test_dialog_lists_overlaps_selects_them_and_disables_merge(qapp):
+    from ui_qt.canvas import StructCanvas
+    from ui_qt.dialogs import DuplicatesDialog
+    s, m1, m2, full = _chain_with_full_member()
+    sc = StructCanvas()
+    sc.load_state(s)
+    dlg = DuplicatesDialog(sc)
+    assert "overlapping" in dlg._result.text()
+    assert dlg._btn_select.isEnabled() and not dlg._btn_fix.isEnabled()
+    dlg.select_found()
+    selected = {i.member.id for i in sc.selectedItems() if hasattr(i, "member")}
+    assert selected == {m1.id, m2.id, full.id}

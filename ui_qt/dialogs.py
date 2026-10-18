@@ -588,9 +588,13 @@ class DuplicatesDialog(QDialog):
                 lines.append(f"<b>{r.extra_members}</b> duplicate member(s) in {len(r.member_groups)} location(s)")
             if r.zero_length:
                 lines.append(f"<b>{len(r.zero_length)}</b> zero-length member(s)")
+            if r.overlaps:
+                lines.append(f"<b>{len(r.overlaps)}</b> pair(s) of overlapping members — collinear and "
+                             "sharing part of their length (e.g. a member drawn over a divided one). "
+                             "Select them and delete the one you do not want.")
             self._result.setText("<br>".join(lines))
         self._btn_select.setEnabled(not r.is_clean)
-        self._btn_fix.setEnabled(not r.is_clean)
+        self._btn_fix.setEnabled(r.fixable)
 
     def select_found(self) -> None:
         if self.report is not None:

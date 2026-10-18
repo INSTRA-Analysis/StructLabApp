@@ -1,4 +1,4 @@
-"""Model hygiene checks: coincident nodes, duplicate members, zero-length members.
+"""Model hygiene checks: coincident nodes, duplicate, overlapping and zero-length members.
 
 Typical sources are rotate/mirror copies, pasted geometry and imported files. A duplicated
 member silently doubles the stiffness; a node lying on another without sharing it leaves the
@@ -8,6 +8,9 @@ the model in place:
 * coincident nodes merge into the lowest id; members are re-pointed, node loads summed, and
   the kept node takes the first non-free support of the cluster (conflicts are reported);
 * members that become zero-length are removed;
+* overlapping members — collinear and sharing part of their length without joining the same
+  two points (typically a member drawn over a divided one) — are REPORTED only: which one to
+  delete is a modelling decision;
 * duplicate members (same two nodes, either direction) are removed, keeping the lowest id;
   a duplicate's member loads move to the kept member when both run the same way. A reversed
   duplicate that carries loads is NOT removed (its local-direction loads would need flipping)
@@ -31,6 +34,7 @@ class DuplicateReport:
     node_clusters: list[list[int]] = field(default_factory=list)    # coincident node ids, lowest first
     member_groups: list[list[int]] = field(default_factory=list)    # duplicate member ids, lowest first
     zero_length: list[int] = field(default_factory=list)            # members whose ends coincide
+    overlaps: list[tuple[int, int]] = field(default_factory=list)   # collinear, partly shared members
 
     @property
     def extra_nodes(self) -> int:
@@ -42,13 +46,19 @@ class DuplicateReport:
 
     @property
     def is_clean(self) -> bool:
-        return not (self.node_clusters or self.member_groups or self.zero_length)
+        return not (self.node_clusters or self.member_groups or self.zero_length or self.overlaps)
+
+    @property
+    def fixable(self) -> bool:
+        """Anything ``merge_duplicates`` can repair (overlaps are only reported)."""
+        return bool(self.node_clusters or self.member_groups or self.zero_length)
 
     def node_ids(self) -> list[int]:
         return [n for c in self.node_clusters for n in c]
 
     def member_ids(self) -> list[int]:
-        return [m for g in self.member_groups for m in g] + list(self.zero_length)
+        overlapping = sorted({m for pair in self.overlaps for m in pair})
+        return [m for g in self.member_groups for m in g] + list(self.zero_length) + overlapping
 
 
 @dataclass
@@ -86,6 +96,55 @@ def _representatives(state: ModelState, tol: float) -> dict[int, int]:
     return {nid: find(nid) for nid in parent}
 
 
+def _line_key(p, q, tol: float):
+    """(direction key, unit direction, perpendicular foot, t-interval) of segment p→q, with the
+    direction made canonical so collinear members point the same way; None if too short."""
+    d = [q[k] - p[k] for k in range(3)]
+    length = math.sqrt(sum(c * c for c in d))
+    if length <= tol:
+        return None
+    d = [c / length for c in d]
+    lead = next(c for c in d if abs(c) > 1e-9)
+    if lead < 0:
+        d = [-c for c in d]
+    t0, t1 = sorted((sum(p[k] * d[k] for k in range(3)), sum(q[k] * d[k] for k in range(3))))
+    foot = [p[k] - sum(p[i] * d[i] for i in range(3)) * d[k] for k in range(3)]
+    return tuple(round(c, 5) for c in d), d, foot, (t0, t1)
+
+
+def find_overlapping_members(state: ModelState, tol: float = DEFAULT_TOL,
+                             rep: dict[int, int] | None = None) -> list[tuple[int, int]]:
+    """Pairs of collinear members that share more than ``tol`` of their length but do not
+    join the same two points (those are duplicates) — e.g. a member drawn over a divided one."""
+    rep = rep if rep is not None else _representatives(state, tol)
+    coords = {n.id: (n.x, n.y, n.z) for n in state.nodes}
+    cell = max(10 * tol, 1e-3)
+    buckets: dict[tuple, list] = {}
+    pairs: list[tuple[int, int]] = []
+    for m in state.members:
+        if m.node_i not in coords or m.node_j not in coords:
+            continue
+        key = _line_key(coords[m.node_i], coords[m.node_j], tol)
+        if key is None:
+            continue
+        dkey, _d, foot, (t0, t1) = key
+        ends = frozenset((rep.get(m.node_i, m.node_i), rep.get(m.node_j, m.node_j)))
+        base = tuple(math.floor(c / cell) for c in foot)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    for other_id, other_foot, (u0, u1), other_ends in buckets.get(
+                            (dkey, base[0] + dx, base[1] + dy, base[2] + dz), ()):
+                        if other_ends == ends:
+                            continue                     # an exact duplicate, reported separately
+                        if math.dist(foot, other_foot) > tol:
+                            continue                     # parallel but on a different line
+                        if min(t1, u1) - max(t0, u0) > tol:
+                            pairs.append((min(other_id, m.id), max(other_id, m.id)))
+        buckets.setdefault((dkey, *base), []).append((m.id, foot, (t0, t1), ends))
+    return sorted(set(pairs))
+
+
 def check_duplicates(state: ModelState, tol: float = DEFAULT_TOL) -> DuplicateReport:
     rep = _representatives(state, tol)
     clusters: dict[int, list[int]] = {}
@@ -101,6 +160,7 @@ def check_duplicates(state: ModelState, tol: float = DEFAULT_TOL) -> DuplicateRe
             continue
         pairs.setdefault(frozenset((a, b)), []).append(m.id)
     report.member_groups = sorted(sorted(g) for g in pairs.values() if len(g) > 1)
+    report.overlaps = find_overlapping_members(state, tol, rep)
     return report
 
 

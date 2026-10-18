@@ -107,6 +107,14 @@ def validate_model_issues(state) -> list[Issue]:
             members=[m for g in dup.member_groups for m in g],
         )
 
+    if dup.overlaps:
+        warnings.append(
+            f"{len(dup.overlaps)} pair(s) of members overlap — collinear and sharing part of their "
+            "length (e.g. a member drawn over a divided one), so that stretch is stiffened twice.\n"
+            "Use Check Duplicates (Model tab, or Tools menu) to find them.",
+            members=sorted({m for pair in dup.overlaps for m in pair}),
+        )
+
     # No loads in the active case
     lc = state.active_case
     has_node_loads = any(not lc.get_node_load(n.id).is_zero() for n in state.nodes)
