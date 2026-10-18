@@ -565,3 +565,19 @@ def test_group_legend_uses_the_whole_view_even_when_only_a_small_area_repaints(q
     whole = view.mapToScene(view.viewport().rect()).boundingRect()
     assert seen[0].width() == pytest.approx(whole.width()) and seen[0].height() == pytest.approx(whole.height())
     assert seen[0].width() > small.width() * 5
+
+
+def test_show_loads_toggle_runs_without_error(qapp, monkeypatch):
+    """Regression: the handler carried two stray lines from a removed 2D/3D toggle (NameError)."""
+    from ui_qt.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
+    win = MainWindow()
+    try:
+        win._on_show_loads_toggled(False)
+        assert win._scene._show_loads is False
+        win._on_show_loads_toggled(True)
+        assert win._scene._show_loads is True
+    finally:
+        win._is_dirty = False
+        win.close()

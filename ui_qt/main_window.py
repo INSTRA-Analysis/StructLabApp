@@ -469,8 +469,6 @@ class MainWindow(QMainWindow):
 
     def _on_show_loads_toggled(self, checked: bool) -> None:
         self._scene.set_loads_visible(checked)
-        self._update_status_stats()
-        self._sb.showMessage(f"Switched to {target} mode.")
 
     def _on_colour_by_group_toggled(self, checked: bool) -> None:
         self._scene.set_colour_by_group(checked)
