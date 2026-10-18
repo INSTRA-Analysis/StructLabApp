@@ -53,6 +53,7 @@ _SHORTCUTS = [
     ("Scale",                    "S"),
     ("Isolate / Restore All",    "I"),
     ("Lock to X / Y / Z axis",   "X / Y / Z"),
+    ("Slide along a member (A again: next member)", "A"),
     ("Type an exact value",      "0-9 . , -"),
     ("Confirm typed value",      "Enter"),
     ("Cancel (grab/scale/measure)", "Esc"),

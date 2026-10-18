@@ -118,6 +118,10 @@ class StructCanvas(QGraphicsScene):
         self._grab_origin_pos: QPointF | None = None
         self._grab_node_origins: dict[int, tuple[float, float, float]] = {}
         self._grab_typed: str = ""                  # accumulated numeric input
+        # "Along member" constraint (A key): slide along a member connected to the grabbed node
+        self._grab_member_id: int | None = None
+        self._grab_dir: tuple[float, float, float] | None = None   # unit vector, + = towards far end
+        self._grab_limits: tuple[float, float] = (-math.inf, math.inf)
 
         # ── S-scale state (scale selection about its centroid) ────────────────
         self._scale_active: bool = False
@@ -625,11 +629,15 @@ class StructCanvas(QGraphicsScene):
             return
         from PyQt6.QtGui import QCursor
         view = views[0]
-        scene_pos = view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+        self._begin_grab(sel_nodes, view.mapToScene(view.mapFromGlobal(QCursor.pos())))
+
+    def _begin_grab(self, sel_nodes: list, scene_pos: QPointF) -> None:
+        """Start grabbing ``sel_nodes`` with the pointer at ``scene_pos`` (one undo step)."""
         self.save_snapshot()
         self._grab_active      = True
         self._grab_is_extrude  = False
         self._grab_axis        = None
+        self._clear_grab_member()
         self._grab_origin_pos  = scene_pos
         self._grab_node_origins = {n.id: (n.x, n.y, n.z) for n in sel_nodes}
         self._grab_typed       = ""
@@ -673,6 +681,7 @@ class StructCanvas(QGraphicsScene):
         self._grab_active      = True
         self._grab_is_extrude  = True
         self._grab_axis        = None
+        self._clear_grab_member()
         self._grab_origin_pos  = scene_pos
         self._grab_node_origins = {}
         for nid in new_node_ids:
@@ -682,12 +691,92 @@ class StructCanvas(QGraphicsScene):
         self._grab_typed = ""
         self.invalidate(self.sceneRect())
 
+    # ── grab along a member (A) ───────────────────────────────────────────────
+
+    _ALONG_MARGIN = 0.01        # m — never slide onto the far node (zero-length member)
+
+    def _clear_grab_member(self) -> None:
+        self._grab_member_id = None
+        self._grab_dir = None
+        self._grab_limits = (-math.inf, math.inf)
+
+    def _grab_anchor(self) -> int | None:
+        """The grabbed node whose members define the 'along' direction (the first one)."""
+        return next(iter(self._grab_node_origins), None)
+
+    def cycle_grab_member(self) -> int | None:
+        """A pressed during a grab: lock to the next member at the anchor node, or release
+        after the last one. Returns the member id now used (None = free)."""
+        anchor = self._grab_anchor()
+        if anchor is None:
+            return None
+        ms = self.model_state
+        connected = sorted((m for m in ms.members if anchor in (m.node_i, m.node_j)
+                            and m.node_i != m.node_j), key=lambda m: m.id)
+        ids = [m.id for m in connected]
+        if not ids:
+            self._clear_grab_member()
+            return None
+        if self._grab_member_id in ids:
+            i = ids.index(self._grab_member_id) + 1
+            if i >= len(ids):
+                self._clear_grab_member()
+                return None
+            member = connected[i]
+        else:
+            member = connected[0]
+        ox, oy, oz = self._grab_node_origins[anchor]
+        far = ms.get_node(member.node_j if member.node_i == anchor else member.node_i)
+        vec = (far.x - ox, far.y - oy, far.z - oz)
+        length = math.sqrt(sum(c * c for c in vec))
+        if length < 1e-12:
+            self._clear_grab_member()
+            return None
+        d = tuple(c / length for c in vec)
+        lo, hi = -math.inf, math.inf
+        for m in connected:                     # collinear neighbours bound the slide
+            other = ms.get_node(m.node_j if m.node_i == anchor else m.node_i)
+            w = (other.x - ox, other.y - oy, other.z - oz)
+            wl = math.sqrt(sum(c * c for c in w))
+            if wl < 1e-12:
+                continue
+            cos = sum(a * b for a, b in zip(w, d)) / wl
+            if cos > 1 - 1e-9:
+                hi = min(hi, wl - self._ALONG_MARGIN)
+            elif cos < -1 + 1e-9:
+                lo = max(lo, -wl + self._ALONG_MARGIN)
+        self._grab_axis = None
+        self._grab_member_id, self._grab_dir, self._grab_limits = member.id, d, (lo, hi)
+        return member.id
+
+    def _move_along_member(self, distance: float) -> None:
+        lo, hi = self._grab_limits
+        s = max(lo, min(hi, distance))
+        dx, dy, dz = (s * c for c in self._grab_dir)
+        self._apply_delta_to_grabbed(dx, dy, dz)
+
+    def _screen_to_along(self, dsx: float, dsy: float) -> float:
+        """Metres along the locked member for a screen drag (dsx, dsy) — projection onto
+        the member's on-screen direction."""
+        vx, vy, vz = self._grab_dir
+        if self._is_3d_mode():
+            ex, ey = _proj.isometric(vx, vy, vz)
+        else:
+            ex, ey = vx * PX_PER_M, -vy * PX_PER_M
+        mag2 = ex * ex + ey * ey
+        if mag2 < 1e-9:                         # member points at the viewer
+            return 0.0
+        return (dsx * ex + dsy * ey) / mag2
+
     def _apply_grab(self, current_pos: QPointF) -> None:
         """Reposition grabbed nodes to follow the mouse, respecting axis lock."""
         if not self._grab_active or self._grab_origin_pos is None:
             return
         dsx = current_pos.x() - self._grab_origin_pos.x()
         dsy = current_pos.y() - self._grab_origin_pos.y()
+        if self._grab_dir is not None:
+            self._move_along_member(self._screen_to_along(dsx, dsy))
+            return
         self._move_grabbed_nodes_screen(dsx, dsy)
 
     def _move_grabbed_nodes_screen(self, dsx: float, dsy: float) -> None:
@@ -784,6 +873,9 @@ class StructCanvas(QGraphicsScene):
             dist = float(self._grab_typed)
         except ValueError:
             return
+        if self._grab_dir is not None:
+            self._move_along_member(dist)
+            return
         axis = self._grab_axis
         if axis == 'X':
             self._apply_delta_to_grabbed(dist, 0.0, 0.0)
@@ -799,9 +891,12 @@ class StructCanvas(QGraphicsScene):
         self._grab_active     = False
         self._grab_is_extrude = False
         ms = self.model_state
+        # Snap to the 0.25 m grid only for a free mouse drag: a typed distance or a slide
+        # along a member is exact, and rounding x, y, z would pull it off the member line.
+        snap = not self._grab_typed and self._grab_dir is None
         for nid in self._grab_node_origins:
             node = ms.get_node(nid)
-            if node:
+            if node and snap:
                 node.x = round(node.x / 0.25) * 0.25
                 node.y = round(node.y / 0.25) * 0.25
                 node.z = round(node.z / 0.25) * 0.25
@@ -811,6 +906,7 @@ class StructCanvas(QGraphicsScene):
         self._grab_node_origins = {}
         self._grab_origin_pos   = None
         self._grab_axis         = None
+        self._clear_grab_member()
         self._grab_typed        = ""
         self.update_depth_order()
         self.invalidate(self.sceneRect())
@@ -825,6 +921,7 @@ class StructCanvas(QGraphicsScene):
         self._grab_node_origins = {}
         self._grab_origin_pos   = None
         self._grab_axis         = None
+        self._clear_grab_member()
         self._grab_typed        = ""
         self.undo()
 
@@ -841,6 +938,7 @@ class StructCanvas(QGraphicsScene):
             new_axis = text.upper()
             # Toggle: pressing same axis again removes constraint
             self._grab_axis = None if self._grab_axis == new_axis else new_axis
+            self._clear_grab_member()
             self._grab_typed = ""
             # Re-apply from current mouse position
             views = self.views()
@@ -850,6 +948,14 @@ class StructCanvas(QGraphicsScene):
                     views[0].mapFromGlobal(QCursor.pos())
                 )
                 self._apply_grab(scene_pos)
+            self.invalidate(self.sceneRect())
+        elif key == K.Key_A:
+            self.cycle_grab_member()
+            self._grab_typed = ""
+            views = self.views()
+            if views:
+                from PyQt6.QtGui import QCursor
+                self._apply_grab(views[0].mapToScene(views[0].mapFromGlobal(QCursor.pos())))
             self.invalidate(self.sceneRect())
         elif key == K.Key_Backspace:
             self._grab_typed = self._grab_typed[:-1]
@@ -2312,6 +2418,7 @@ class StructView(QGraphicsView):
         if selected and scene._mode == CanvasMode.SELECT:
             _ROWS = [
                 ("G",       "Move (grab)"),
+                ("G then A", "Slide along a member"),
                 ("E",       "Extrude"),
                 ("I",       "Isolate / Restore all"),
                 ("Ctrl+D",  "Duplicate array"),
@@ -2407,12 +2514,18 @@ class StructView(QGraphicsView):
         painter.setFont(font)
 
         verb = "EXTRUDE" if is_extrude else "GRAB"
-        if typed:
+        along = scene._grab_member_id
+        if along is not None:
+            member = scene.model_state.get_member(along)
+            label = f"along member {along}" + (f" ({member.group})" if member and member.group else "")
+            status = (f"{verb}  {label}  {typed}_ m" if typed else
+                      f"{verb}  {label}  (move mouse or type distance, + towards far end · A next member)")
+        elif typed:
             status = f"{verb}  {axis or ''}  {typed}_"
         elif axis:
             status = f"{verb}  {axis}  (move mouse or type distance)"
         else:
-            status = f"{verb}  (X/Y/Z to constrain · Enter/LMB confirm · Esc cancel)"
+            status = f"{verb}  (X/Y/Z axis · A along member · Enter/LMB confirm · Esc cancel)"
 
         lbl_x = rect.left()  + 12 / scale
         lbl_y = rect.bottom() - 14 / scale
