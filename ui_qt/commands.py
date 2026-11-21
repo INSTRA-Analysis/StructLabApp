@@ -139,8 +139,26 @@ MODE_KEYS = ("mode_select", "mode_node", "mode_member", "mode_measure")
 OVERLAY_KEYS = {"ov_bmd": "BMD", "ov_sfd": "SFD", "ov_afd": "AFD", "ov_def": "Def", "ov_labels": "Labels"}
 
 
+def _category_keys() -> dict[str, str]:
+    """Command key → category colour; commands not listed keep the neutral text colour."""
+    from ui_qt import theme
+    groups = {
+        theme.GEOMETRY: ("mode_node", "mode_member", "duplicate", "set_bars", "set_beams",
+                         "rotate_selection", "scale_selection", "beam_wizard", "portal_wizard",
+                         "truss_wizard", "frame_wizard"),
+        theme.LOAD:     ("add_lc", "remove_lc", "self_weight", "combinations", "show_loads"),
+        theme.RESULT:   ("solve", "ov_bmd", "ov_sfd", "ov_afd", "ov_def", "ov_labels",
+                         "force_colours", "animate"),
+        theme.DESIGN:   ("util_colours", "crossing_braces"),
+    }
+    return {key: colour for colour, keys in groups.items() for key in keys}
+
+
+CATEGORY_TINT: dict[str, str] = _category_keys()
+
+
 def _make(win, c: Command) -> QAction:
-    act = QAction(icon(c.icon) if c.icon else icon(""), c.text, win)
+    act = QAction(icon(c.icon, CATEGORY_TINT.get(c.key)) if c.icon else icon(""), c.text, win)
     if c.shortcut:
         act.setShortcut(QKeySequence(c.shortcut))
     if c.tip:

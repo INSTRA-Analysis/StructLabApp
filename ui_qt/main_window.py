@@ -31,6 +31,7 @@ from ui_qt.canvas import StructCanvas, StructView, CanvasMode, WorkingPlane
 from ui_qt.model_state import ElementType
 from ui_qt.panels import PropertiesPanel, ResultsPanel, BrandingFooter
 from ui_qt.icons import icon
+from ui_qt import theme as _theme
 
 _AUTOSAVE_PATH = Path.home() / ".structlab" / "autosave.slab"
 
@@ -50,15 +51,15 @@ def _plane_for_view(az: float, el: float) -> WorkingPlane:
     return WorkingPlane.YZ              # Right (90°) or Left (-90°)
 
 _DOCK_HDR = (
-    "background:#2d2d2d; color:#9aa4ad;"
+    f"background:{_theme.SURFACE2}; color:{_theme.TEXT_DIM};"
     " font-size:10px; font-weight:bold; padding-left:6px;"
-    " border-bottom:2px solid #00b4d8; border-top:1px solid #3c3c3c;"
+    f" border-bottom:2px solid {_theme.CYAN}; border-top:1px solid {_theme.BORDER};"
 )
 
 _DOCK_BTN = (
-    "QPushButton { background: transparent; color: #9aa4ad; border: none;"
+    f"QPushButton {{ background: transparent; color: {_theme.TEXT_DIM}; border: none;"
     " font-size: 13px; padding: 0 2px; }"
-    "QPushButton:hover { background: rgba(0,180,216,45); color: #00b4d8;"
+    f"QPushButton:hover {{ background: rgba(0,180,216,45); color: {_theme.CYAN};"
     " border-radius: 2px; }"
 )
 

@@ -12,13 +12,15 @@ from __future__ import annotations
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QMenu
 
+from ui_qt import theme
 from ui_qt.icons import icon
 from ui_qt.ribbon import RibbonBar
 
 
-def _menu_action(win, text: str, icon_name: str, menu: QMenu, tip: str = "") -> QAction:
+def _menu_action(win, text: str, icon_name: str, menu: QMenu, tip: str = "",
+                 tint: str | None = None) -> QAction:
     """An action whose button opens ``menu`` (kept alive by parenting it to the window)."""
-    act = QAction(icon(icon_name), text, win)
+    act = QAction(icon(icon_name, tint), text, win)
     act.setMenu(menu)
     if tip:
         act.setToolTip(tip)
@@ -76,9 +78,9 @@ def build_ribbon(win) -> RibbonBar:
     model = bar.add_tab("Model")
     g = model.add_group("Templates")
     g.add_large(_menu_action(win, "Wizards", "wand-sparkles", win._wizards_menu,
-                             "Generate a beam, portal frame, truss or frame"))
+                             "Generate a beam, portal frame, truss or frame", theme.GEOMETRY))
     g = model.add_group("Geometry")
-    mirror = QAction(icon("flip-horizontal-2"), "Mirror…", win)
+    mirror = QAction(icon("flip-horizontal-2", theme.GEOMETRY), "Mirror…", win)
     mirror.setToolTip("Mirror the selection about a plane")
     mirror.triggered.connect(lambda: win._view._on_mirror(True))
     g.add_small(mirror)
@@ -92,7 +94,7 @@ def build_ribbon(win) -> RibbonBar:
     g.add_small(a["crossing_braces"])
     g = model.add_group("Supports")
     g.add_large(_menu_action(win, "Supports", "support", _supports_menu(win),
-                             "Assign a support to the selected nodes"))
+                             "Assign a support to the selected nodes", theme.SUPPORT))
     g = model.add_group("Sections")
     g.add_large(a["panel_groups"])
 

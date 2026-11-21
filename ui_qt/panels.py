@@ -2264,8 +2264,9 @@ class BrandingFooter(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SECTION_HEADER_STYLE = (
-    "background:#2d2d2d; color:#cccccc;"
-    " font-size:11px; font-weight:bold; padding-left:6px;"
+    "background:#393b41; color:#9a9ea6;"
+    " font-size:10px; font-weight:bold; padding-left:6px;"
+    " border-bottom:1px solid #4a4d55;"
 )
 
 

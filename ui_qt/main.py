@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from ui_qt.main_window import MainWindow
-from ui_qt.theme import STYLESHEET
+from ui_qt.theme import apply_theme
 
 _CRASH_LOG = Path.home() / ".structlab" / "crash.log"
 
@@ -55,7 +55,7 @@ def main() -> None:
     sys.excepthook = _exception_handler
     app = QApplication(sys.argv)
     app.setApplicationName("StructLab")
-    app.setStyleSheet(STYLESHEET)
+    apply_theme(app)
     window = MainWindow()
     window.show()
     if len(sys.argv) > 1:

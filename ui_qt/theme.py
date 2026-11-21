@@ -1,19 +1,62 @@
-"""Application-wide Qt stylesheet for StructLab.
+"""Application-wide colours, palette and Qt stylesheet for StructLab.
 
-Single cyan accent on a dark base.  Canvas and scene content are untouched.
-Adjust CYAN / CYAN_DIM here to retheme the whole app.
+The frame is calm mid-grey (Blender-like, not near-black) with one cyan accent for the
+active state.  Colour that carries meaning comes from the category colours below: each
+command family tints its icons with one colour, so the interface reads by function.
+Adjust the tokens here to retheme the whole app; ``apply_theme`` installs them.
 """
 
-CYAN      = "#00b4d8"   # primary accent — borders, active tabs, headers
-CYAN_DIM  = "#1e5f74"   # subordinate borders (group boxes, inner tabs pane)
-CYAN_TINT = "#003d4f"   # checked-button fill
+from __future__ import annotations
 
-SURFACE   = "#252526"
-SURFACE2  = "#2d2d2d"
-BORDER    = "#3c3c3c"
-TEXT      = "#d4d4d4"
-TEXT_DIM  = "#888888"
-BG        = "#1e1e1e"
+CYAN      = "#00b4d8"   # primary accent — active state, focus, primary action
+CYAN_DIM  = "#1e6a80"   # subordinate borders (group boxes, inner tabs pane)
+CYAN_TINT = "#0d4a5c"   # checked-button fill
+
+BG        = "#26282c"   # deepest surface: inputs, tables, panes
+SURFACE   = "#2f3136"   # panels and docks
+SURFACE2  = "#393b41"   # headers, buttons, tabs
+BORDER    = "#4a4d55"
+TEXT      = "#e0e2e6"
+TEXT_DIM  = "#9a9ea6"
+
+# ── Category colours (icons, panel accents, canvas symbols) ──────────────────
+GEOMETRY  = CYAN        # nodes, members, modelling tools
+SUPPORT   = "#5cc96b"   # supports and restraints
+LOAD      = "#f0a030"   # load cases, loads, combinations
+RESULT    = "#a87ee8"   # analysis results and diagrams
+DESIGN    = "#e8c840"   # design checks, utilisation
+
+# ── Axis colours (grid, gizmo, local axes) — Blender convention ─────────────
+AXIS_X    = "#e8505b"
+AXIS_Y    = "#7ccc4a"
+AXIS_Z    = "#4a90e8"
+
+
+def apply_theme(app) -> None:
+    """Install the Fusion style, a palette built from the tokens, and the stylesheet.
+
+    Fusion honours the palette on every platform, so widgets the stylesheet does not name
+    (dialogs, check boxes, list views) still take the theme greys instead of the OS ones.
+    """
+    from PyQt6.QtGui import QColor, QPalette
+
+    app.setStyle("Fusion")
+    pal = QPalette()
+    role = QPalette.ColorRole
+    for r, colour in (
+        (role.Window, SURFACE), (role.WindowText, TEXT), (role.Base, BG),
+        (role.AlternateBase, SURFACE), (role.ToolTipBase, SURFACE2), (role.ToolTipText, TEXT),
+        (role.Text, TEXT), (role.Button, SURFACE2), (role.ButtonText, TEXT),
+        (role.BrightText, "#ffffff"), (role.Highlight, CYAN_TINT), (role.HighlightedText, "#ffffff"),
+        (role.Link, CYAN), (role.PlaceholderText, TEXT_DIM), (role.Mid, BORDER),
+        (role.Dark, BG), (role.Light, SURFACE2), (role.Shadow, "#16171a"),
+    ):
+        pal.setColor(r, QColor(colour))
+    disabled = QPalette.ColorGroup.Disabled
+    for r in (role.WindowText, role.Text, role.ButtonText):
+        pal.setColor(disabled, r, QColor(TEXT_DIM))
+    app.setPalette(pal)
+    app.setStyleSheet(STYLESHEET)
 
 # ── Stylesheet ────────────────────────────────────────────────────────────────
 

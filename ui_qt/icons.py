@@ -43,16 +43,20 @@ def _pixmap(svg: str, colour: str, size: int) -> QPixmap:
 
 
 @lru_cache(maxsize=None)
-def icon(name: str) -> QIcon:
-    """Themed QIcon for ``name``; an empty QIcon if the name is unknown."""
+def icon(name: str, tint: str | None = None) -> QIcon:
+    """Themed QIcon for ``name``; an empty QIcon if the name is unknown.
+
+    ``tint`` is a category colour (see theme.py) used for both the normal and the checked
+    state; without it the icon is drawn in the text colour and turns cyan when checked.
+    """
     path = icon_path(name)
     if path is None:
         return QIcon()
     svg = path.read_text(encoding="utf-8")
     result = QIcon()
     for size in _SIZES:
-        result.addPixmap(_pixmap(svg, TEXT, size), QIcon.Mode.Normal, QIcon.State.Off)
-        result.addPixmap(_pixmap(svg, CYAN, size), QIcon.Mode.Normal, QIcon.State.On)
+        result.addPixmap(_pixmap(svg, tint or TEXT, size), QIcon.Mode.Normal, QIcon.State.Off)
+        result.addPixmap(_pixmap(svg, tint or CYAN, size), QIcon.Mode.Normal, QIcon.State.On)
         result.addPixmap(_pixmap(svg, TEXT_DIM, size), QIcon.Mode.Disabled, QIcon.State.Off)
     return result
 
