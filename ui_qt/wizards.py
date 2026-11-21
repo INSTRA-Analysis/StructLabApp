@@ -30,6 +30,8 @@ from ui_qt.presets import (
     _E_C30, _E_C35, _FCK_C30, _FCK_C35, _RHO_RC,
     beam_wizard, portal_wizard, truss_wizard, frame_wizard,
 )
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style
 from ui_qt.model_state import ModelState
 from ui_qt.section_library import default_steel_section
 
@@ -97,7 +99,7 @@ class BeamWizardDialog(QDialog):
         root = QVBoxLayout(self)
 
         # ── Geometry & supports ──────────────────────────────────────────────
-        geo = QGroupBox("Geometry & Supports")
+        geo = QGroupBox("Geometry && Supports")         # "&&" = a literal & (single & is a mnemonic)
         gv  = QVBoxLayout(geo)
 
         n_row = QHBoxLayout()
@@ -186,6 +188,10 @@ class BeamWizardDialog(QDialog):
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
+        apply_dialog_style(self, "Continuous beam",
+                           "Spans and supports, a steel or concrete section, UDL and a midspan "
+                           "point load",
+                           theme.GEOMETRY, "wand-sparkles")
 
         self._rb_steel.toggled.connect(
             lambda steel: (
@@ -376,6 +382,10 @@ class PortalWizardDialog(QDialog):
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
+        apply_dialog_style(self, "Portal frame",
+                           "Single-bay portal: span, column height, pinned or fixed bases, "
+                           "rafter and wind loads",
+                           theme.GEOMETRY, "wand-sparkles")
 
     def _on_accept(self) -> None:
         if self._rb_steel.isChecked():
@@ -494,6 +504,9 @@ class TrussWizardDialog(QDialog):
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
+        apply_dialog_style(self, "Truss",
+                           "Pratt, Warren or Howe truss of pinned bars with panel-point loads",
+                           theme.GEOMETRY, "wand-sparkles")
 
     def _on_accept(self) -> None:
         if self._rb_pratt.isChecked():
@@ -579,6 +592,10 @@ class FrameWizardDialog(QDialog):
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
+        apply_dialog_style(self, "Multi-storey frame",
+                           "Rigid-jointed frame: bays × storeys, column bases and one section "
+                           "for every member",
+                           theme.GEOMETRY, "wand-sparkles")
 
     def _on_accept(self) -> None:
         E, A, I, W_pl, W_el, b, h, density, fy, mat_type = self._sec.result

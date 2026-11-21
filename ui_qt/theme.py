@@ -308,6 +308,63 @@ QToolButton#float_btn:disabled {{
     color : {TEXT_DIM};
 }}
 
+/* Dialogs styled with dialog_style.apply_dialog_style (wizards, combinations…) */
+QDialog#themed_dialog {{
+    background : {SURFACE};
+}}
+QDialog#themed_dialog QGroupBox {{
+    background    : {BG};
+    border        : 1px solid {FRAME_LINE};
+    border-radius : {FRAME_RADIUS}px;
+    margin-top    : 16px;
+    padding       : 12px 10px 8px 10px;
+    font-weight   : bold;
+    color         : {TEXT_DIM};
+}}
+QDialog#themed_dialog QGroupBox::title {{
+    subcontrol-origin   : margin;
+    subcontrol-position : top left;
+    left    : 10px;
+    padding : 0 4px;
+    color   : {TEXT_DIM};
+}}
+QDialog#themed_dialog QGroupBox QLabel,
+QDialog#themed_dialog QGroupBox QRadioButton,
+QDialog#themed_dialog QGroupBox QCheckBox {{
+    font-weight : normal;
+    color       : {TEXT};
+}}
+QFrame#dialog_header {{
+    background    : {SURFACE2};
+    border        : 1px solid {FRAME_LINE};
+    border-radius : {FRAME_RADIUS}px;
+}}
+QLabel#dialog_header_title {{
+    color : {TEXT}; font-size: 13pt; font-weight: bold; background: transparent; border: none;
+}}
+QLabel#dialog_header_sub {{
+    color : {TEXT_DIM}; background: transparent; border: none;
+}}
+QPushButton[role="primary"] {{
+    background   : #0e7a93;
+    border       : 1px solid {CYAN};
+    color        : #ffffff;
+    font-weight  : bold;
+    padding      : 5px 18px;
+}}
+QPushButton[role="primary"]:hover {{
+    background : #1190ad;
+    color      : #ffffff;
+}}
+QPushButton[role="primary"]:pressed {{
+    background : {CYAN_TINT};
+}}
+QPushButton[role="primary"]:disabled {{
+    background   : {SURFACE2};
+    border-color : {BORDER};
+    color        : {TEXT_DIM};
+}}
+
 /* Tabs of docks stacked in one place (Results | Groups) */
 QMainWindow > QTabBar {{
     background : {FRAME_GAP};

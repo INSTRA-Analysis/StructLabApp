@@ -18,6 +18,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style, mark_primary
+from ui_qt.icons import icon
 from ui_qt.model_state import ModelState, LoadCombination
 
 
@@ -146,16 +149,9 @@ def _factors_summary(combo: LoadCombination, state: ModelState) -> str:
 
 # ── CombinationsDialog ────────────────────────────────────────────────────────
 
-_ULS_COLOR = QColor("#5a1a1a")
-_SLS_COLOR = QColor("#0d2b45")
-
-_BTN_STYLE = (
-    "QPushButton {{ font-weight: bold; color: white; border-radius: 3px;"
-    " padding: 5px 12px; background-color: {bg}; }}"
-    "QPushButton:hover {{ background-color: {hv}; }}"
-    "QPushButton:pressed {{ background-color: {pr}; }}"
-    "QPushButton:disabled {{ background-color: #555; color: #888; }}"
-)
+# Limit-state cells: soft tints of the theme's red / blue (axis colours) on the dark table
+_ULS_COLOR = QColor(232, 80, 91, 70)
+_SLS_COLOR = QColor(74, 144, 232, 70)
 
 
 class CombinationsDialog(QDialog):
@@ -172,17 +168,6 @@ class CombinationsDialog(QDialog):
         self.setMinimumHeight(400)
 
         layout = QVBoxLayout(self)
-
-        # ── header ────────────────────────────────────────────────────────────
-        hdr = QLabel(
-            "<b>EN 1990 Load Combinations</b>  ·  "
-            "Each combination is a factored superposition of load cases.  "
-            "Click <b>Auto-generate</b> to build standard ULS/SLS combinations "
-            "from the cases already in your model, then select one and click "
-            "<b>Solve Selected</b>."
-        )
-        hdr.setWordWrap(True)
-        layout.addWidget(hdr)
 
         # ── table ─────────────────────────────────────────────────────────────
         self._table = QTableWidget(0, 3)
@@ -201,10 +186,7 @@ class CombinationsDialog(QDialog):
         # ── button row ────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
 
-        auto_btn = QPushButton("Auto-generate EN 1990")
-        auto_btn.setStyleSheet(
-            _BTN_STYLE.format(bg="#1565C0", hv="#1976D2", pr="#0d47a1")
-        )
+        auto_btn = QPushButton(icon("sigma", theme.LOAD), "Auto-generate EN 1990")
         auto_btn.clicked.connect(self._on_auto_generate)
         btn_row.addWidget(auto_btn)
 
@@ -220,17 +202,11 @@ class CombinationsDialog(QDialog):
 
         btn_row.addStretch()
 
-        self._env_btn = QPushButton("Solve All & Envelope…")
-        self._env_btn.setStyleSheet(
-            _BTN_STYLE.format(bg="#4A148C", hv="#6A1B9A", pr="#38006b")
-        )
+        self._env_btn = QPushButton(icon("chart-column", theme.RESULT), "Solve All && Envelope…")
         self._env_btn.clicked.connect(self._on_envelope)
         btn_row.addWidget(self._env_btn)
 
-        self._solve_btn = QPushButton("Solve Selected")
-        self._solve_btn.setStyleSheet(
-            _BTN_STYLE.format(bg="#2196F3", hv="#1976D2", pr="#0D47A1")
-        )
+        self._solve_btn = QPushButton(icon("play"), "Solve Selected")
         self._solve_btn.clicked.connect(self._on_solve)
         btn_row.addWidget(self._solve_btn)
 
@@ -240,6 +216,12 @@ class CombinationsDialog(QDialog):
         close_box.rejected.connect(self.accept)
         layout.addWidget(close_box)
 
+        apply_dialog_style(
+            self, "Load combinations — EN 1990",
+            "Each combination is a factored sum of load cases. Auto-generate builds the "
+            "standard ULS and SLS sets from the cases in your model; select one and solve it.",
+            theme.LOAD, "sigma")
+        mark_primary(self._solve_btn)
         self._rebuild_table()
 
     # ── table helpers ─────────────────────────────────────────────────────────
@@ -378,6 +360,9 @@ class _AddCombinationDialog(QDialog):
         btns.accepted.connect(self._on_ok)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        apply_dialog_style(self, "Add load combination",
+                           "Name, limit state and a partial factor for each load case "
+                           "(0 leaves the case out)", theme.LOAD, "sigma")
 
     def _on_ok(self) -> None:
         name = self._name.text().strip() or "Combination"
