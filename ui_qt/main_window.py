@@ -841,18 +841,23 @@ class MainWindow(QMainWindow):
             return  # closed without choosing → blank canvas
 
         choice = dlg.choice
-        if choice in ("beam", "frame", "truss", "blank"):
-            # TODO: link "beam"/"frame"/"truss" to a matching preset/wizard once
-            # one is defined — for now all four start an empty canvas.
+        if choice == "blank":
             from ui_qt.model_state import ModelState
             blank = ModelState()
             blank.analysis_mode = dlg.start_mode      # "2D" (XY plane, Y up) or "3D" (Z up)
-            label = "Blank" if choice == "blank" else choice.title()
-            self._apply_model_state(blank, f"{label} ({dlg.start_mode})")
+            self._apply_model_state(blank, f"Blank ({dlg.start_mode})")
+        elif choice.startswith("wizard:"):
+            handler = getattr(self, f"_on_{choice[7:]}_wizard", None)
+            if handler is not None:
+                handler()                             # cancelled wizard → blank canvas
         elif choice.startswith("file:"):
             self._open_file(choice[5:])
         elif choice == "open":
             self._on_open()
+        elif choice == "help:shortcuts":
+            self._on_keyboard_shortcuts()
+        elif choice == "help:about":
+            self._on_about()
 
     def _rebuild_recent_menu(self) -> None:
         from ui_qt import recent_files as RF
