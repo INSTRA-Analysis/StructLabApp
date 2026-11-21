@@ -44,12 +44,11 @@ TEMPLATE_THUMB = QSize(112, 64)
 
 # Template sketches (line segments, x right / y up, 2D) — what each wizard builds
 _TEMPLATES: tuple[tuple[str, str, str, list[Segment]], ...] = (
-    ("beam", "Continuous beam", "Spans, supports, UDL and point loads",
+    ("beam", "Continuous beam", "Spans, supports, UDL and a midspan point load",
      [((0, 0, 0), (9, 0, 0)), ((0, -0.5, 0), (0, 0, 0)), ((4.5, -0.5, 0), (4.5, 0, 0)),
       ((9, -0.5, 0), (9, 0, 0))]),
-    ("portal", "Portal frame", "Pitched or flat single-bay portal",
-     [((0, 0, 0), (0, 4, 0)), ((0, 4, 0), (4, 5.5, 0)), ((4, 5.5, 0), (8, 4, 0)),
-      ((8, 4, 0), (8, 0, 0))]),
+    ("portal", "Portal frame", "Single-bay portal, pinned or fixed bases",
+     [((0, 0, 0), (0, 4, 0)), ((0, 4, 0), (8, 4, 0)), ((8, 4, 0), (8, 0, 0))]),
     ("truss", "Truss", "Pratt, Warren or Howe trusses",
      [((0, 0, 0), (10, 0, 0)), ((0, 0, 0), (0, 2, 0)), ((0, 2, 0), (10, 2, 0)),
       ((10, 2, 0), (10, 0, 0))]
