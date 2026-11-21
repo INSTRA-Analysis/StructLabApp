@@ -38,6 +38,17 @@ if TYPE_CHECKING:
 # Must match canvas.py
 PX_PER_M: float = 80.0
 
+# Diagram colours (blue–cyan family, see ui_qt/theme.py); labels are lighter tints so they
+# stay readable on the dark viewport. AFD keeps its meaning: red = compression, blue = tension.
+_BMD_COLOUR       = "#3d8bfd"   # theme.BLUE
+_BMD_LABEL        = "#9cc4ff"
+_SFD_COLOUR       = "#4fd1c5"   # theme.AQUA
+_SFD_LABEL        = "#93e6de"
+_DEFORMED_COLOUR  = "#00b4d8"   # theme.CYAN
+_DEFORMED_LABEL   = "#7fdcf0"
+_AFD_COMPRESSION  = "#e8505b"   # theme.AXIS_X red
+_AFD_TENSION      = "#4a90e8"   # theme.AXIS_Z blue
+
 # Z-values
 _Z_ORIG     = 2.5   # original grey lines in deformed view
 _Z_OVERLAY  = 3.0   # filled diagram polygons / deformed curves
@@ -485,9 +496,9 @@ def draw_bmd(
     When member_ids is given, each produced item is tagged with its UI member ID
     via setData(0, uid) for per-member visibility control.
     """
-    fill_color = QColor("#cc4444")
-    fill_color.setAlpha(55)
-    outline_pen = QPen(QColor("#cc4444"), 1)
+    fill_color = QColor(_BMD_COLOUR)
+    fill_color.setAlpha(60)
+    outline_pen = QPen(QColor(_BMD_COLOUR), 1)
 
     res_by_id = {r.element_id: r for r in sub_results}
     el_by_id  = {e.id: e for e in model.elements}
@@ -531,9 +542,9 @@ def draw_sfd(
     member_ids: "list[int] | None" = None,
 ) -> list[QGraphicsItem]:
     """Draw one smooth filled SFD polygon per UI member. V(x) = V_i − w·x for UDL."""
-    fill_color = QColor("#2255cc")
+    fill_color = QColor(_SFD_COLOUR)
     fill_color.setAlpha(55)
-    outline_pen = QPen(QColor("#2255cc"), 1)
+    outline_pen = QPen(QColor(_SFD_COLOUR), 1)
 
     res_by_id = {r.element_id: r for r in sub_results}
     el_by_id  = {e.id: e for e in model.elements}
@@ -600,7 +611,7 @@ def draw_afd(
         ix_s, iy_s = _node_to_scene(ni, model)
         jx_s, jy_s = _node_to_scene(nj, model)
 
-        color_str = "#cc2222" if N > 0 else "#2255cc"
+        color_str = _AFD_COMPRESSION if N > 0 else _AFD_TENSION
         pen = QPen(QColor(color_str), 4)
 
         line_path = QPainterPath()
@@ -655,7 +666,7 @@ def draw_deformed(
     When el_id_to_member_id is given, each item is tagged with its UI member ID.
     """
     grey_pen    = QPen(QColor(160, 160, 160), 1)
-    deform_pen  = QPen(QColor("#cc2222"), 2, Qt.PenStyle.DashLine)
+    deform_pen  = QPen(QColor(_DEFORMED_COLOUR), 2, Qt.PenStyle.DashLine)
     n_dofs = len(displacements)
 
     items: list[QGraphicsItem] = []
@@ -848,7 +859,7 @@ def draw_labels(
                 offset  = M_peak * scale_px_per_Nm
                 _peak_label(f"{M_peak / 1e3:.2f} kN·m",
                             base_sx + perp_x * offset, base_sy + perp_y * offset,
-                            "#990000", 'BMD')
+                            _BMD_LABEL, 'BMD')
 
         # ── SFD value labels at the member ends ───────────────────────────────
         # Shear is constant/linear within a node-loaded member, so the critical
@@ -863,7 +874,7 @@ def draw_labels(
                 by = iy_s + tt * L_px * sin_s
                 off_v = -vv * scale_px_per_Nm   # positive V plotted above (see draw_sfd)
                 _peak_label(f"{vv / 1e3:.2f} kN",
-                            bx + perp_x * off_v, by + perp_y * off_v, "#2255cc", 'SFD')
+                            bx + perp_x * off_v, by + perp_y * off_v, _SFD_LABEL, 'SFD')
 
         # ── AFD axial-N label (representative for member) ─────────────────────
         first_res = res_by_id.get(el_ids[0])
@@ -871,7 +882,7 @@ def draw_labels(
             N = first_res.N_i
             _peak_label(f"{N / 1e3:.2f} kN",
                         ix_s + 0.5 * L_px * cos_s, iy_s + 0.5 * L_px * sin_s,
-                        "#cc2222" if N > 0 else "#2255cc", 'AFD')
+                        _AFD_COMPRESSION if N > 0 else _AFD_TENSION, 'AFD')
 
         # ── Deformed peak-δ label ─────────────────────────────────────────────
         if displacements is not None and def_scale > 0.0:
@@ -888,7 +899,7 @@ def draw_labels(
                     offset_d = -def_scale * v_peak * PX_PER_M
                     _peak_label(f"{v_peak * 1e3:.2f} mm",
                                 base_sx_d + perp_x * offset_d, base_sy_d + perp_y * offset_d,
-                                "#cc2222", 'Deformed')
+                                _DEFORMED_LABEL, 'Deformed')
 
         # Tag all items produced during this member's iteration with its UI id
         if member_ids is not None and mi < len(member_ids):
