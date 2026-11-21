@@ -24,9 +24,9 @@ import math
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
-    QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QPixmap,
+    QBrush, QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPen, QPixmap,
 )
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
@@ -129,11 +129,74 @@ def render_wireframe(segs: list[Segment], size: QSize, is_3d: bool,
 # ── widgets ───────────────────────────────────────────────────────────────────
 
 class _Banner(QWidget):
-    """Wordmark over a gradient with a faint lattice tower and truss drawn in."""
+    """Wordmark over a blue gradient, with a truss assembling its stiffness matrix.
+
+    The art (ui_qt/banner_art.py) plays its assembly once, member by member, the first time
+    the banner is shown, then rests on the finished matrix; clicking the banner replays it.
+    """
+
+    ART_WIDTH = 480          # px from the right edge reserved for the art
+    STEP_MS = 115            # one member per step
 
     def __init__(self) -> None:
         super().__init__()
         self.setFixedHeight(150)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Direct Stiffness Method: each member adds its block to K "
+                        "(click to replay the assembly)")
+        from ui_qt.banner_art import ASSEMBLY
+        self._n_members = len(ASSEMBLY.bars)
+        self.count = self._n_members          # members assembled so far (all at rest)
+        self._played = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._step)
+
+    # ── animation ─────────────────────────────────────────────────────────────
+
+    def play(self) -> None:
+        """Replay the assembly from an empty matrix."""
+        self.count = 0
+        self._timer.start(self.STEP_MS)
+        self.update()
+
+    def _step(self) -> None:
+        self.count += 1
+        if self.count >= self._n_members:
+            self.count = self._n_members
+            self._timer.stop()
+        self.update()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._played:
+            self._played = True
+            self.play()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.play()
+        super().mousePressEvent(event)
+
+    # ── painting ──────────────────────────────────────────────────────────────
+
+    def _art_layer(self, w: int, h: int) -> QImage:
+        """The art on a transparent layer, faded in from the left so it never meets the text."""
+        from ui_qt.banner_art import paint_assembly
+        dpr = self.devicePixelRatioF()
+        img = QImage(int(w * dpr), int(h * dpr), QImage.Format.Format_ARGB32_Premultiplied)
+        img.setDevicePixelRatio(dpr)
+        img.fill(Qt.GlobalColor.transparent)
+        p = QPainter(img)
+        origin_x = w - self.ART_WIDTH
+        flash = self.count - 1 if self._timer.isActive() else -1
+        paint_assembly(p, QPointF(origin_x, 0), self.count, flash)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        mask = QLinearGradient(origin_x - 90, 0, origin_x + 80, 0)
+        mask.setColorAt(0.0, QColor(0, 0, 0, 0))
+        mask.setColorAt(1.0, QColor(0, 0, 0, 255))
+        p.fillRect(QRectF(0, 0, w, h), QBrush(mask))
+        p.end()
+        return img
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         p = QPainter(self)
@@ -148,35 +211,7 @@ class _Banner(QWidget):
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), theme.FRAME_RADIUS, theme.FRAME_RADIUS)
 
         p.setClipRect(QRectF(1, 1, w - 2, h - 2))
-        line = QColor(theme.CYAN)
-        line.setAlpha(70)
-        p.setPen(QPen(line, 1.2))
-        # Warren truss along the bottom
-        y0, y1, step = h - 18.0, h - 52.0, 34.0
-        x = w * 0.50
-        p.drawLine(QPointF(x, y0), QPointF(w + 10, y0))
-        p.drawLine(QPointF(x + step / 2, y1), QPointF(w + 10, y1))
-        while x < w + step:
-            p.drawLine(QPointF(x, y0), QPointF(x + step / 2, y1))
-            p.drawLine(QPointF(x + step / 2, y1), QPointF(x + step, y0))
-            x += step
-        # Lattice mast on the right, tapering to the top
-        cx, base, top = w - 120.0, h - 52.0, 10.0
-        half_b, half_t, panels = 26.0, 7.0, 6
-        line.setAlpha(110)
-        p.setPen(QPen(line, 1.3))
-        for i in range(panels):
-            ya = base - (base - top) * i / panels
-            yb = base - (base - top) * (i + 1) / panels
-            ha = half_b + (half_t - half_b) * i / panels
-            hb = half_b + (half_t - half_b) * (i + 1) / panels
-            p.drawLine(QPointF(cx - ha, ya), QPointF(cx - hb, yb))
-            p.drawLine(QPointF(cx + ha, ya), QPointF(cx + hb, yb))
-            p.drawLine(QPointF(cx - ha, ya), QPointF(cx + hb, yb))
-            p.drawLine(QPointF(cx + ha, ya), QPointF(cx - hb, yb))
-            p.drawLine(QPointF(cx - hb, yb), QPointF(cx + hb, yb))
-        arm_y = top + (base - top) * 0.25
-        p.drawLine(QPointF(cx - 60, arm_y), QPointF(cx + 60, arm_y))
+        p.drawImage(QPointF(0, 0), self._art_layer(w, h))
         p.setClipping(False)
 
         f = QFont(); f.setPointSize(30); f.setBold(True)
