@@ -294,3 +294,187 @@ class ModesArt:
                 x += 6
             _text(p, f"Mode {m + 1}", cx, self.BASE + 16, LABEL, 9)
         p.restore()
+
+
+# ── stability: effective lengths ─────────────────────────────────────────────
+
+def fixed_pinned_root() -> float:
+    """kL for a column fixed at one end and pinned at the other: the first root of tan kL = kL."""
+    kl = 4.5
+    for _ in range(50):
+        kl -= (np.tan(kl) - kl) / (1 / np.cos(kl) ** 2 - 1)
+    return float(kl)
+
+
+def column_shapes() -> list[tuple[str, float, object, str, str]]:
+    """(name, effective length factor K, shape(s) with s = 0 at the base, base, top)."""
+    kl = fixed_pinned_root()
+
+    def fixed_pinned(s):                                    # y(0)=y'(0)=0, y(1)=y''(1)=0
+        return -np.tan(kl) * (1 - np.cos(kl * s)) + (kl * s - np.sin(kl * s))
+
+    peak = max(abs(fixed_pinned(s)) for s in np.linspace(0, 1, 401))
+    return [
+        ("pinned–pinned", 1.0, lambda s: np.sin(np.pi * s), "pin", "pin"),
+        ("fixed–free", 2.0, lambda s: 1 - np.cos(np.pi * s / 2), "fixed", "free"),
+        ("fixed–pinned", np.pi / kl, lambda s: fixed_pinned(s) / peak, "fixed", "pin"),
+        ("fixed–fixed", 0.5, lambda s: (1 - np.cos(2 * np.pi * s)) / 2, "fixed", "fixed"),
+    ]
+
+
+class ColumnsArt:
+    """Stability: buckled shapes of the four classic Euler columns and their K factors."""
+
+    theme = "Stability"
+    steps = 24
+    fade = (-60.0, -30.0)
+    tooltip = ("Euler buckling of the four classic columns, with their effective length "
+               "factors K (click to replay)")
+
+    XS = (55.0, 145.0, 235.0, 325.0)
+    BASE, TOP, AMP = 118.0, 26.0, 15.0
+
+    def __init__(self) -> None:
+        self.columns = column_shapes()
+
+    def paint(self, p: QPainter, origin: QPointF, step: int | None = None) -> None:
+        step = self.steps if step is None else step
+        f = step / self.steps
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.translate(origin)
+        support = _alpha(theme.SUPPORT, 0.85)
+        for (name, K, shape, bottom, top), x in zip(self.columns, self.XS):
+            straight = QPen(_alpha(theme.TEXT_DIM, 0.35), 1.0)
+            straight.setDashPattern([3, 3])
+            p.setPen(straight)
+            p.drawLine(QPointF(x, self.BASE), QPointF(x, self.TOP))
+            pts = [(x + self.AMP * f * shape(s), self.BASE - s * (self.BASE - self.TOP))
+                   for s in np.linspace(0, 1, 81)]
+            _polyline(p, pts, theme.CYAN, 2.2)
+            tip_x = x + self.AMP * f * shape(1.0)
+            for end, y, down in ((bottom, self.BASE + 1, True), (top, self.TOP - 1, False)):
+                ex = x if end != "free" else tip_x
+                if end == "fixed":
+                    _fixed_base(p, ex if y == self.BASE + 1 else tip_x, y, 14, down)
+                elif end == "pin":
+                    s = 6.0
+                    tri = ([QPointF(ex, y), QPointF(ex - s, y + s * 1.3), QPointF(ex + s, y + s * 1.3)] if down else
+                           [QPointF(ex, y), QPointF(ex - s, y - s * 1.3), QPointF(ex + s, y - s * 1.3)])
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QBrush(support))
+                    p.drawPolygon(QPolygonF(tri))
+            load = QColor(theme.LOAD)
+            p.setPen(QPen(load, 1.4))
+            p.drawLine(QPointF(tip_x, self.TOP - 22), QPointF(tip_x, self.TOP - 12))
+            _arrow_head(p, QPointF(tip_x, self.TOP - 7), 0, 1, load)
+            k_text = f"K = {K:.1f}" if K in (0.5, 1.0, 2.0) else f"K = {K:.3f}"
+            _text(p, k_text, x + 18, self.BASE - 44, LABEL, 9.5, Qt.AlignmentFlag.AlignLeft)
+            _text(p, name, x, self.BASE + 20, _alpha(theme.TEXT_DIM, 0.95), 8.5)
+        p.restore()
+
+
+# ── reliability: the reliability index in standard normal space ─────────────
+
+def normal_cdf(x: float) -> float:
+    from math import erfc, sqrt
+    return 0.5 * erfc(-x / sqrt(2.0))
+
+
+@dataclass
+class ReliabilityProblem:
+    """g = R − S with S ~ N(μS, σS), R ~ N(μR, σR), independent."""
+    mu_s: float = 1.0
+    sd_s: float = 0.20
+    mu_r: float = 1.9
+    sd_r: float = 0.15
+
+    @property
+    def beta(self) -> float:
+        return (self.mu_r - self.mu_s) / float(np.hypot(self.sd_r, self.sd_s))
+
+    @property
+    def pf(self) -> float:
+        return normal_cdf(-self.beta)
+
+    @property
+    def design_point(self) -> tuple[float, float]:
+        """(u_R, u_S) closest to the origin on g = 0 (Hasofer–Lind)."""
+        n = float(np.hypot(self.sd_r, self.sd_s))
+        return -self.beta * self.sd_r / n, self.beta * self.sd_s / n
+
+    def limit_u_s(self, u_r: float) -> float:
+        """u_S on the limit state for a given u_R: μR + σR·uR = μS + σS·uS."""
+        return (self.mu_r - self.mu_s + self.sd_r * u_r) / self.sd_s
+
+    def g(self, u_r: float, u_s: float) -> float:
+        return (self.mu_r + self.sd_r * u_r) - (self.mu_s + self.sd_s * u_s)
+
+
+class ReliabilityArt:
+    """Reliability: limit state, probability contours, design point and β."""
+
+    theme = "Reliability"
+    steps = 24
+    fade = (-60.0, -30.0)
+    tooltip = ("The reliability index β: the distance from the mean to the nearest failure "
+               "point in standard normal space (click to replay)")
+
+    CX, CY, S = 180.0, 92.0, 15.0
+
+    def __init__(self) -> None:
+        self.prob = ReliabilityProblem()
+
+    def _u(self, u_r: float, u_s: float) -> QPointF:
+        return QPointF(self.CX + u_r * self.S, self.CY - u_s * self.S)
+
+    def paint(self, p: QPainter, origin: QPointF, step: int | None = None) -> None:
+        step = self.steps if step is None else step
+        f = step / self.steps
+        pr, U = self.prob, self._u
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.translate(origin)
+        # failure domain (g < 0) and the limit state g = 0
+        lo, hi = -22.0, 6.0                                  # far left: hidden by the fade
+        fail = QPolygonF([U(lo, pr.limit_u_s(lo)), U(hi, pr.limit_u_s(hi)), U(hi, 14.0), U(lo, 14.0)])
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(_alpha("#e8505b", 0.16)))
+        p.drawPolygon(fail)
+        p.setPen(QPen(QColor("#e8505b"), 1.8))
+        p.drawLine(U(lo, pr.limit_u_s(lo)), U(hi, pr.limit_u_s(hi)))
+        # probability contours: circles of radius 1…4 standard deviations
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for r in range(1, 5):
+            p.setPen(QPen(_alpha(theme.SKY, (0.55 - 0.1 * r) * f), 1.0))
+            p.drawEllipse(QPointF(self.CX, self.CY), r * self.S, r * self.S)
+        axis = _alpha(theme.TEXT_DIM, 0.4)
+        p.setPen(QPen(axis, 1.0))
+        p.drawLine(U(-5.5, 0), U(5.5, 0))
+        p.drawLine(U(0, -2.0), U(0, 5.5))
+        # β: from the mean to the design point
+        ur, us = pr.design_point
+        tip = U(ur * f, us * f)
+        p.setPen(QPen(QColor("#ffffff"), 1.6))
+        p.drawLine(QPointF(self.CX, self.CY), tip)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(theme.CYAN)))
+        p.drawEllipse(tip, 4.0, 4.0)
+        mid = U(ur / 2, us / 2)
+        _text(p, f"β = {pr.beta:.2f}", mid.x() + 34, mid.y() + 4, "#ffffff", 10)
+        if f >= 1:
+            _text(p, "design point", tip.x() - 8, tip.y() - 6, theme.CYAN, 8.5, Qt.AlignmentFlag.AlignRight)
+        _text(p, "g = R − S = 0", 62, 140, "#f2949a", 9, Qt.AlignmentFlag.AlignLeft)
+        _text(p, "failure", 80, 18, "#f2949a", 9)
+        _text(p, "u_R", U(5.5, 0).x() + 6, self.CY + 4, LABEL, 9, Qt.AlignmentFlag.AlignLeft)
+        _text(p, "u_S", self.CX + 6, max(U(0, 5.5).y() + 4, 12.0), LABEL, 9, Qt.AlignmentFlag.AlignLeft)
+        _text(p, f"Pf = Φ(−β) = {_scientific(pr.pf)}", 470, 40, _alpha(theme.TEXT_DIM, 0.95), 9,
+              Qt.AlignmentFlag.AlignRight)
+        p.restore()
+
+
+def _scientific(x: float) -> str:
+    """1.59e-04 → "1.59 × 10⁻⁴"."""
+    exponent = int(np.floor(np.log10(abs(x))))
+    sup = str(exponent).translate(str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹"))
+    return f"{x / 10 ** exponent:.2f} × 10{sup}"

@@ -61,6 +61,53 @@ def test_shear_frame_modes_are_the_textbook_eigenvectors():
         assert K @ modes[:, k] == pytest.approx(values[k] * modes[:, k], abs=1e-9)
 
 
+# ── X1 effective lengths ─────────────────────────────────────────────────────
+
+def test_fixed_pinned_column_root_and_effective_length():
+    from ui_qt.banner_gallery import fixed_pinned_root, column_shapes
+    kl = fixed_pinned_root()
+    assert kl == pytest.approx(4.493409, abs=1e-6)
+    assert np.tan(kl) == pytest.approx(kl, rel=1e-9)
+    factors = {name: K for name, K, *_ in column_shapes()}
+    assert factors == pytest.approx({"pinned–pinned": 1.0, "fixed–free": 2.0,
+                                     "fixed–pinned": 0.6992, "fixed–fixed": 0.5}, abs=1e-4)
+
+
+def test_buckled_shapes_satisfy_their_end_conditions():
+    from ui_qt.banner_gallery import column_shapes
+    h = 1e-5
+    d1 = lambda f, s: (f(s + h) - f(s - h)) / (2 * h)
+    d2 = lambda f, s: (f(s + h) - 2 * f(s) + f(s - h)) / (h * h)
+    for name, _K, f, bottom, top in column_shapes():
+        assert f(0.0) == pytest.approx(0.0, abs=1e-9), name                  # no base movement
+        if bottom == "fixed":
+            assert d1(f, 0.0 + h) == pytest.approx(0.0, abs=1e-3), name      # no base rotation
+        if top == "pin":
+            assert f(1.0) == pytest.approx(0.0, abs=1e-9), name              # no top movement
+            assert d2(f, 1.0 - h) == pytest.approx(0.0, abs=2e-2), name      # no top moment
+        if top == "fixed":
+            assert f(1.0) == pytest.approx(0.0, abs=1e-9), name
+            assert d1(f, 1.0 - h) == pytest.approx(0.0, abs=1e-3), name
+        if top == "free":
+            assert d2(f, 1.0 - h) == pytest.approx(0.0, abs=2e-2), name      # no tip moment
+
+
+# ── R2 reliability index ─────────────────────────────────────────────────────
+
+def test_reliability_index_and_design_point():
+    from math import erfc, sqrt
+    from ui_qt.banner_gallery import ReliabilityProblem
+    pr = ReliabilityProblem()
+    assert pr.beta == pytest.approx(0.9 / 0.25)
+    assert pr.pf == pytest.approx(0.5 * erfc(3.6 / sqrt(2)), rel=1e-12)
+    assert pr.pf == pytest.approx(1.5911e-4, rel=1e-3)
+    ur, us = pr.design_point
+    assert pr.g(ur, us) == pytest.approx(0.0, abs=1e-12)                     # on the limit state
+    assert np.hypot(ur, us) == pytest.approx(pr.beta, rel=1e-12)             # at distance β
+    for u in np.linspace(-10, 10, 201):                                       # and the closest point
+        assert np.hypot(u, pr.limit_u_s(u)) >= pr.beta - 1e-9
+
+
 # ── every banner draws at every step ─────────────────────────────────────────
 
 def test_each_banner_paints_every_frame_of_its_draw_in(qapp):

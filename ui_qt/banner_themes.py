@@ -45,10 +45,22 @@ def _modes():
     return ModesArt()
 
 
+def _columns():
+    from ui_qt.banner_gallery import ColumnsArt
+    return ColumnsArt()
+
+
+def _reliability():
+    from ui_qt.banner_gallery import ReliabilityArt
+    return ReliabilityArt()
+
+
 BANNERS: tuple[BannerEntry, ...] = (
     BannerEntry("portal", "Static analysis: portal frame", _portal),
     BannerEntry("modes", "Dynamics: frame mode shapes", _modes),
     BannerEntry("element", "Finite elements: the frame element", _element),
+    BannerEntry("columns", "Stability: effective lengths", _columns),
+    BannerEntry("reliability", "Reliability: the reliability index", _reliability),
 )
 
 
