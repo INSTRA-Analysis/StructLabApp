@@ -680,6 +680,13 @@ class MainWindow(QMainWindow):
         self._act["panel_results"] = self._right_dock.toggleViewAction()
         self._act["panel_groups"] = self._groups_dock.toggleViewAction()
 
+        from ui_qt.workspaces import build_workspace_actions
+        ws_actions = build_workspace_actions(self)
+        self._act.update(ws_actions)
+        ws_menu = view_menu.addMenu("Workspace")
+        for act in ws_actions.values():
+            ws_menu.addAction(act)
+
         view_menu.addSeparator()
         self._named_views_menu = view_menu.addMenu(icon("camera"), "Named Views")
         self._named_views_menu.aboutToShow.connect(self._fill_named_views_menu)

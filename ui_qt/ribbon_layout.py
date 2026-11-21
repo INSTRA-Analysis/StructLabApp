@@ -49,6 +49,7 @@ def build_ribbon(win) -> RibbonBar:
     a = win._act
     bar = RibbonBar(win)
     bar.set_file_menu(win._file_menu)
+    bar.add_workspace_switcher([a[k] for k in ("ws_model", "ws_loads", "ws_results")])
     for key in ("save", "undo", "redo", "solve"):
         bar.add_quick_action(a[key])
 

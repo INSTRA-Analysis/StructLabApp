@@ -70,6 +70,13 @@ QToolButton#ribbon_large:checked, QToolButton#ribbon_small:checked {{
 }}
 QToolButton#ribbon_large:disabled, QToolButton#ribbon_small:disabled {{ color: {TEXT_DIM}; }}
 QLabel#ribbon_field_label {{ color: {TEXT_DIM}; }}
+QFrame#ws_switch {{ border: 1px solid {FRAME_LINE}; border-radius: 5px; background: {FRAME_GAP}; }}
+QToolButton#ws_btn {{
+    background: transparent; color: {TEXT_DIM}; border: none; border-radius: 4px;
+    padding: 2px 12px;
+}}
+QToolButton#ws_btn:hover {{ color: {TEXT}; background: {SURFACE2}; }}
+QToolButton#ws_btn:checked {{ color: {CYAN}; background: {CYAN_TINT}; }}
 """
 
 
@@ -208,6 +215,7 @@ class RibbonBar(QWidget):
         top_lay = QHBoxLayout(top)
         top_lay.setContentsMargins(0, 0, 4, 0)
         top_lay.setSpacing(2)
+        self._top_lay = top_lay
 
         self.file_button = QToolButton()
         self.file_button.setObjectName("ribbon_file")
@@ -276,6 +284,28 @@ class RibbonBar(QWidget):
 
     def set_file_menu(self, menu: QMenu) -> None:
         self.file_button.setMenu(menu)
+
+    def add_workspace_switcher(self, actions: list[QAction]) -> QFrame:
+        """A segmented [Model | Loads | Results] control, just left of the quick buttons.
+
+        Its buttons are bound to the workspace actions (ui_qt/workspaces.py); the tabs
+        themselves never switch workspaces."""
+        frame = QFrame()
+        frame.setObjectName("ws_switch")
+        lay = QHBoxLayout(frame)
+        lay.setContentsMargins(1, 1, 1, 1)
+        lay.setSpacing(0)
+        for action in actions:
+            btn = QToolButton()
+            btn.setObjectName("ws_btn")
+            btn.setDefaultAction(action)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            lay.addWidget(btn)
+        quick_at = self._top_lay.indexOf(self._quick)
+        self._top_lay.insertWidget(quick_at, frame)
+        self._top_lay.insertSpacing(quick_at + 1, 10)
+        self.workspace_switcher = frame
+        return frame
 
     def add_quick_action(self, action: QAction) -> QToolButton:
         btn = QToolButton()
