@@ -68,8 +68,8 @@ class NavGizmo:
         # Disc — faint, a touch brighter while the pointer is over the gizmo
         disc_r = self.HALF / scale
         over = self.hovered is not None
-        painter.setPen(QPen(QColor(255, 255, 255, 34 if over else 18), 1.0 / scale))
-        painter.setBrush(QBrush(QColor(255, 255, 255, 26 if over else 12)))
+        painter.setPen(QPen(QColor(79, 179, 246, 60 if over else 32), 1.0 / scale))   # theme.SKY
+        painter.setBrush(QBrush(QColor(79, 179, 246, 34 if over else 18)))
         painter.drawEllipse(QPointF(cx, cy), disc_r, disc_r)
 
         # Balls back → front so the near ones overlap the far ones

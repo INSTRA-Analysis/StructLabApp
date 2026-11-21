@@ -38,8 +38,10 @@ from ui_qt import theme as _theme
 from PyQt6.QtGui import QRadialGradient
 
 # Viewport background: vertical gradient, lighter at the top (Blender-like)
-_VIEWPORT_TOP    = QColor("#3a3d44")
-_VIEWPORT_BOTTOM = QColor("#1f2125")
+_VIEWPORT_TOP    = QColor(_theme.VIEWPORT_TOP)
+_VIEWPORT_BOTTOM = QColor(_theme.VIEWPORT_BOTTOM)
+_GRID_MINOR = "#3f4d60"      # blue-grey grid lines on the navy-tinted viewport
+_GRID_MAJOR = "#586a82"
 
 
 def _fade_pen(colour: QColor, centre: QPointF, radius: float, width: float = 1.0) -> QPen:
@@ -2364,7 +2366,7 @@ class StructView(QGraphicsView):
 
         # Welcome overlay — only on first launch before any user action
         if not self.scene()._hide_welcome and not self.scene().model_state.nodes:
-            painter.setPen(QPen(QColor("#6a6e78"), 1))
+            painter.setPen(QPen(QColor("#6c7d94"), 1))
             font = painter.font()
             font.setPointSize(18)
             font.setBold(True)
@@ -2373,7 +2375,7 @@ class StructView(QGraphicsView):
             font.setPointSize(10)
             font.setBold(False)
             painter.setFont(font)
-            painter.setPen(QPen(QColor("#585c66"), 1))
+            painter.setPen(QPen(QColor("#566579"), 1))
             r2 = rect.adjusted(0, 30, 0, 0)
             painter.drawText(r2, Qt.AlignmentFlag.AlignCenter,
                              "Press N to add a node  |  Ctrl+O to open  |  Presets menu to start")
@@ -2740,8 +2742,8 @@ class StructView(QGraphicsView):
         major_step = GRID_STEP
 
         fade_c, fade_r = self._grid_fade()
-        minor_pen = _fade_pen(QColor(78, 82, 92), fade_c, fade_r)
-        major_pen = _fade_pen(QColor(100, 105, 116), fade_c, fade_r, 1.2)
+        minor_pen = _fade_pen(QColor(_GRID_MINOR), fade_c, fade_r)
+        major_pen = _fade_pen(QColor(_GRID_MAJOR), fade_c, fade_r, 1.2)
 
         left = int(math.floor(rect.left()   / minor_step)) * minor_step
         right = int(math.ceil( rect.right()  / minor_step)) * minor_step
@@ -2804,8 +2806,8 @@ class StructView(QGraphicsView):
 
         # ── Pens ──────────────────────────────────────────────────────────────
         fade_c, fade_r = self._grid_fade()
-        minor_pen = _fade_pen(QColor(76, 80, 90), fade_c, fade_r)
-        major_pen = _fade_pen(QColor(104, 109, 120), fade_c, fade_r, 1.3)
+        minor_pen = _fade_pen(QColor(_GRID_MINOR), fade_c, fade_r)
+        major_pen = _fade_pen(QColor(_GRID_MAJOR), fade_c, fade_r, 1.3)
         pl_minor  = QPen(QColor(0, 120, 140, 110)); pl_minor.setCosmetic(True)
         pl_major  = QPen(QColor(0, 155, 175, 180)); pl_major.setCosmetic(True)
         pl_major.setWidthF(1.4)

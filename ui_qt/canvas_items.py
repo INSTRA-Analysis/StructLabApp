@@ -71,11 +71,11 @@ ARROW_HEAD = 7                 # px — arrowhead half-width
 UDL_LEN    = 22                # px — UDL arrow shaft
 
 # Members: calm colours on the dark viewport — bars (most of a truss or tower) in light
-# steel grey, beams in a soft cyan (the geometry category colour). Selection stays yellow.
-_BEAM_PEN  = QPen(QColor("#5fc4dc"), 2)
-_BAR_PEN   = QPen(QColor("#aab6c4"), 2)
-_NODE_FILL = QColor("#e6e9ef")
-_NODE_EDGE = QColor("#2a2c31")
+# blue-steel, beams in sky blue (theme.SKY, the blue–cyan family). Selection stays yellow.
+_BEAM_PEN  = QPen(QColor("#4fb3f6"), 2)
+_BAR_PEN   = QPen(QColor("#b4c3d6"), 2)
+_NODE_FILL = QColor("#e8eef6")
+_NODE_EDGE = QColor("#22272e")
 _GHOST_PEN = QPen(QColor("#aaaaaa"), 1, Qt.PenStyle.DashLine)
 _LOAD_PEN  = QPen(QColor("#cc2200"), 2.5)
 _UDL_PEN   = QPen(QColor("#cc2200"), 1)
