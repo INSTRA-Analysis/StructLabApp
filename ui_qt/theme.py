@@ -183,4 +183,69 @@ QScrollBar::add-line, QScrollBar::sub-line {{
     width: 0; height: 0;
 }}
 
+
+/* ═══════════════════════════════════════════════════════════
+   DEPTH & BORDERS — docks, inputs, tables, tooltips, status bar
+   Panels sit one step lighter than the canvas; every container
+   has a 1px border so regions read as distinct surfaces.
+   ═══════════════════════════════════════════════════════════ */
+
+QDockWidget {{
+    border : 1px solid {BORDER};
+}}
+
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
+    background    : {BG};
+    border        : 1px solid {BORDER};
+    border-radius : 3px;
+    padding       : 2px 5px;
+    selection-background-color : {CYAN_DIM};
+}}
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
+    border-color : {CYAN_DIM};
+}}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+    border-color : {CYAN};
+}}
+
+QTableView {{
+    alternate-background-color : {SURFACE};
+    selection-background-color : {CYAN_TINT};
+    selection-color            : {TEXT};
+}}
+
+QToolTip {{
+    background    : {SURFACE2};
+    color         : {TEXT};
+    border        : 1px solid {CYAN_DIM};
+    padding       : 3px 6px;
+}}
+
+QStatusBar {{
+    background : {SURFACE2};
+    border-top : 1px solid {BORDER};
+    color      : {TEXT_DIM};
+}}
+QStatusBar::item {{
+    border : none;
+}}
+
+QMenu {{
+    background : {SURFACE2};
+    border     : 1px solid {BORDER};
+    padding    : 3px;
+}}
+QMenu::item {{
+    padding : 4px 22px 4px 18px;
+}}
+QMenu::item:selected {{
+    background : {CYAN_TINT};
+    color      : {CYAN};
+}}
+QMenu::separator {{
+    height : 1px;
+    background : {BORDER};
+    margin : 3px 6px;
+}}
+
 """

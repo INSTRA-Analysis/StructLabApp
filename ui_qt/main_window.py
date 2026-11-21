@@ -50,14 +50,16 @@ def _plane_for_view(az: float, el: float) -> WorkingPlane:
     return WorkingPlane.YZ              # Right (90°) or Left (-90°)
 
 _DOCK_HDR = (
-    "background:#00ACC1; color:#ffffff;"
-    " font-size:11px; font-weight:bold; padding-left:6px;"
+    "background:#2d2d2d; color:#9aa4ad;"
+    " font-size:10px; font-weight:bold; padding-left:6px;"
+    " border-bottom:2px solid #00b4d8; border-top:1px solid #3c3c3c;"
 )
 
 _DOCK_BTN = (
-    "QPushButton { background: transparent; color: #ffffff; border: none;"
+    "QPushButton { background: transparent; color: #9aa4ad; border: none;"
     " font-size: 13px; padding: 0 2px; }"
-    "QPushButton:hover { background: rgba(255,255,255,50); border-radius: 2px; }"
+    "QPushButton:hover { background: rgba(0,180,216,45); color: #00b4d8;"
+    " border-radius: 2px; }"
 )
 
 
@@ -78,8 +80,8 @@ class _DockTitleBar(QWidget):
         layout.setContentsMargins(6, 0, 4, 0)
         layout.setSpacing(2)
 
-        lbl = QLabel(title)
-        lbl.setStyleSheet("background: transparent;")
+        lbl = QLabel(title.upper())
+        lbl.setStyleSheet("background: transparent; border: none; letter-spacing: 1px;")
         layout.addWidget(lbl)
         layout.addStretch()
 
