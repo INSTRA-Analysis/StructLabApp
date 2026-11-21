@@ -19,6 +19,11 @@ BORDER    = "#4a4d55"
 TEXT      = "#e0e2e6"
 TEXT_DIM  = "#9a9ea6"
 
+# ── Framed areas (VS Code-like): each region is a rounded box on a dark gutter ─
+FRAME_GAP    = "#141518"   # gutter between the boxes (window background)
+FRAME_LINE   = "#5d6573"   # the box outline
+FRAME_RADIUS = 6           # px, box corner radius
+
 # ── Category colours (icons, panel accents, canvas symbols) ──────────────────
 GEOMETRY  = CYAN        # nodes, members, modelling tools
 SUPPORT   = "#5cc96b"   # supports and restraints
@@ -233,8 +238,64 @@ QScrollBar::add-line, QScrollBar::sub-line {{
    has a 1px border so regions read as distinct surfaces.
    ═══════════════════════════════════════════════════════════ */
 
-QDockWidget {{
-    border : 1px solid {BORDER};
+/* ═══════════════════════════════════════════════════════════
+   FRAMED AREAS — every region (ribbon, canvas, each dock) is a
+   rounded box with a light outline on a dark gutter, like VS Code.
+   Dock boxes are two halves: the title bar (top corners) and
+   QFrame#panel_body (bottom corners), see main_window.py.
+   ═══════════════════════════════════════════════════════════ */
+
+QMainWindow {{
+    background : {FRAME_GAP};
+}}
+QMainWindow::separator {{
+    background : {FRAME_GAP};
+    width  : 6px;
+    height : 6px;
+}}
+QMainWindow::separator:hover {{
+    background : {CYAN_DIM};
+}}
+
+QWidget#dock_title {{
+    background : {SURFACE2};
+    border     : 1px solid {FRAME_LINE};
+    border-bottom : 1px solid {BORDER};
+    border-top-left-radius  : {FRAME_RADIUS}px;
+    border-top-right-radius : {FRAME_RADIUS}px;
+}}
+QFrame#panel_body {{
+    background : {SURFACE};
+    border     : 1px solid {FRAME_LINE};
+    border-top : none;
+    border-bottom-left-radius  : {FRAME_RADIUS}px;
+    border-bottom-right-radius : {FRAME_RADIUS}px;
+}}
+QFrame#canvas_frame {{
+    background    : {BG};
+    border        : 1px solid {FRAME_LINE};
+    border-radius : {FRAME_RADIUS}px;
+}}
+
+/* Tabs of docks stacked in one place (Results | Groups) */
+QMainWindow > QTabBar {{
+    background : {FRAME_GAP};
+}}
+QMainWindow > QTabBar::tab {{
+    background    : {FRAME_GAP};
+    color         : {TEXT_DIM};
+    border        : 1px solid {BORDER};
+    border-radius : 4px;
+    padding       : 3px 14px;
+    margin        : 3px 2px;
+}}
+QMainWindow > QTabBar::tab:selected {{
+    color        : {TEXT};
+    border-color : {FRAME_LINE};
+    background   : {SURFACE2};
+}}
+QMainWindow > QTabBar::tab:hover:!selected {{
+    color : {TEXT};
 }}
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
@@ -265,8 +326,7 @@ QToolTip {{
 }}
 
 QStatusBar {{
-    background : {SURFACE2};
-    border-top : 1px solid {BORDER};
+    background : {FRAME_GAP};
     color      : {TEXT_DIM};
 }}
 QStatusBar::item {{

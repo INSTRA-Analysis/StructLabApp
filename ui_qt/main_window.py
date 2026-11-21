@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QDockWidget, QPushButton, QButtonGroup, QMessageBox,
     QFileDialog, QMenu, QMenuBar,
     QLabel, QDoubleSpinBox, QComboBox, QGraphicsView,
-    QScrollArea, QVBoxLayout, QHBoxLayout,
+    QScrollArea, QVBoxLayout, QHBoxLayout, QFrame,
 )
 from PyQt6.QtCore import Qt, QSettings, QSize, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QColor
@@ -50,11 +50,7 @@ def _plane_for_view(az: float, el: float) -> WorkingPlane:
         return WorkingPlane.XZ          # Front (0°) or Back (±180°)
     return WorkingPlane.YZ              # Right (90°) or Left (-90°)
 
-_DOCK_HDR = (
-    f"background:{_theme.SURFACE2}; color:{_theme.TEXT_DIM};"
-    " font-size:10px; font-weight:bold; padding-left:6px;"
-    f" border-bottom:2px solid {_theme.CYAN}; border-top:1px solid {_theme.BORDER};"
-)
+_DOCK_HDR = f"color:{_theme.TEXT_DIM}; font-size:10px; font-weight:bold;"
 
 _DOCK_BTN = (
     f"QPushButton {{ background: transparent; color: {_theme.TEXT_DIM}; border: none;"
@@ -62,6 +58,20 @@ _DOCK_BTN = (
     f"QPushButton:hover {{ background: rgba(0,180,216,45); color: {_theme.CYAN};"
     " border-radius: 2px; }"
 )
+
+
+def _framed_body(widget: QWidget) -> QFrame:
+    """Bottom half of a dock's framed box: outline on three sides, rounded lower corners.
+
+    The small inset keeps the content's square corners inside the rounded outline.
+    """
+    frame = QFrame()
+    frame.setObjectName("panel_body")
+    lay = QVBoxLayout(frame)
+    lay.setContentsMargins(1, 0, 1, 3)
+    lay.setSpacing(0)
+    lay.addWidget(widget)
+    return frame
 
 
 class _DockTitleBar(QWidget):
@@ -74,11 +84,13 @@ class _DockTitleBar(QWidget):
     def __init__(self, title: str, dock: QDockWidget) -> None:
         super().__init__()
         self._dock = dock
-        self.setFixedHeight(22)
+        self.setObjectName("dock_title")        # top half of the framed box (theme.py)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedHeight(26)
         self.setStyleSheet(_DOCK_HDR)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 0, 4, 0)
+        layout.setContentsMargins(8, 0, 6, 0)
         layout.setSpacing(2)
 
         lbl = QLabel(title.upper())
@@ -163,7 +175,14 @@ class MainWindow(QMainWindow):
     def _build_canvas(self) -> None:
         self._scene = StructCanvas()
         self._view  = StructView(self._scene)
-        self.setCentralWidget(self._view)
+        self._view.setFrameShape(QFrame.Shape.NoFrame)
+        canvas_frame = QFrame()                 # the canvas's framed box (theme.py)
+        canvas_frame.setObjectName("canvas_frame")
+        lay = QVBoxLayout(canvas_frame)
+        lay.setContentsMargins(1, 1, 1, 1)
+        lay.addWidget(self._view)
+        self.setCentralWidget(canvas_frame)
+        self.setContentsMargins(6, 2, 6, 0)     # gutter around the boxes
         self._scene.model_changed.connect(self._on_model_changed)
         _me = weakref.ref(self)      # weak: a window<->scene reference cycle makes teardown order random
         self._scene.results_provider = lambda: getattr(_me(), "_solve_cache", None)
@@ -1070,7 +1089,8 @@ class MainWindow(QMainWindow):
         holder.setMovable(False)
         holder.setFloatable(False)
         holder.toggleViewAction().setVisible(False)
-        holder.setStyleSheet("QToolBar#ribbon_holder { border: 0; padding: 0; spacing: 0; }")
+        holder.setStyleSheet("QToolBar#ribbon_holder { border: 0; padding: 0; spacing: 0;"
+                             f" background: {_theme.FRAME_GAP}; }}")
         holder.layout().setContentsMargins(0, 0, 0, 0)
         holder.addWidget(self._ribbon)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, holder)
@@ -1169,7 +1189,8 @@ class MainWindow(QMainWindow):
         pf.addWidget(props_scroll)
 
         self._left_dock = QDockWidget(self)
-        self._left_dock.setWidget(props_frame)
+        props_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._left_dock.setWidget(_framed_body(props_frame))
         self._left_dock.setMinimumWidth(230)
         self._left_dock.setFeatures(_feat)
         self._left_dock.setWindowTitle("Properties")
@@ -1185,7 +1206,7 @@ class MainWindow(QMainWindow):
         rf.addWidget(BrandingFooter())
 
         self._right_dock = QDockWidget(self)
-        self._right_dock.setWidget(results_frame)
+        self._right_dock.setWidget(_framed_body(results_frame))
         self._right_dock.setMinimumWidth(260)
         self._right_dock.setFeatures(_feat)
         self._right_dock.setWindowTitle("Results")
@@ -1197,7 +1218,7 @@ class MainWindow(QMainWindow):
         self._groups_panel = GroupsPanel(self._scene)
         self._groups_panel.changed.connect(self._on_properties_applied)
         self._groups_dock = QDockWidget(self)
-        self._groups_dock.setWidget(self._groups_panel)
+        self._groups_dock.setWidget(_framed_body(self._groups_panel))
         self._groups_dock.setMinimumWidth(260)
         self._groups_dock.setFeatures(_feat)
         self._groups_dock.setWindowTitle("Groups")

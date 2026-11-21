@@ -26,15 +26,18 @@ from PyQt6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from ui_qt.theme import BG, BORDER, CYAN, CYAN_TINT, SURFACE, SURFACE2, TEXT, TEXT_DIM
+from ui_qt.theme import (
+    BORDER, CYAN, CYAN_TINT, FRAME_GAP, FRAME_LINE, FRAME_RADIUS, SURFACE, SURFACE2, TEXT,
+    TEXT_DIM,
+)
 
 LARGE_ICON = QSize(28, 28)
 SMALL_ICON = QSize(16, 16)
 SMALL_ROWS = 3                      # small buttons / widgets stacked per column
 
 STYLESHEET = f"""
-QWidget#ribbon {{ background: {SURFACE}; }}
-QWidget#ribbon_top {{ background: {BG}; }}
+QWidget#ribbon {{ background: {FRAME_GAP}; }}
+QWidget#ribbon_top {{ background: {FRAME_GAP}; }}
 QTabBar#ribbon_tabs::tab {{
     background: transparent; color: {TEXT_DIM}; padding: 5px 14px; border: none;
     border-bottom: 2px solid transparent;
@@ -46,8 +49,8 @@ QToolButton#ribbon_file {{
     padding: 3px 12px; margin: 2px 6px;
 }}
 QToolButton#ribbon_file::menu-indicator {{ image: none; }}
-QStackedWidget#ribbon_pages {{ background: {SURFACE}; border-top: 1px solid {BORDER};
-    border-bottom: 1px solid {BORDER}; }}
+QStackedWidget#ribbon_pages {{ background: {SURFACE}; border: 1px solid {FRAME_LINE};
+    border-radius: {FRAME_RADIUS}px; }}
 QFrame#ribbon_divider {{ color: {BORDER}; }}
 QScrollArea#ribbon_scroll, QWidget#ribbon_page {{ background: {SURFACE}; border: none; }}
 QScrollArea#ribbon_scroll QScrollBar:horizontal {{ height: 6px; background: {SURFACE}; }}
@@ -235,11 +238,14 @@ class RibbonBar(QWidget):
 
         self.pages = QStackedWidget()
         self.pages.setObjectName("ribbon_pages")
-        self.pages.setFixedHeight(self.PAGE_HEIGHT)
+        # Framed box (theme FRAME_*): the inset keeps the pages' square corners inside
+        # the rounded outline, so the height grows by the same amount.
+        self.pages.setContentsMargins(2, 2, 2, 2)
+        self.pages.setFixedHeight(self.PAGE_HEIGHT + 4)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 4)
+        lay.setSpacing(2)
         lay.addWidget(top)
         lay.addWidget(self.pages)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
