@@ -197,7 +197,7 @@ class SectionPickerDialog(QDialog):
     def _restore_last_state(self, current_E: float) -> None:
         st = SectionPickerDialog._last_state
         if not st:
-            # First open: match material from E if possible, else default Steel S275
+            # First open: match material from E if possible, else the first entry
             for name, (E, _density, _fy, _mt, _lbl) in MATERIALS.items():
                 if abs(E - current_E) < 1e8:
                     idx = self._mat_combo.findText(name)
@@ -206,11 +206,16 @@ class SectionPickerDialog(QDialog):
                         break
             else:
                 self._mat_combo.setCurrentIndex(0)
+            # Always fill E / density / fy from the shown material: selecting the entry
+            # that is already current (index 0, "Steel S235") fires no change signal, and
+            # fy would keep the 275 MPa placeholder.
+            self._on_material_changed(self._mat_combo.currentText())
             return
 
-        # Restore material (fires _on_material_changed → auto-fills spinboxes)
+        # Restore material, then fill the fields from it (see the note above)
         mat_idx = self._mat_combo.findText(st.get("material", "Steel S275"))
         self._mat_combo.setCurrentIndex(max(0, mat_idx))
+        self._on_material_changed(self._mat_combo.currentText())
         # For Custom, restore manually-entered density and fy
         if st.get("material") == "Custom":
             self._density_spin.setValue(st.get("density", 0.0))
