@@ -277,6 +277,37 @@ QFrame#canvas_frame {{
     border-radius : {FRAME_RADIUS}px;
 }}
 
+/* Floating tool strips inside the canvas (viewport_overlay.py) */
+QFrame#float_strip {{
+    background    : rgba(47, 49, 54, 235);
+    border        : 1px solid {FRAME_LINE};
+    border-radius : 8px;
+}}
+QFrame#float_divider {{
+    background : {BORDER};
+    border     : none;
+    margin     : 2px 3px;
+}}
+QToolButton#float_btn {{
+    background    : transparent;
+    color         : {TEXT};
+    border        : 1px solid transparent;
+    border-radius : 5px;
+    padding       : 0 6px;
+}}
+QToolButton#float_btn:hover {{
+    background   : {SURFACE2};
+    border-color : {BORDER};
+}}
+QToolButton#float_btn:checked {{
+    background   : {CYAN_TINT};
+    border-color : {CYAN};
+    color        : {CYAN};
+}}
+QToolButton#float_btn:disabled {{
+    color : {TEXT_DIM};
+}}
+
 /* Tabs of docks stacked in one place (Results | Groups) */
 QMainWindow > QTabBar {{
     background : {FRAME_GAP};

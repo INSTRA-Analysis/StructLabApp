@@ -164,6 +164,7 @@ class MainWindow(QMainWindow):
         if use_ribbon:
             self._install_ribbon()
         self._build_status_bar()
+        self._build_viewport_strips()
         self._wire_selection()
         self._setup_autosave()
         recovered = self._check_autosave_recovery()
@@ -189,6 +190,12 @@ class MainWindow(QMainWindow):
         self._scene.view_changed.connect(self._redraw_overlays)
         self._scene.view_preset.connect(self._on_view_preset)
         self._scene.plane_offset_changed.connect(self._on_scene_plane_offset_changed)
+
+    def _build_viewport_strips(self) -> None:
+        """Floating tools / view / results strips inside the canvas (shared actions)."""
+        from ui_qt.viewport_overlay import ViewportStrips
+        self._strips = ViewportStrips(self._view, self._act, self._scene._is_3d_mode)
+        self._scene.model_changed.connect(self._strips.refresh)
 
     # ── menu bar ─────────────────────────────────────────────────────────────
 
