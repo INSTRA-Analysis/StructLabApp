@@ -35,7 +35,19 @@ def _element():
     return ElementArt()
 
 
+def _portal():
+    from ui_qt.banner_gallery import PortalArt
+    return PortalArt()
+
+
+def _modes():
+    from ui_qt.banner_gallery import ModesArt
+    return ModesArt()
+
+
 BANNERS: tuple[BannerEntry, ...] = (
+    BannerEntry("portal", "Static analysis: portal frame", _portal),
+    BannerEntry("modes", "Dynamics: frame mode shapes", _modes),
     BannerEntry("element", "Finite elements: the frame element", _element),
 )
 
