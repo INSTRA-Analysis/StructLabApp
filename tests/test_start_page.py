@@ -65,10 +65,14 @@ def test_wireframe_handles_empty_and_degenerate_input(qapp):
     ("wizard:portal", "_on_portal_wizard"),
     ("help:shortcuts", "_on_keyboard_shortcuts"),
 ])
-def test_window_acts_on_the_start_page_choice(qapp, monkeypatch, choice, handler):
+def test_window_acts_on_the_start_page_choice(qapp, monkeypatch, tmp_path, choice, handler):
+    from PyQt6.QtCore import QSettings
     from PyQt6.QtWidgets import QDialog
+    import ui_qt.banner_themes as bt
     import ui_qt.welcome_dialog as wd
     from ui_qt.main_window import MainWindow
+    store = QSettings(str(tmp_path / "structlab.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(bt, "settings", lambda: store)    # never touch the real preferences
     show_welcome = MainWindow._show_welcome            # the real one, called below
     monkeypatch.setattr(MainWindow, "_show_welcome", lambda self: None)
     monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)

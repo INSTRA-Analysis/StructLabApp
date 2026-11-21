@@ -695,6 +695,33 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._act["reset_layout"])
         view_menu.addSeparator()
         view_menu.addAction(self._act["ribbon_interface"])
+        view_menu.addMenu(self._build_banner_menu())
+
+    def _build_banner_menu(self) -> QMenu:
+        """View > Start Page Banner: rotate one theme per start, or pin one banner."""
+        from ui_qt import banner_themes as bt
+        menu = QMenu("Start Page Banner", self)
+        menu.setIcon(icon("image"))
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        current = bt.pinned()
+        choices = [(bt.ROTATE, "Rotate: a different theme at each start")]
+        choices += [(b.key, b.title) for b in bt.BANNERS]
+        for i, (key, title) in enumerate(choices):
+            act = QAction(title, self)
+            act.setCheckable(True)
+            act.setChecked(key == current)
+            act.triggered.connect(lambda _c=False, k=key: bt.set_pinned(k))
+            group.addAction(act)
+            menu.addAction(act)
+            if i == 0:
+                menu.addSeparator()
+        self._banner_menu = menu
+        a = QAction(icon("image"), "Start Page Banner", self)
+        a.setMenu(menu)
+        a.setToolTip("Rotate the start-page banner through the themes, or keep one")
+        self._act["banner_choice"] = a
+        return menu
 
     def _fill_named_views_menu(self, menu=None) -> None:
         """Rebuild a Named Views menu (the View menu's, or the ribbon drop-down): save, jump to, delete."""
@@ -837,7 +864,8 @@ class MainWindow(QMainWindow):
         from ui_qt import recent_files as RF
         from PyQt6.QtWidgets import QDialog
 
-        dlg = WelcomeDialog(self, recent_files=RF.load())
+        from ui_qt.banner_themes import next_banner
+        dlg = WelcomeDialog(self, recent_files=RF.load(), banner_art=next_banner())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return  # closed without choosing → blank canvas
 

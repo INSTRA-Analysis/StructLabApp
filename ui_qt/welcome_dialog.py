@@ -139,12 +139,14 @@ class _Banner(QWidget):
     ART_WIDTH = 480          # px from the right edge reserved for the art
     STEP_MS = 50             # one draw-in step
 
-    def __init__(self) -> None:
+    def __init__(self, art=None) -> None:
         super().__init__()
         self.setFixedHeight(150)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        from ui_qt.banner_art import ElementArt
-        self.art = ElementArt()
+        if art is None:
+            from ui_qt.banner_art import ElementArt
+            art = ElementArt()
+        self.art = art
         self.setToolTip(self.art.tooltip)
         self._steps = self.art.steps
         self.count = self._steps              # draw-in progress (complete at rest)
@@ -213,6 +215,17 @@ class _Banner(QWidget):
         p.setClipRect(QRectF(1, 1, w - 2, h - 2))
         p.drawImage(QPointF(0, 0), self._art_layer(w, h))
         p.setClipping(False)
+
+        # Theme label, bottom-right ("FINITE ELEMENTS", "DYNAMICS", …)
+        theme_name = getattr(self.art, "theme", "")
+        if theme_name:
+            lf = QFont(); lf.setPointSizeF(7.0); lf.setBold(True)
+            lf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
+            p.setFont(lf)
+            label = QColor(theme.TEXT_DIM); label.setAlpha(170)
+            p.setPen(label)
+            p.drawText(QRectF(w - 260, h - 20, 246, 14),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, theme_name.upper())
 
         f = QFont(); f.setPointSize(30); f.setBold(True)
         p.setFont(f)
@@ -309,8 +322,13 @@ QScrollArea#start_scroll, QWidget#start_recent {{ background: transparent; borde
 class WelcomeDialog(QDialog):
     """The start page. See the module docstring for the ``choice`` values."""
 
-    def __init__(self, parent=None, recent_files: list[str] | None = None) -> None:
+    def __init__(self, parent=None, recent_files: list[str] | None = None,
+                 banner_art=None) -> None:
+        """``banner_art``: the art to show (ui_qt/banner_themes.next_banner); the frame
+        element when None. Choosing it is left to the caller so that opening this dialog
+        never changes the saved rotation by itself."""
         super().__init__(parent)
+        self._banner_art = banner_art
         self.setObjectName("start_page")
         self.setWindowTitle("Welcome to StructLab")
         self.setModal(True)
@@ -327,7 +345,8 @@ class WelcomeDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 10)
         root.setSpacing(10)
-        root.addWidget(_Banner())
+        self.banner = _Banner(self._banner_art)
+        root.addWidget(self.banner)
 
         body = QHBoxLayout()
         body.setSpacing(10)

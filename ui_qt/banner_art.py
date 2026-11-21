@@ -289,6 +289,7 @@ def stress_trajectories(span_to_depth: float = 6.0, seeds: int = 6,
 class ElementArt:
     """Beam element with stress trajectories and end freedoms, beside its labelled kᵉ."""
 
+    theme = "Finite elements"
     steps = 30                       # draw-in: trajectories first, then the matrix rows
     tooltip = ("The frame element, inside and out: stress trajectories in the beam, "
                "and the stiffness matrix the solver uses for it (click to replay)")
@@ -412,6 +413,7 @@ class ElementArt:
 class AssemblyArt:
     """The Pratt-truss assembly (``paint_assembly``) behind the same interface."""
 
+    theme = "Direct stiffness method"
     steps = len(ASSEMBLY.bars)
     fade = (-90.0, 80.0)
     tooltip = ("Direct Stiffness Method: each member adds its block to K "

@@ -158,6 +158,7 @@ def build_ribbon(win) -> RibbonBar:
         g.add_small(a[key])
     g = view.add_group("Interface")
     g.add_small(a["ribbon_interface"])
+    g.add_small(a["banner_choice"])
 
     # ── Tools ─────────────────────────────────────────────────────────────────
     tools = bar.add_tab("Tools")
