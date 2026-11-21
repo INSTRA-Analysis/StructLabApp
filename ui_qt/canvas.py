@@ -2436,30 +2436,8 @@ class StructView(QGraphicsView):
         else:
             self._draw_2d_axis_badge(painter, vc_cx, vc_cy)
 
-        # ── 3. Working plane label (just below the ViewCube) — 3D only ────────
-        # The working-plane selector is a 3D drawing aid; in 2D the model lives
-        # in a single plane (XZ), so the label would just contradict the badge.
-        if scene._is_3d_mode():
-            plane  = scene._working_plane
-            offset = scene._plane_offset
-            lbl_pen = QPen(QColor("#00cccc"))
-            lbl_pen.setCosmetic(True)
-            painter.setPen(lbl_pen)
-            z_font = painter.font()
-            z_font.setPointSize(8)
-            z_font.setBold(True)
-            painter.setFont(z_font)
-            _axis_map = {
-                WorkingPlane.XY:   f"Z = {offset:.2f} m",
-                WorkingPlane.XZ:   f"Y = {offset:.2f} m",
-                WorkingPlane.YZ:   f"X = {offset:.2f} m",
-                WorkingPlane.FREE: "Free (XY ground)",
-            }
-            plane_text = f"Plane {plane.name}  |  {_axis_map[plane]}"
-            lbl_y = float(vc.MARGIN * 2 + vc.HALF * 2 + 16)
-            painter.drawText(QPointF(w - 215.0, lbl_y), plane_text)
-            z_font.setBold(False)
-            painter.setFont(z_font)
+        # (The working-plane offset is shown on the floating view strip, see
+        #  viewport_overlay.py and MainWindow._update_plane_offset_action.)
 
         # ── 4. Branding badge (bottom-right corner) ───────────────────────────
         pad_x = 7.0;  pad_y = 5.0
@@ -3044,6 +3022,20 @@ class StructView(QGraphicsView):
         menu.addAction("Set Current View as Home", lambda *a: self._set_view_as_home())
         menu.exec(global_pt)
 
+    def ask_plane_offset(self) -> None:
+        """Dialog for the locked coordinate of the active working plane (not for Free)."""
+        scene = self.scene()
+        axis_name = {WorkingPlane.XY: "Z", WorkingPlane.XZ: "Y",
+                     WorkingPlane.YZ: "X"}.get(scene._working_plane)
+        if axis_name is None:
+            return
+        val, ok = QInputDialog.getDouble(
+            self, "Set plane offset", f"{axis_name} coordinate (m):",
+            scene._plane_offset, -1000.0, 1000.0, 3,
+        )
+        if ok:
+            scene.set_plane_offset(val)
+
     def _set_cube_view(self, az: float, el: float) -> None:
         self.scene().set_view_preset(az, el)
         self.scene().view_changed.emit()
@@ -3101,32 +3093,6 @@ class StructView(QGraphicsView):
                 event.accept()
                 return
 
-        # ── Plane-label click → quick-set dialog for the working-plane offset ───
-        if event.button() == Qt.MouseButton.LeftButton and self.scene()._is_3d_mode():
-            vp   = self.viewport()
-            w, h = vp.width(), vp.height()
-            vc   = self._view_cube
-            # The label is drawn at (w-215, lbl_y) where lbl_y = MARGIN*2+HALF*2+16
-            lbl_y   = vc.MARGIN * 2 + vc.HALF * 2 + 16
-            lbl_hit = QRect(w - 220, lbl_y - 16, 165, 22)
-            scene   = self.scene()
-            if (lbl_hit.contains(event.pos())
-                    and scene._working_plane is not WorkingPlane.FREE):
-                axis_name = {
-                    WorkingPlane.XY: "Z",
-                    WorkingPlane.XZ: "Y",
-                    WorkingPlane.YZ: "X",
-                }[scene._working_plane]
-                val, ok = QInputDialog.getDouble(
-                    self, "Set plane offset",
-                    f"{axis_name} coordinate (m):",
-                    scene._plane_offset,
-                    -1000.0, 1000.0, 3,
-                )
-                if ok:
-                    scene.set_plane_offset(val)
-                event.accept()
-                return
 
         # ── Start custom rubber-band on empty-space left-click in SELECT mode ──
         if (event.button() == Qt.MouseButton.LeftButton

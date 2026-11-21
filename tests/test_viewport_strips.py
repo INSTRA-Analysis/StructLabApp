@@ -42,6 +42,17 @@ def test_strip_buttons_are_the_shared_actions(win):
     win._act["ov_sfd"].setChecked(False)
 
 
+def test_plane_offset_readout_follows_plane_and_offset(win):
+    from ui_qt.canvas import WorkingPlane
+    act = win._act["plane_offset"]
+    assert any(b.defaultAction() is act for b in win._strips.top.buttons)
+    win._set_working_plane(WorkingPlane.XZ)
+    win._scene.set_plane_offset(2.5)
+    assert act.text() == "Y = 2.50 m" and act.isEnabled()
+    win._set_working_plane(WorkingPlane.FREE)
+    assert act.text() == "Ground" and not act.isEnabled()
+
+
 @pytest.mark.parametrize("width", [1900, 1300, 1100, 900])
 def test_strips_stay_inside_the_viewport_and_clear_of_each_other(win, qapp, width):
     from ui_qt.viewport_overlay import GIZMO_SPACE

@@ -780,6 +780,20 @@ class MainWindow(QMainWindow):
             self._plane_spin.setValue(restored)
             self._plane_spin.blockSignals(False)
             self._scene.set_plane_offset(restored)
+        self._update_plane_offset_action()
+
+    def _update_plane_offset_action(self) -> None:
+        """Refresh the offset readout on the view strip ("Z = 1.50 m", or "Ground" for Free)."""
+        act = self._act.get("plane_offset")
+        if act is None:
+            return
+        axis = {WorkingPlane.XY: "Z", WorkingPlane.XZ: "Y",
+                WorkingPlane.YZ: "X"}.get(getattr(self, "_active_plane", WorkingPlane.XY))
+        act.setText(f"{axis} = {self._scene._plane_offset:.2f} m" if axis else "Ground")
+        act.setEnabled(axis is not None)
+        strips = getattr(self, "_strips", None)
+        if strips is not None:
+            strips.refresh()                 # the text width changed
 
     def _on_plane_offset_changed(self, value: float) -> None:
         """Spin-box changed: push to scene (signal chain syncs per-plane memory)."""
@@ -792,6 +806,7 @@ class MainWindow(QMainWindow):
         self._plane_spin.blockSignals(False)
         if self._active_plane != WorkingPlane.FREE:
             self._plane_offsets[self._active_plane] = value
+        self._update_plane_offset_action()
 
     def _on_set_view(self, azimuth: float, elevation: float,
                      plane: WorkingPlane | None = None) -> None:
@@ -1013,6 +1028,12 @@ class MainWindow(QMainWindow):
             self._plane_btns[plane] = act
             a[f"plane_{label.lower()}"] = act
         self._plane_btns[WorkingPlane.XY].setChecked(True)
+
+        # Working-plane offset readout ("Z = 0.00 m"); click to type a new value
+        offset_act = QAction("Z = 0.00 m", self)
+        offset_act.setToolTip("Locked coordinate of the working plane — click to set it")
+        offset_act.triggered.connect(lambda _c=False: self._view.ask_plane_offset())
+        a["plane_offset"] = offset_act
 
         # Named views and dynamic selection menus, as actions with drop-down menus
         self._named_views_popup = QMenu(self)

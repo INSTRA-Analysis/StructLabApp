@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import QBoxLayout, QFrame, QToolButton, QWidget
 LEFT_KEYS = ("mode_select", "mode_node", "mode_member", "mode_measure", "|",
              "duplicate", "delete", "|", "zoom_fit")
 TOP_KEYS = ("view_top", "view_front", "view_left", "view_right", "view_sw", "|",
-            "plane_xy", "plane_xz", "plane_yz", "plane_free", "|",
+            "plane_xy", "plane_xz", "plane_yz", "plane_free", "plane_offset", "|",
             "local_axes", "show_loads", "section_cut")
 RIGHT_KEYS = ("ov_def", "ov_bmd", "ov_sfd", "ov_afd", "ov_labels", "|",
               "force_colours", "util_colours", "|", "animate")
