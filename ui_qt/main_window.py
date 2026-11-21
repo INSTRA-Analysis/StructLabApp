@@ -1911,6 +1911,11 @@ class MainWindow(QMainWindow):
         from ui_qt.solve_actions import solve_engine
         return solve_engine(model, member_el_map, state)
 
+    def _show_results_workspace(self) -> None:
+        """After a successful solve, bring up the Results workspace (panels, strip, tab)."""
+        from ui_qt.workspaces import WORKSPACES, apply_workspace
+        apply_workspace(self, next(w for w in WORKSPACES if w.key == "ws_results"))
+
     def _on_solve(self) -> None:
         state = self._scene.model_state
         if not state.nodes or not state.members:
@@ -2008,6 +2013,7 @@ class MainWindow(QMainWindow):
             )
             self._sb.showMessage(summary)
             self._update_status_stats()
+            self._show_results_workspace()
         except Exception as exc:
             msg = str(exc)
             if "Singular matrix" in msg or "singular" in msg.lower():
