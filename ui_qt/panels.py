@@ -2090,8 +2090,9 @@ class ResultsPanel(QWidget):
         # Member cell across them so it's visually obvious "these N rows are
         # one element assessed against N different capacities," instead of
         # looking like N separate members that happen to share an ID.
-        header_bg = QBrush(QColor("#26282c"))
-        header_fg = QBrush(QColor("#dddddd"))
+        from ui_qt import theme as _theme
+        header_bg = QBrush(QColor(_theme.BG))
+        header_fg = QBrush(QColor(_theme.TEXT))
         row = 0
         while row < len(flat_rows):
             span = 1
@@ -2264,9 +2265,9 @@ class BrandingFooter(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SECTION_HEADER_STYLE = (
-    "background:#393b41; color:#9a9ea6;"
+    "background:#343b46; color:#97a1b0;"          # theme SURFACE2 / TEXT_DIM
     " font-size:10px; font-weight:bold; padding-left:6px;"
-    " border-bottom:1px solid #4a4d55;"
+    " border-bottom:1px solid #444d5a;"           # theme BORDER
 )
 
 

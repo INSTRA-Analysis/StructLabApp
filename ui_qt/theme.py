@@ -8,21 +8,39 @@ Adjust the tokens here to retheme the whole app; ``apply_theme`` installs them.
 
 from __future__ import annotations
 
-CYAN      = "#00b4d8"   # primary accent — active state, focus, primary action
-CYAN_DIM  = "#1e6a80"   # subordinate borders (group boxes, inner tabs pane)
-CYAN_TINT = "#0d4a5c"   # checked-button fill
+# ── Blue–cyan family: the interface and structure colours, navy → aqua ───────
+NAVY      = "#0f2a3d"   # deep fills: checked buttons, start-page banner
+DEEP_BLUE = "#1e4f8a"   # selected rows, active workspace, menu highlight
+BLUE      = "#3d8bfd"   # secondary accent: selection, focus, links; BMD
+SKY       = "#4fb3f6"   # beams on the canvas, highlights
+CYAN      = "#00b4d8"   # primary accent — active state, primary action; deformed shape
+AQUA      = "#4fd1c5"   # soft highlights; SFD
 
-BG        = "#26282c"   # deepest surface: inputs, tables, panes
-SURFACE   = "#2f3136"   # panels and docks
-SURFACE2  = "#393b41"   # headers, buttons, tabs
-BORDER    = "#4a4d55"
-TEXT      = "#e0e2e6"
-TEXT_DIM  = "#9a9ea6"
+CYAN_DIM  = "#1e6a80"   # subordinate borders (group boxes, inner tabs pane)
+CYAN_TINT = NAVY        # checked-button fill
+
+# Neutrals: blue-grey (same lightness steps as plain grey, a few degrees toward blue)
+BG        = "#22272e"   # deepest surface: inputs, tables, panes
+SURFACE   = "#2a3039"   # panels and docks
+SURFACE2  = "#343b46"   # headers, buttons, tabs
+BORDER    = "#444d5a"
+TEXT      = "#e1e6ee"
+TEXT_DIM  = "#97a1b0"
+
+# Primary actions and the active workspace: blue → cyan
+GRADIENT_PRIMARY = f"qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {BLUE}, stop:1 {CYAN})"
+GRADIENT_PRIMARY_HOVER = ("qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                          f"stop:0 {SKY}, stop:1 #33c6e6)")
+GRADIENT_ACTIVE = f"qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {DEEP_BLUE}, stop:1 #0e7a93)"
 
 # ── Framed areas (VS Code-like): each region is a rounded box on a dark gutter ─
-FRAME_GAP    = "#141518"   # gutter between the boxes (window background)
-FRAME_LINE   = "#5d6573"   # the box outline
+FRAME_GAP    = "#11151b"   # gutter between the boxes (window background)
+FRAME_LINE   = "#5a6880"   # the box outline
 FRAME_RADIUS = 6           # px, box corner radius
+
+# ── Viewport background (vertical gradient, navy-tinted) ─────────────────────
+VIEWPORT_TOP    = "#2f3b4a"
+VIEWPORT_BOTTOM = "#1b2028"
 
 # ── Category colours (icons, panel accents, canvas symbols) ──────────────────
 GEOMETRY  = CYAN        # nodes, members, modelling tools
@@ -52,9 +70,9 @@ def apply_theme(app) -> None:
         (role.Window, SURFACE), (role.WindowText, TEXT), (role.Base, BG),
         (role.AlternateBase, SURFACE), (role.ToolTipBase, SURFACE2), (role.ToolTipText, TEXT),
         (role.Text, TEXT), (role.Button, SURFACE2), (role.ButtonText, TEXT),
-        (role.BrightText, "#ffffff"), (role.Highlight, CYAN_TINT), (role.HighlightedText, "#ffffff"),
-        (role.Link, CYAN), (role.PlaceholderText, TEXT_DIM), (role.Mid, BORDER),
-        (role.Dark, BG), (role.Light, SURFACE2), (role.Shadow, "#16171a"),
+        (role.BrightText, "#ffffff"), (role.Highlight, DEEP_BLUE), (role.HighlightedText, "#ffffff"),
+        (role.Link, BLUE), (role.PlaceholderText, TEXT_DIM), (role.Mid, BORDER),
+        (role.Dark, BG), (role.Light, SURFACE2), (role.Shadow, "#0b0e12"),
     ):
         pal.setColor(r, QColor(colour))
     disabled = QPalette.ColorGroup.Disabled
@@ -279,7 +297,7 @@ QFrame#canvas_frame {{
 
 /* Floating tool strips inside the canvas (viewport_overlay.py) */
 QFrame#float_strip {{
-    background    : rgba(47, 49, 54, 235);
+    background    : rgba(42, 48, 57, 235);       /* SURFACE, slightly see-through */
     border        : 1px solid {FRAME_LINE};
     border-radius : 8px;
 }}
@@ -346,18 +364,18 @@ QLabel#dialog_header_sub {{
     color : {TEXT_DIM}; background: transparent; border: none;
 }}
 QPushButton[role="primary"] {{
-    background   : #0e7a93;
-    border       : 1px solid {CYAN};
+    background   : {GRADIENT_PRIMARY};
+    border       : 1px solid {SKY};
     color        : #ffffff;
     font-weight  : bold;
     padding      : 5px 18px;
 }}
 QPushButton[role="primary"]:hover {{
-    background : #1190ad;
+    background : {GRADIENT_PRIMARY_HOVER};
     color      : #ffffff;
 }}
 QPushButton[role="primary"]:pressed {{
-    background : {CYAN_TINT};
+    background : {DEEP_BLUE};
 }}
 QPushButton[role="primary"]:disabled {{
     background   : {SURFACE2};
@@ -391,13 +409,13 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     border        : 1px solid {BORDER};
     border-radius : 3px;
     padding       : 2px 5px;
-    selection-background-color : {CYAN_DIM};
+    selection-background-color : {DEEP_BLUE};
 }}
 QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
     border-color : {CYAN_DIM};
 }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-    border-color : {CYAN};
+    border-color : {BLUE};
 }}
 
 /* Radio buttons and check boxes: outlined, filled with the accent when on
@@ -433,8 +451,8 @@ QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
 
 QTableView {{
     alternate-background-color : {SURFACE};
-    selection-background-color : {CYAN_TINT};
-    selection-color            : {TEXT};
+    selection-background-color : {DEEP_BLUE};
+    selection-color            : #ffffff;
 }}
 
 QToolTip {{
@@ -461,8 +479,8 @@ QMenu::item {{
     padding : 4px 22px 4px 18px;
 }}
 QMenu::item:selected {{
-    background : {CYAN_TINT};
-    color      : {CYAN};
+    background : {DEEP_BLUE};
+    color      : #ffffff;
 }}
 QMenu::separator {{
     height : 1px;

@@ -27,8 +27,8 @@ from PyQt6.QtWidgets import (
 )
 
 from ui_qt.theme import (
-    BORDER, CYAN, CYAN_TINT, FRAME_GAP, FRAME_LINE, FRAME_RADIUS, SURFACE, SURFACE2, TEXT,
-    TEXT_DIM,
+    BORDER, CYAN, CYAN_TINT, FRAME_GAP, FRAME_LINE, FRAME_RADIUS, GRADIENT_ACTIVE, SURFACE,
+    SURFACE2, TEXT, TEXT_DIM,
 )
 
 LARGE_ICON = QSize(28, 28)
@@ -76,7 +76,7 @@ QToolButton#ws_btn {{
     padding: 2px 12px;
 }}
 QToolButton#ws_btn:hover {{ color: {TEXT}; background: {SURFACE2}; }}
-QToolButton#ws_btn:checked {{ color: {CYAN}; background: {CYAN_TINT}; }}
+QToolButton#ws_btn:checked {{ color: #ffffff; background: {GRADIENT_ACTIVE}; }}
 """
 
 

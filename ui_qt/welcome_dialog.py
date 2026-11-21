@@ -99,8 +99,8 @@ def render_wireframe(segs: list[Segment], size: QSize, is_3d: bool,
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     if background:
         grad = QLinearGradient(0, 0, 0, size.height())
-        grad.setColorAt(0.0, QColor("#3a3d44"))
-        grad.setColorAt(1.0, QColor("#1f2125"))
+        grad.setColorAt(0.0, QColor(theme.VIEWPORT_TOP))       # same as the canvas
+        grad.setColorAt(1.0, QColor(theme.VIEWPORT_BOTTOM))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(grad))
         p.drawRoundedRect(QRectF(0, 0, size.width(), size.height()), 5, 5)
@@ -140,9 +140,9 @@ class _Banner(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
         grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0.0, QColor("#163847"))
-        grad.setColorAt(0.55, QColor("#1f2a31"))
-        grad.setColorAt(1.0, QColor("#22252a"))
+        grad.setColorAt(0.0, QColor(theme.DEEP_BLUE))           # blue → navy → panel
+        grad.setColorAt(0.45, QColor(theme.NAVY))
+        grad.setColorAt(1.0, QColor(theme.SURFACE))
         p.setPen(QPen(QColor(theme.FRAME_LINE), 1))
         p.setBrush(QBrush(grad))
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), theme.FRAME_RADIUS, theme.FRAME_RADIUS)
@@ -255,7 +255,7 @@ QLabel#start_heading {{
 QFrame#start_card {{
     background: {theme.SURFACE2}; border: 1px solid {theme.BORDER}; border-radius: 6px;
 }}
-QFrame#start_card:hover {{ border-color: {theme.CYAN}; background: #3d4048; }}
+QFrame#start_card:hover {{ border-color: {theme.CYAN}; background: #3b4350; }}
 QLabel#start_card_title {{
     color: {theme.TEXT}; font-weight: bold; background: transparent; border: none;
 }}

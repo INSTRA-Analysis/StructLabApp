@@ -89,7 +89,7 @@ class ConsoleDialog(QDialog):
             "In-process IPython kernel  ·  Tab = complete  ·  "
             "Ctrl+L = clear  ·  Ctrl+C = interrupt"
         )
-        info.setStyleSheet("color: #9a9ea6; font-size: 11px;")    # theme.TEXT_DIM
+        info.setStyleSheet("color: #97a1b0; font-size: 11px;")    # theme.TEXT_DIM
         bar.addWidget(info)
         bar.addStretch()
 
