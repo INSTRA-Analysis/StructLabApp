@@ -70,8 +70,12 @@ ARROW_LEN  = 40                # px — nodal load arrow shaft
 ARROW_HEAD = 7                 # px — arrowhead half-width
 UDL_LEN    = 22                # px — UDL arrow shaft
 
-_BEAM_PEN  = QPen(QColor("#2255cc"), 2)
-_BAR_PEN   = QPen(QColor("#22aa44"), 2)
+# Members: calm colours on the dark viewport — bars (most of a truss or tower) in light
+# steel grey, beams in a soft cyan (the geometry category colour). Selection stays yellow.
+_BEAM_PEN  = QPen(QColor("#5fc4dc"), 2)
+_BAR_PEN   = QPen(QColor("#aab6c4"), 2)
+_NODE_FILL = QColor("#e6e9ef")
+_NODE_EDGE = QColor("#2a2c31")
 _GHOST_PEN = QPen(QColor("#aaaaaa"), 1, Qt.PenStyle.DashLine)
 _LOAD_PEN  = QPen(QColor("#cc2200"), 2.5)
 _UDL_PEN   = QPen(QColor("#cc2200"), 1)
@@ -364,8 +368,8 @@ class NodeItem(QGraphicsEllipseItem):
         )
         self.setAcceptHoverEvents(True)       # tooltip text is built on hover
         self.setZValue(2)
-        self.setBrush(QBrush(QColor("#2255cc")))
-        self.setPen(QPen(QColor("#003399"), 1))
+        self.setBrush(QBrush(_NODE_FILL))
+        self.setPen(QPen(_NODE_EDGE, 1))
         self._support_items: list = []
         self._hinge_item: QGraphicsEllipseItem | None = None
         self._load_items: list = []
@@ -447,8 +451,8 @@ class NodeItem(QGraphicsEllipseItem):
                 self.setBrush(QBrush(QColor("#ffcc00")))
                 self.setPen(QPen(QColor("#ffffff"), 2))
             else:
-                self.setBrush(QBrush(QColor("#2255cc")))
-                self.setPen(QPen(QColor("#003399"), 1))
+                self.setBrush(QBrush(_NODE_FILL))
+                self.setPen(QPen(_NODE_EDGE, 1))
 
         return super().itemChange(change, value)
 
