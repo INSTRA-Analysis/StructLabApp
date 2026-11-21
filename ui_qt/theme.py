@@ -400,6 +400,37 @@ QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
     border-color : {CYAN};
 }}
 
+/* Radio buttons and check boxes: outlined, filled with the accent when on
+   (the Fusion defaults are dark-on-dark on this palette and hard to see) */
+QRadioButton::indicator, QCheckBox::indicator {{
+    width      : 12px;
+    height     : 12px;
+    border     : 1px solid {TEXT_DIM};
+    background : {BG};
+}}
+QRadioButton::indicator {{
+    border-radius : 7px;
+}}
+QCheckBox::indicator {{
+    border-radius : 3px;
+}}
+QRadioButton::indicator:hover, QCheckBox::indicator:hover {{
+    border-color : {CYAN};
+}}
+QRadioButton::indicator:checked {{
+    background : qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+                                 stop:0 {CYAN}, stop:0.45 {CYAN}, stop:0.55 {BG}, stop:1 {BG});
+    border-color : {CYAN};
+}}
+QCheckBox::indicator:checked {{
+    background   : {CYAN};
+    border-color : {CYAN};
+}}
+QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
+    border-color : {BORDER};
+    background   : {SURFACE};
+}}
+
 QTableView {{
     alternate-background-color : {SURFACE};
     selection-background-color : {CYAN_TINT};
