@@ -129,24 +129,25 @@ def render_wireframe(segs: list[Segment], size: QSize, is_3d: bool,
 # ── widgets ───────────────────────────────────────────────────────────────────
 
 class _Banner(QWidget):
-    """Wordmark over a blue gradient, with a truss assembling its stiffness matrix.
+    """Wordmark over a blue gradient, with the banner art from ui_qt/banner_art.py.
 
-    The art (ui_qt/banner_art.py) plays its assembly once, member by member, the first time
-    the banner is shown, then rests on the finished matrix; clicking the banner replays it.
+    The art (the frame element "inside and out"; ``AssemblyArt`` is the kept alternative)
+    draws itself in once, the first time the banner is shown, then rests complete; clicking
+    the banner replays it.
     """
 
     ART_WIDTH = 480          # px from the right edge reserved for the art
-    STEP_MS = 115            # one member per step
+    STEP_MS = 50             # one draw-in step
 
     def __init__(self) -> None:
         super().__init__()
         self.setFixedHeight(150)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Direct Stiffness Method: each member adds its block to K "
-                        "(click to replay the assembly)")
-        from ui_qt.banner_art import ASSEMBLY
-        self._n_members = len(ASSEMBLY.bars)
-        self.count = self._n_members          # members assembled so far (all at rest)
+        from ui_qt.banner_art import ElementArt
+        self.art = ElementArt()
+        self.setToolTip(self.art.tooltip)
+        self._steps = self.art.steps
+        self.count = self._steps              # draw-in progress (complete at rest)
         self._played = False
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._step)
@@ -161,8 +162,8 @@ class _Banner(QWidget):
 
     def _step(self) -> None:
         self.count += 1
-        if self.count >= self._n_members:
-            self.count = self._n_members
+        if self.count >= self._steps:
+            self.count = self._steps
             self._timer.stop()
         self.update()
 
@@ -181,17 +182,16 @@ class _Banner(QWidget):
 
     def _art_layer(self, w: int, h: int) -> QImage:
         """The art on a transparent layer, faded in from the left so it never meets the text."""
-        from ui_qt.banner_art import paint_assembly
         dpr = self.devicePixelRatioF()
         img = QImage(int(w * dpr), int(h * dpr), QImage.Format.Format_ARGB32_Premultiplied)
         img.setDevicePixelRatio(dpr)
         img.fill(Qt.GlobalColor.transparent)
         p = QPainter(img)
         origin_x = w - self.ART_WIDTH
-        flash = self.count - 1 if self._timer.isActive() else -1
-        paint_assembly(p, QPointF(origin_x, 0), self.count, flash)
+        self.art.paint(p, QPointF(origin_x, 0), self.count)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-        mask = QLinearGradient(origin_x - 90, 0, origin_x + 80, 0)
+        fade_from, fade_to = self.art.fade
+        mask = QLinearGradient(origin_x + fade_from, 0, origin_x + fade_to, 0)
         mask.setColorAt(0.0, QColor(0, 0, 0, 0))
         mask.setColorAt(1.0, QColor(0, 0, 0, 255))
         p.fillRect(QRectF(0, 0, w, h), QBrush(mask))

@@ -1,13 +1,18 @@
-"""Start-page banner art: a Pratt truss assembling its global stiffness matrix.
+"""Start-page banner art. Two pieces, each drawn into a 480 × 150 area with a QPainter:
 
-Every member of an 8-panel Pratt truss has its own colour (blue at the left support to aqua
-at the right, the theme's blue-cyan ramp) and paints the 4 × 4 block it adds to the global
-stiffness matrix K. Where members share a joint their colours mix in K, so the picture shows
-the Direct Stiffness Method's scatter assembly: K = Σ Aᵉᵀ kᵉ Aᵉ.
+``ElementArt`` (the banner in use) — "the element, inside and out": a simply supported beam
+with its principal stress trajectories under a uniform load (tension aqua, compression
+blue) and its six end freedoms drawn as arrows (u blue, v aqua, θ sky), beside the 2D frame
+element stiffness matrix kᵉ typeset in symbols, rows and columns labelled with the same
+freedoms in the same colours. The trajectories are traced through the beam-theory stress
+field; the matrix is the one ``elements.frame_element`` uses (checked in the tests).
 
-``ASSEMBLY`` is computed once with NumPy (EA = 1, panel = 1); ``paint_assembly`` draws the
-first ``count`` members (all by default) into a QPainter, so the start page can animate the
-assembly member by member. No Qt widgets here, only painting.
+``paint_assembly`` (kept as an alternative) — an 8-panel Pratt truss whose members, coloured
+along the theme's blue-cyan ramp, scatter their 4 × 4 blocks into the global stiffness
+matrix K (colours mix where members share a joint): K = Σ Aᵉᵀ kᵉ Aᵉ.
+
+Both draw progressively (``step`` of ``steps``) so the start page can animate them once.
+No Qt widgets here, only painting.
 """
 
 from __future__ import annotations
@@ -206,3 +211,224 @@ def _mono(size: float) -> QFont:
     f.setStyleHint(QFont.StyleHint.Monospace)
     f.setPointSizeF(size * 0.75)          # px-ish sizes from the preview, as points
     return f
+
+
+# ── "The element, inside and out" ────────────────────────────────────────────
+
+#: The 2D frame element stiffness matrix in local coordinates, DOFs [uᵢ vᵢ θᵢ uⱼ vⱼ θⱼ].
+FRAME_TERMS: tuple[tuple[str, ...], ...] = (
+    ("EA/L", "0", "0", "−EA/L", "0", "0"),
+    ("0", "12EI/L³", "6EI/L²", "0", "−12EI/L³", "6EI/L²"),
+    ("0", "6EI/L²", "4EI/L", "0", "−6EI/L²", "2EI/L"),
+    ("−EA/L", "0", "0", "EA/L", "0", "0"),
+    ("0", "−12EI/L³", "−6EI/L²", "0", "12EI/L³", "−6EI/L²"),
+    ("0", "6EI/L²", "2EI/L", "0", "−6EI/L²", "4EI/L"),
+)
+#: (label, colour) per DOF: axial u blue, transverse v aqua, rotation θ sky
+FRAME_DOFS: tuple[tuple[str, str], ...] = (
+    ("uᵢ", theme.BLUE), ("vᵢ", theme.AQUA), ("θᵢ", theme.SKY),
+    ("uⱼ", theme.BLUE), ("vⱼ", theme.AQUA), ("θⱼ", theme.SKY),
+)
+
+
+def evaluate_frame_term(term: str, E: float, A: float, I: float, L: float) -> float:
+    """Numeric value of one ``FRAME_TERMS`` entry (used to check it against the solver)."""
+    if term == "0":
+        return 0.0
+    sign = -1.0 if term.startswith("−") else 1.0
+    body = term.lstrip("−")
+    if body == "EA/L":
+        return sign * E * A / L
+    coef, power = body.split("EI/L")
+    exponent = {"": 1, "²": 2, "³": 3}[power]
+    return sign * float(coef) * E * I / L ** exponent
+
+
+def stress_trajectories(span_to_depth: float = 6.0, seeds: int = 6,
+                        step: float = 0.01) -> list[tuple[int, np.ndarray]]:
+    """Principal stress trajectories of a simply supported beam under uniform load.
+
+    Beam of depth 1 and span ``span_to_depth``; y up from the neutral axis. Stresses from
+    beam theory (w = 1): σx = −M·y/I, τ = 3V/2A·(1 − 4y²). Each trajectory starts at
+    midspan and is traced outward until it leaves the beam. Returns (family, points)
+    with family 0 = tension (σ1), 1 = compression (σ2); points are (x, y) arrays that start
+    at midspan, so drawing a prefix makes the lines grow outward.
+    """
+    span, depth = span_to_depth, 1.0
+    inertia, area = depth ** 3 / 12, depth
+
+    def direction(x: float, y: float, family: int) -> np.ndarray:
+        moment, shear = x * (span - x) / 2, span / 2 - x
+        sx = -moment * y / inertia
+        tau = 1.5 * shear / area * (1 - 4 * y * y / depth ** 2)
+        theta = 0.5 * np.arctan2(2 * tau, sx) + (np.pi / 2 if family else 0.0)
+        return np.array([np.cos(theta), np.sin(theta)])
+
+    def trace(y0: float, family: int, sign: float) -> np.ndarray:
+        pt, prev, pts = np.array([span / 2, y0]), None, [(span / 2, y0)]
+        for _ in range(4000):
+            d = direction(pt[0], pt[1], family)
+            if (prev is not None and d @ prev < 0) or (prev is None and d[0] * sign < 0):
+                d = -d
+            prev = d
+            pt = pt + d * step
+            if pt[0] < 0 or pt[0] > span or abs(pt[1]) > depth / 2:
+                break
+            pts.append((pt[0], pt[1]))
+        return np.array(pts)
+
+    out: list[tuple[int, np.ndarray]] = []
+    for k in range(1, seeds + 1):
+        y = -depth / 2 + k * (depth / 2) / (seeds + 1)   # tension seeds: bottom half
+        for sign in (1.0, -1.0):
+            out.append((0, trace(y, 0, sign)))
+            out.append((1, trace(-y, 1, sign)))
+    return out
+
+
+class ElementArt:
+    """Beam element with stress trajectories and end freedoms, beside its labelled kᵉ."""
+
+    steps = 30                       # draw-in: trajectories first, then the matrix rows
+    tooltip = ("The frame element, inside and out: stress trajectories in the beam, "
+               "and the stiffness matrix the solver uses for it (click to replay)")
+
+    BEAM = (0.0, 150.0, 82.0)            # x0, x1, centre-line y (art coordinates)
+    MATRIX = (203.0, 32.0, 38.0, 15.5)   # x0, y0, column width, row height
+    fade = (-80.0, -50.0)                # fade-in from the left, ends before the uᵢ label
+
+    def __init__(self) -> None:
+        self.trajectories = stress_trajectories()
+
+    def paint(self, p: QPainter, origin: QPointF, step: int | None = None) -> None:
+        step = self.steps if step is None else step
+        f = step / self.steps
+        grow = min(1.0, f / 0.65)                   # trajectories: first 65 % of the time
+        rows_shown = 0 if f < 0.65 else min(6, 1 + int((f - 0.65) / 0.35 * 6))
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.translate(origin)
+        self._paint_beam(p, grow)
+        self._paint_matrix(p, rows_shown, labels=f >= 0.65)
+        p.restore()
+
+    # ── beam ──────────────────────────────────────────────────────────────────
+
+    def _paint_beam(self, p: QPainter, grow: float) -> None:
+        x0, x1, yc = self.BEAM
+        scale = (x1 - x0) / 6.0                     # span/depth = 6, depth = 1
+        half = scale / 2
+        for family, pts in self.trajectories:
+            n = max(2, int(len(pts) * grow))
+            colour = QColor(theme.AQUA if family == 0 else theme.BLUE)
+            colour.setAlpha(230)
+            p.setPen(QPen(colour, 1.1))
+            p.drawPolyline(QPolygonF([QPointF(x0 + x * scale, yc - y * scale) for x, y in pts[:n]]))
+        outline = QColor(theme.TEXT_DIM); outline.setAlpha(200)
+        p.setPen(QPen(outline, 1.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(QRectF(x0, yc - half, x1 - x0, 2 * half))
+        axis = QColor(theme.TEXT_DIM); axis.setAlpha(80)
+        p.setPen(QPen(axis, 1.0, Qt.PenStyle.DashLine))
+        p.drawLine(QPointF(x0, yc), QPointF(x1, yc))
+        for x, sub, out in ((x0, "ᵢ", -1), (x1, "ⱼ", 1)):
+            self._paint_freedoms(p, x, yc, half, sub, out)
+
+    def _paint_freedoms(self, p: QPainter, x: float, yc: float, half: float, sub: str,
+                        out: int) -> None:
+        """u (axial), v (transverse) and θ (rotation) arrows at one end of the element."""
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor("#e8eef6")))
+        p.drawEllipse(QPointF(x, yc), 2.6, 2.6)
+        p.setFont(_mono(9.5))
+        u, v, th = QColor(theme.BLUE), QColor(theme.AQUA), QColor(theme.SKY)
+        side = (Qt.AlignmentFlag.AlignLeft if out > 0 else Qt.AlignmentFlag.AlignRight)
+        # u (axial)
+        p.setPen(QPen(u, 1.5))
+        p.drawLine(QPointF(x, yc), QPointF(x + out * 18, yc))
+        _arrow_head(p, QPointF(x + out * 22, yc), out, 0, u)
+        p.setPen(u)
+        p.drawText(QRectF(x + out * 26 - (0 if out > 0 else 22), yc - 7, 22, 14),
+                   side | Qt.AlignmentFlag.AlignVCenter, "u" + sub)
+        # v (transverse)
+        top = yc - half
+        p.setPen(QPen(v, 1.5))
+        p.drawLine(QPointF(x, top), QPointF(x, top - 22))
+        _arrow_head(p, QPointF(x, top - 26), 0, -1, v)
+        p.setPen(v)
+        p.drawText(QPointF(x + 6, top - 19), "v" + sub)
+        # θ (rotation, anticlockwise)
+        cy, r = yc + half + 14, 13.0
+        p.setPen(QPen(th, 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # arc under the node, from lower-left round to lower-right; the head at the lower
+        # right points up-right, so the bottom of the circle moves right: anticlockwise,
+        # StructLab's positive θ
+        p.drawArc(QRectF(x - r, cy - r, 2 * r, 2 * r), -27 * 16, -126 * 16)
+        a = 0.15 * np.pi                                    # screen angle of the head (y down)
+        end = np.array([x + r * np.cos(a), cy + r * np.sin(a)])
+        t = np.array([np.sin(a), -np.cos(a)])               # tangent of anticlockwise motion
+        n = np.array([-t[1], t[0]])
+        tip, back = end + 4 * t, end - 3 * t
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(th))
+        p.drawPolygon(QPolygonF([QPointF(*tip), QPointF(*(back + 3 * n)), QPointF(*(back - 3 * n))]))
+        p.setPen(th)
+        label_x = x + out * 16
+        p.drawText(QRectF(label_x - (0 if out > 0 else 22), cy + 11, 22, 14),
+                   side | Qt.AlignmentFlag.AlignVCenter, "θ" + sub)
+
+    # ── matrix ────────────────────────────────────────────────────────────────
+
+    def _paint_matrix(self, p: QPainter, rows_shown: int, labels: bool) -> None:
+        x0, y0, cw, rh = self.MATRIX
+        ox = x0 + 12
+        p.setFont(_mono(13))
+        p.setPen(QColor(theme.BLUE).lighter(150))
+        p.drawText(QRectF(x0 - 30, y0 - 30, 28, 22), Qt.AlignmentFlag.AlignCenter, "kᵉ")
+        bracket = QColor(theme.TEXT); bracket.setAlpha(190)
+        p.setPen(QPen(bracket, 1.1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        left, right, top, bottom = x0 + 4, x0 + 4 + 6 * cw + 16, y0 - 4, y0 + 6 * rh + 2
+        for x, lip in ((left, 5), (right, -5)):
+            p.drawPolyline(QPolygonF([QPointF(x + lip, top), QPointF(x, top),
+                                      QPointF(x, bottom), QPointF(x + lip, bottom)]))
+        p.setFont(_mono(7.8))
+        dim = QColor(theme.TEXT_DIM); dim.setAlpha(110)
+        for r in range(rows_shown):
+            for c, term in enumerate(FRAME_TERMS[r]):
+                colour = dim if term == "0" else QColor(theme.BLUE if "EA" in term else theme.AQUA)
+                p.setPen(colour)
+                p.drawText(QRectF(ox + c * cw, y0 + r * rh, cw, rh), Qt.AlignmentFlag.AlignCenter, term)
+        if labels:
+            p.setFont(_mono(7.8))
+            for i, (name, col) in enumerate(FRAME_DOFS):
+                p.setPen(QColor(col))
+                p.drawText(QRectF(ox + i * cw, y0 - 18, cw, 12), Qt.AlignmentFlag.AlignCenter, name)
+                p.drawText(QRectF(x0 + 6 * cw + 24, y0 + i * rh, 24, rh),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+
+
+class AssemblyArt:
+    """The Pratt-truss assembly (``paint_assembly``) behind the same interface."""
+
+    steps = len(ASSEMBLY.bars)
+    fade = (-90.0, 80.0)
+    tooltip = ("Direct Stiffness Method: each member adds its block to K "
+               "(click to replay the assembly)")
+
+    def paint(self, p: QPainter, origin: QPointF, step: int | None = None) -> None:
+        step = self.steps if step is None else step
+        flash = step - 1 if 0 < step < self.steps else -1
+        paint_assembly(p, origin, step, flash)
+
+
+def _arrow_head(p: QPainter, tip: QPointF, dx: int, dy: int, colour: QColor) -> None:
+    """Small filled arrow head pointing along (dx, dy); axis-aligned only."""
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(colour))
+    if dx:
+        pts = [tip, QPointF(tip.x() - dx * 6, tip.y() - 3), QPointF(tip.x() - dx * 6, tip.y() + 3)]
+    else:
+        pts = [tip, QPointF(tip.x() - 3, tip.y() - dy * 6), QPointF(tip.x() + 3, tip.y() - dy * 6)]
+    p.drawPolygon(QPolygonF(pts))

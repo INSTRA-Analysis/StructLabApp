@@ -49,16 +49,45 @@ def test_matrix_cells_cover_exactly_the_non_zero_terms(qapp):
     assert set(first) == set(a.blocks[0])                    # one member = one 4 × 4 block
 
 
-def test_banner_plays_the_assembly_once_then_rests_complete(qapp):
+def test_typeset_frame_matrix_is_the_solvers_frame_element():
+    """The banner's kᵉ, evaluated with numbers, equals elements.FrameElement's local k."""
+    from core.material import Material
+    from core.node import Node
+    from core.section import Section
+    from elements.frame_element import FrameElement
+    from ui_qt.banner_art import FRAME_TERMS, evaluate_frame_term
+    E, A, I, L = 210e9, 5.38e-3, 8.356e-5, 4.5
+    el = FrameElement(1, Node(1, 0.0, 0.0), Node(2, L, 0.0), Material("S355", E),
+                      Section(name="IPE 300", area=A, moment_of_inertia=I))
+    k_solver = el.local_stiffness_matrix()
+    k_banner = np.array([[evaluate_frame_term(t, E, A, I, L) for t in row] for row in FRAME_TERMS])
+    assert k_solver.shape == (6, 6)
+    assert np.allclose(k_banner, k_solver, rtol=1e-12, atol=0.0)
+
+
+def test_stress_trajectories_stay_in_the_beam_and_cover_both_families():
+    from ui_qt.banner_art import stress_trajectories
+    paths = stress_trajectories()
+    assert {family for family, _ in paths} == {0, 1}
+    for family, pts in paths:
+        assert len(pts) > 20
+        assert np.all(pts[:, 0] >= 0) and np.all(pts[:, 0] <= 6)
+        assert np.all(np.abs(pts[:, 1]) <= 0.5)
+        assert pts[0, 0] == pytest.approx(3.0)              # traced out from midspan
+        # tension starts below the neutral axis, compression above
+        assert (pts[0, 1] < 0) == (family == 0)
+
+
+def test_banner_draws_in_once_then_rests_complete(qapp):
     from ui_qt.welcome_dialog import _Banner
     b = _Banner()
     b.resize(1000, 150)
     b.show()
     qapp.processEvents()
-    assert b._timer.isActive() and b.count < b._n_members     # started on first show
-    for _ in range(b._n_members):
+    assert b._timer.isActive() and b.count < b._steps         # started on first show
+    for _ in range(b._steps):
         b._step()
-    assert b.count == b._n_members and not b._timer.isActive()
+    assert b.count == b._steps and not b._timer.isActive()
     assert not b.grab().isNull()
     b.hide(); b.show()
     assert not b._timer.isActive()                            # plays only once by itself
