@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style
 from ui_qt.section_library import (
     MATERIALS, STEEL_PROFILES, angle_section_extras,
     rectangular_section, t_beam_section,
@@ -105,7 +107,7 @@ class SectionPickerDialog(QDialog):
         prev_form.addRow("W_el (cm³):", self._lbl_Wel)
         self._lbl_extra = QLabel("")
         self._lbl_extra.setWordWrap(True)
-        self._lbl_extra.setStyleSheet("color: #8fb8c8;")
+        self._lbl_extra.setStyleSheet(f"color: {theme.CYAN};")
         prev_form.addRow(self._lbl_extra)
         layout.addWidget(prev_box)
 
@@ -117,6 +119,9 @@ class SectionPickerDialog(QDialog):
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        apply_dialog_style(self, "Section library",
+                           "Material and cross-section; the properties update as you choose",
+                           theme.GEOMETRY, "layers")
 
         # Wire live preview — call after all widgets exist
         self._tabs.currentChanged.connect(self._update_preview)

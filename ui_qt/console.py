@@ -89,19 +89,14 @@ class ConsoleDialog(QDialog):
             "In-process IPython kernel  ·  Tab = complete  ·  "
             "Ctrl+L = clear  ·  Ctrl+C = interrupt"
         )
-        info.setStyleSheet("color: #777; font-size: 11px;")
+        info.setStyleSheet("color: #9a9ea6; font-size: 11px;")    # theme.TEXT_DIM
         bar.addWidget(info)
         bar.addStretch()
 
         for label, slot in [("Clear", self._clear),
                              ("Restart kernel", self._restart_kernel)]:
             btn = QPushButton(label)
-            btn.setFixedHeight(24)
-            btn.setStyleSheet(
-                "QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;"
-                "  border-radius:3px; padding:0 8px; font-size:11px; }"
-                "QPushButton:hover { background:#3a3a3a; }"
-            )
+            btn.setFixedHeight(24)                 # look comes from the app stylesheet
             btn.clicked.connect(slot)
             bar.addWidget(btn)
 

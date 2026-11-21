@@ -24,6 +24,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style
 from ui_qt.model_state import ModelState
 
 
@@ -269,13 +271,6 @@ class EnvelopeDialog(QDialog):
         names = ", ".join(r['combo'].name for r in solve_runs_rich[:3])
         if n > 3:
             names += f" … (+{n - 3} more)"
-        hdr = QLabel(
-            f"<b>Envelope across {n} combination(s)</b>  ·  {names}<br>"
-            "Tables show max/min at member <i>ends</i>. "
-            "Diagram tabs show the full pointwise envelope along each member."
-        )
-        hdr.setWordWrap(True)
-        layout.addWidget(hdr)
 
         tabs = QTabWidget()
         tabs.addTab(self._node_tab(solve_runs_rich, state),   "Node Displacements")
@@ -287,6 +282,10 @@ class EnvelopeDialog(QDialog):
         bbox = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         bbox.rejected.connect(self.accept)
         layout.addWidget(bbox)
+        apply_dialog_style(
+            self, f"Envelope across {n} combination(s)",
+            f"{names}\nTables give max / min at member ends; the diagram tabs give the full "
+            "envelope along each member.", theme.RESULT, "chart-column")
 
     # ── node displacement table ────────────────────────────────────────────────
 

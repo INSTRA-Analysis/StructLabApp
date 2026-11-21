@@ -18,6 +18,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
     QAbstractButton, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout,
+    QWidget,
 )
 
 from ui_qt import theme
@@ -71,11 +72,17 @@ def apply_dialog_style(dialog: QDialog, title: str, subtitle: str = "",
     """Give ``dialog`` the StructLab dialog look (see the module docstring)."""
     dialog.setObjectName("themed_dialog")
     lay = dialog.layout()
+    if lay is not None and not isinstance(lay, QVBoxLayout):
+        # Any other top-level layout (form, grid…) moves into a body widget under the header
+        body = QWidget()
+        body.setLayout(lay)               # reparents the layout away from the dialog
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay = QVBoxLayout(dialog)
+        lay.addWidget(body, 1)
     if lay is not None:
         lay.setContentsMargins(14, 14, 14, 12)
         lay.setSpacing(10)
-        if isinstance(lay, (QVBoxLayout,)):
-            lay.insertWidget(0, _header(title, subtitle, accent, icon_name))
+        lay.insertWidget(0, _header(title, subtitle, accent, icon_name))
     for box in dialog.findChildren(QDialogButtonBox):
         ok = box.button(QDialogButtonBox.StandardButton.Ok)
         if ok is not None:

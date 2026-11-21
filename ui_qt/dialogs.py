@@ -6,6 +6,10 @@ No dependency on MainWindow internals.
 """
 from __future__ import annotations
 
+import sys
+
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style, mark_primary
 from ui_qt.version import VERSION_LABEL
 
 from PyQt6.QtCore import Qt
@@ -90,7 +94,7 @@ def show_keyboard_shortcuts(parent) -> None:
         if key is None:
             item = QTableWidgetItem(f"  {action}")
             item.setFont(bold)
-            item.setForeground(QColor("#00ACC1"))
+            item.setForeground(QColor(theme.CYAN))
             table.setItem(row, 0, item)
             table.setSpan(row, 0, 1, 2)
         else:
@@ -101,6 +105,9 @@ def show_keyboard_shortcuts(parent) -> None:
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
     btns.rejected.connect(dlg.accept)
     layout.addWidget(btns)
+    dlg.resize(400, 560)
+    apply_dialog_style(dlg, "Keyboard shortcuts", "Grouped by where they work",
+                       theme.CYAN, "keyboard")
     dlg.exec()
 
 
@@ -110,55 +117,30 @@ def show_about(parent) -> None:
     """Display the About StructLab dialog."""
     dlg = QDialog(parent)
     dlg.setWindowTitle("About StructLab")
-    dlg.setFixedWidth(380)
+    dlg.setFixedWidth(440)
     layout = QVBoxLayout(dlg)
-    layout.setSpacing(10)
-    layout.setContentsMargins(28, 24, 28, 20)
 
-    def _lbl(text: str, style: str = "") -> QLabel:
-        lbl = QLabel(text)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    def _row(label: str, text: str) -> None:
+        form.addRow(label, QLabel(text))
+
+    box = QGroupBox("Details")
+    form = QFormLayout(box)
+    form.setSpacing(6)
+    _row("Method:", "Direct Stiffness Method, linear static")
+    _row("Structures:", "Beams · frames · trusses · mixed, 2D and 3D")
+    _row("Validation:", "20 benchmark cases against OpenSeesPy and closed-form results")
+    py = sys.version_info
+    _row("Built with:", f"Python {py.major}.{py.minor}  ·  PyQt6  ·  NumPy / SciPy  ·  Matplotlib")
+    _row("Licence:", "GPL v3  ·  © 2024–2026 Imed Mhamdi / INSTRA Analysis")
+    for lbl in box.findChildren(QLabel):
         lbl.setWordWrap(True)
-        if style:
-            lbl.setStyleSheet(style)
-        return lbl
-
-    title_font = QFont(); title_font.setPointSize(22); title_font.setBold(True)
-    title = _lbl("StructLab")
-    title.setFont(title_font)
-    title.setStyleSheet("color:#00ACC1;")
-    layout.addWidget(title)
-
-    layout.addWidget(_lbl(VERSION_LABEL, "color:#888; font-size:11px;"))
-
-    line = QLabel(); line.setFixedHeight(1)
-    line.setStyleSheet("background:#2a2a34;")
-    layout.addWidget(line)
-
-    layout.addWidget(_lbl(
-        "2D structural analysis using the Direct Stiffness Method.\n"
-        "Beams · Frames · Trusses · Mixed structures.",
-        "color:#bbb; font-size:11px; padding: 4px 0;",
-    ))
-
-    line2 = QLabel(); line2.setFixedHeight(1)
-    line2.setStyleSheet("background:#2a2a34;")
-    layout.addWidget(line2)
-
-    layout.addWidget(_lbl("Built with", "color:#666; font-size:10px;"))
-    layout.addWidget(_lbl(
-        "Python 3.12  ·  PyQt6  ·  NumPy / SciPy  ·  Matplotlib",
-        "color:#888; font-size:10px;",
-    ))
-
-    layout.addWidget(_lbl(
-        "Validated against OpenSeesPy — 13 benchmark cases, 0.00 % error",
-        "color:#666; font-size:10px; padding-top:4px;",
-    ))
+    layout.addWidget(box)
 
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
     btns.rejected.connect(dlg.accept)
     layout.addWidget(btns)
+    apply_dialog_style(dlg, f"StructLab {VERSION_LABEL}",
+                       "2D and 3D structural analysis", theme.CYAN, "info")
     dlg.exec()
 
 
@@ -173,10 +155,9 @@ def show_project_info(parent, state) -> bool:
     dlg.setWindowTitle("Project Information")
     dlg.setMinimumWidth(420)
     layout = QVBoxLayout(dlg)
-    layout.setSpacing(10)
-    layout.setContentsMargins(20, 16, 20, 16)
 
-    form = QFormLayout()
+    project_box = QGroupBox("Project")
+    form = QFormLayout(project_box)
     form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
     form.setSpacing(8)
 
@@ -209,18 +190,16 @@ def show_project_info(parent, state) -> bool:
     form.addRow("Status:",        status_cb)
     form.addRow("Description:",   desc_ed)
 
-    lbl = QLabel("Signatories")
-    lbl.setStyleSheet("color:#00ACC1; font-weight:bold; padding-top:6px;")
-    layout.addLayout(form)
-    layout.addWidget(lbl)
+    layout.addWidget(project_box)
 
-    sign_form = QFormLayout()
+    sign_box = QGroupBox("Signatories")
+    sign_form = QFormLayout(sign_box)
     sign_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
     sign_form.setSpacing(8)
     sign_form.addRow("Designer:",  designer_ed)
     sign_form.addRow("Reviewer:",  reviewer_ed)
     sign_form.addRow("Approver:",  approver_ed)
-    layout.addLayout(sign_form)
+    layout.addWidget(sign_box)
 
     btns = QDialogButtonBox(
         QDialogButtonBox.StandardButton.Ok |
@@ -229,6 +208,9 @@ def show_project_info(parent, state) -> bool:
     btns.accepted.connect(dlg.accept)
     btns.rejected.connect(dlg.reject)
     layout.addWidget(btns)
+    apply_dialog_style(dlg, "Project information",
+                       "Title, client and signatories, shown on the PDF report",
+                       theme.CYAN, "info")
 
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return False
@@ -253,7 +235,6 @@ class DuplicateDialog(QDialog):
     def __init__(self, parent=None, is_3d: bool = False) -> None:
         super().__init__(parent)
         self.setWindowTitle("Duplicate Selection")
-        self.setFixedWidth(300)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -299,6 +280,9 @@ class DuplicateDialog(QDialog):
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        self.setFixedWidth(340)
+        apply_dialog_style(self, "Duplicate selection", "Copies along an axis",
+                           theme.GEOMETRY, "copy-plus")
 
     @property
     def axis(self) -> str:
@@ -324,7 +308,6 @@ class SubdivideDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Subdivide Member")
-        self.setFixedWidth(280)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -349,6 +332,9 @@ class SubdivideDialog(QDialog):
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        self.setFixedWidth(340)
+        apply_dialog_style(self, "Subdivide member", "Equal parts with new nodes",
+                           theme.GEOMETRY, "split")
 
     @property
     def n_divisions(self) -> int:
@@ -367,7 +353,6 @@ class MirrorDialog(QDialog):
     def __init__(self, parent=None, is_3d: bool = True) -> None:
         super().__init__(parent)
         self.setWindowTitle("Mirror Selection")
-        self.setFixedWidth(280)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -407,6 +392,9 @@ class MirrorDialog(QDialog):
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        self.setFixedWidth(340)
+        apply_dialog_style(self, "Mirror selection", "Reflect about a plane",
+                           theme.GEOMETRY, "flip-horizontal-2")
 
     @property
     def plane(self) -> str:
@@ -488,7 +476,7 @@ class RotateDialog(QDialog):
         hint = QLabel("To copy around a tower or any symmetric structure, use Point on its axis "
                       "(e.g. 0, 0, 0). Copies that land exactly on existing members are skipped.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888888;")
+        hint.setStyleSheet(f"color: {theme.TEXT_DIM};")
         layout.addWidget(hint)
 
         self._duplicate = QCheckBox("Duplicate — keep the original and add rotated copies")
@@ -509,6 +497,9 @@ class RotateDialog(QDialog):
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+        apply_dialog_style(self, "Rotate selection",
+                           "About a global axis, or as a polar array of copies",
+                           theme.GEOMETRY, "rotate-3d")
 
     @property
     def axis(self) -> str:
@@ -573,6 +564,10 @@ class DuplicatesDialog(QDialog):
         row.addStretch()
         row.addWidget(close)
         layout.addLayout(row)
+        apply_dialog_style(self, "Check duplicates",
+                           "Coincident nodes; duplicate, zero-length and overlapping members",
+                           theme.GEOMETRY, "scan-search")
+        mark_primary(self._btn_fix)
         self.run_check()
 
     @property

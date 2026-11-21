@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QSlider, QVBoxLayout,
 )
 
+from ui_qt import theme
+from ui_qt.dialog_style import apply_dialog_style
 from ui_qt.model_state import ModelState
 
 AXES = ("X", "Y", "Z")
@@ -79,7 +81,7 @@ class SectionCutDialog(QDialog):
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setRange(0, self._STEPS)
         self._info = QLabel("")
-        self._info.setStyleSheet("color: #888888;")
+        self._info.setStyleSheet(f"color: {theme.TEXT_DIM};")
 
         form = QFormLayout()
         form.addRow("Axis:", self._axis)
@@ -99,6 +101,8 @@ class SectionCutDialog(QDialog):
         lay.addLayout(form)
         lay.addWidget(self._info)
         lay.addLayout(row)
+        apply_dialog_style(self, "Section cut", "Hide one side of a plane to look inside",
+                           theme.GEOMETRY, "scissors")
 
         self._axis.currentTextChanged.connect(self._axis_changed)
         self._pos.valueChanged.connect(self._pos_changed)

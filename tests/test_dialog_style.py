@@ -33,6 +33,31 @@ def test_wizards_are_themed(qapp, cls, title):
     _check(dlg, title)
 
 
+@pytest.mark.parametrize("make, title", [
+    (lambda: __import__("ui_qt.dialogs", fromlist=["x"]).DuplicateDialog(), "Duplicate selection"),
+    (lambda: __import__("ui_qt.dialogs", fromlist=["x"]).SubdivideDialog(), "Subdivide member"),
+    (lambda: __import__("ui_qt.dialogs", fromlist=["x"]).MirrorDialog(), "Mirror selection"),
+    (lambda: __import__("ui_qt.dialogs", fromlist=["x"]).RotateDialog(), "Rotate selection"),
+    (lambda: __import__("ui_qt.section_picker", fromlist=["x"]).SectionPickerDialog(
+        210e9, 0.01, 1e-4), "Section library"),
+])
+def test_tool_dialogs_are_themed(qapp, make, title):
+    _check(make(), title)
+
+
+def test_non_vertical_layout_moves_under_the_header(qapp):
+    from PyQt6.QtWidgets import QDialog, QFormLayout, QLineEdit, QVBoxLayout
+    from ui_qt.dialog_style import apply_dialog_style
+    dlg = QDialog()
+    form = QFormLayout(dlg)
+    edit = QLineEdit()
+    form.addRow("Name:", edit)
+    apply_dialog_style(dlg, "Form dialog")
+    assert isinstance(dlg.layout(), QVBoxLayout)
+    _check(dlg, "Form dialog")
+    assert edit.window() is dlg                     # the form's widgets stay in the dialog
+
+
 def test_combinations_dialog_has_one_primary_action(qapp):
     from PyQt6.QtWidgets import QPushButton
     from ui_qt.combinations import CombinationsDialog

@@ -463,9 +463,6 @@ class MainWindow(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("Scale Selection")
         layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel(
-            f"<b>{len(nodes)} node(s)</b> — scaling about centroid "
-            f"({cx:.3g}, {cy:.3g}, {cz:.3g}) m"))
         form = QFormLayout()
 
         def _spin(val=1.0):
@@ -496,6 +493,10 @@ class MainWindow(QMainWindow):
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         layout.addWidget(btns)
+        from ui_qt.dialog_style import apply_dialog_style
+        apply_dialog_style(dlg, "Scale selection",
+                           f"{len(nodes)} node(s), about their centre "
+                           f"({cx:.3g}, {cy:.3g}, {cz:.3g}) m", _theme.GEOMETRY, "scaling")
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -1461,6 +1462,11 @@ class MainWindow(QMainWindow):
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         layout.addWidget(btns)
+        from ui_qt.dialog_style import apply_dialog_style
+        dlg.setMinimumWidth(360)
+        apply_dialog_style(dlg, "Add load case",
+                           "The category sets its partial and ψ factors in the combinations",
+                           _theme.LOAD, "plus")
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -2363,6 +2369,10 @@ class MainWindow(QMainWindow):
                 btns.accepted.connect(self.accept)
                 btns.rejected.connect(self.reject)
                 lay.addWidget(btns)
+                from ui_qt.dialog_style import apply_dialog_style
+                apply_dialog_style(self, "PDF report",
+                                   "Choose the load case or combination to solve and report on",
+                                   _theme.RESULT, "file-text")
 
             def _toggle(self, lc_checked: bool) -> None:
                 self._cb_lc.setEnabled(lc_checked)
