@@ -33,7 +33,31 @@ from ui_qt.projection import (
     isometric, inverse_isometric,
     inverse_isometric_xz, inverse_isometric_yz,
 )
-from ui_qt.view_cube import ViewCube
+from ui_qt.nav_gizmo import NavGizmo
+from ui_qt import theme as _theme
+from PyQt6.QtGui import QRadialGradient
+
+# Viewport background: vertical gradient, lighter at the top (Blender-like)
+_VIEWPORT_TOP    = QColor("#3a3d44")
+_VIEWPORT_BOTTOM = QColor("#1f2125")
+
+
+def _fade_pen(colour: QColor, centre: QPointF, radius: float, width: float = 1.0) -> QPen:
+    """Cosmetic pen whose colour fades to transparent with distance from ``centre``.
+
+    Used for grid and ground-axis lines so the grid dissolves toward the viewport edges
+    instead of ending in a hard border.
+    """
+    grad = QRadialGradient(centre, radius)
+    mid, edge = QColor(colour), QColor(colour)
+    mid.setAlpha(int(colour.alpha() * 0.65))
+    edge.setAlpha(0)
+    grad.setColorAt(0.0, colour)
+    grad.setColorAt(0.55, mid)
+    grad.setColorAt(1.0, edge)
+    pen = QPen(QBrush(grad), width)
+    pen.setCosmetic(True)
+    return pen
 
 # Distinct palette for "All Cases" overlay — one colour per load case
 _LC_COLORS = [
@@ -2298,7 +2322,7 @@ class StructView(QGraphicsView):
         self._pan_last = None    # QPoint when middle-button is held (pan)
         self._orbit_last = None  # QPoint when middle is held (3D orbit)
         self._orbit_center: tuple[float,float,float] | None = None  # world pivot
-        self._view_cube = ViewCube()
+        self._view_cube = NavGizmo()
         self.setMouseTracking(True)  # needed for hover updates
         self._rb_start: QPoint | None = None   # rubber-band drag start (viewport px)
         self._rb_end:   QPoint | None = None   # rubber-band drag current end
@@ -2319,13 +2343,28 @@ class StructView(QGraphicsView):
     # that keeps minor-line spacing between 20–50 px at the current zoom.
     _SUB_SPACINGS = (1.0, 0.5, 0.25, 0.1, 0.05, 0.025)
 
+    def _fill_viewport_gradient(self, painter: QPainter) -> None:
+        """Vertical gradient pinned to the viewport (it does not scroll or zoom)."""
+        painter.save()
+        painter.resetTransform()
+        h = self.viewport().height()
+        grad = QLinearGradient(0.0, 0.0, 0.0, float(max(h, 1)))
+        grad.setColorAt(0.0, _VIEWPORT_TOP)
+        grad.setColorAt(1.0, _VIEWPORT_BOTTOM)
+        painter.fillRect(self.viewport().rect(), QBrush(grad))
+        painter.restore()
+
+    def _grid_fade(self) -> tuple[QPointF, float]:
+        """Centre and radius (scene units) of the grid fade: the visible viewport."""
+        vp_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        return vp_rect.center(), 0.62 * max(vp_rect.width(), vp_rect.height(), 1.0)
+
     def drawBackground(self, painter: QPainter, rect) -> None:
-        bg = QColor("#1a1a1e")
-        painter.fillRect(rect, bg)
+        self._fill_viewport_gradient(painter)
 
         # Welcome overlay — only on first launch before any user action
         if not self.scene()._hide_welcome and not self.scene().model_state.nodes:
-            painter.setPen(QPen(QColor("#4a4a50"), 1))
+            painter.setPen(QPen(QColor("#6a6e78"), 1))
             font = painter.font()
             font.setPointSize(18)
             font.setBold(True)
@@ -2334,7 +2373,7 @@ class StructView(QGraphicsView):
             font.setPointSize(10)
             font.setBold(False)
             painter.setFont(font)
-            painter.setPen(QPen(QColor("#3a3a40"), 1))
+            painter.setPen(QPen(QColor("#585c66"), 1))
             r2 = rect.adjusted(0, 30, 0, 0)
             painter.drawText(r2, Qt.AlignmentFlag.AlignCenter,
                              "Press N to add a node  |  Ctrl+O to open  |  Presets menu to start")
@@ -2722,10 +2761,11 @@ class StructView(QGraphicsView):
             minor_step = 1
         major_step = GRID_STEP
 
-        minor_pen = QPen(QColor(60, 60, 66)); minor_pen.setCosmetic(True)
-        major_pen = QPen(QColor(80, 80, 88)); major_pen.setCosmetic(True)
+        fade_c, fade_r = self._grid_fade()
+        minor_pen = _fade_pen(QColor(78, 82, 92), fade_c, fade_r)
+        major_pen = _fade_pen(QColor(100, 105, 116), fade_c, fade_r, 1.2)
 
-        left  = int(math.floor(rect.left()   / minor_step)) * minor_step
+        left = int(math.floor(rect.left()   / minor_step)) * minor_step
         right = int(math.ceil( rect.right()  / minor_step)) * minor_step
         top   = int(math.floor(rect.top()    / minor_step)) * minor_step
         bot   = int(math.ceil( rect.bottom() / minor_step)) * minor_step
@@ -2750,15 +2790,13 @@ class StructView(QGraphicsView):
         if major_h: painter.drawLines(major_h)
 
         # ── World-origin axes (drawn on top of the grid) ──────────────────────
-        def _axis_pen(r: int, g: int, b: int) -> QPen:
-            p = QPen(QColor(r, g, b, 200))
-            p.setCosmetic(True)
-            p.setWidthF(2.0)
-            return p
+        def _axis_pen(colour: str) -> QPen:
+            c = QColor(colour); c.setAlpha(210)
+            return _fade_pen(c, fade_c, fade_r, 2.0)
 
-        painter.setPen(_axis_pen(190, 55, 55))   # X axis — red, horizontal at y=0
+        painter.setPen(_axis_pen(_theme.AXIS_X))   # X axis — red, horizontal at y=0
         painter.drawLine(QLineF(rect.left(), 0, rect.right(), 0))
-        painter.setPen(_axis_pen(55, 165, 55))   # Y axis — green, vertical at x=0
+        painter.setPen(_axis_pen(_theme.AXIS_Y))   # Y axis — green, vertical at x=0
         painter.drawLine(QLineF(0, rect.top(), 0, rect.bottom()))
 
     def _draw_iso_grid(self, painter: QPainter, rect) -> None:
@@ -2787,9 +2825,9 @@ class StructView(QGraphicsView):
         )
 
         # ── Pens ──────────────────────────────────────────────────────────────
-        minor_pen = QPen(QColor(52, 52, 60));  minor_pen.setCosmetic(True)
-        major_pen = QPen(QColor(82, 82, 94));  major_pen.setCosmetic(True)
-        major_pen.setWidthF(1.4)
+        fade_c, fade_r = self._grid_fade()
+        minor_pen = _fade_pen(QColor(76, 80, 90), fade_c, fade_r)
+        major_pen = _fade_pen(QColor(104, 109, 120), fade_c, fade_r, 1.3)
         pl_minor  = QPen(QColor(0, 120, 140, 110)); pl_minor.setCosmetic(True)
         pl_major  = QPen(QColor(0, 155, 175, 180)); pl_major.setCosmetic(True)
         pl_major.setWidthF(1.4)
@@ -2829,6 +2867,13 @@ class StructView(QGraphicsView):
         for x_val in x_vals:
             painter.setPen(_pen(x_val, minor_pen, major_pen))
             painter.drawLine(QLineF(*isometric(x_val, y0, 0), *isometric(x_val, y1, 0)))
+
+        # Ground axes across the whole floor: X red along y = 0, Y green along x = 0
+        for colour, (a, b) in ((_theme.AXIS_X, ((x0, 0.0), (x1, 0.0))),
+                               (_theme.AXIS_Y, ((0.0, y0), (0.0, y1)))):
+            c = QColor(colour); c.setAlpha(200)
+            painter.setPen(_fade_pen(c, fade_c, fade_r, 1.8))
+            painter.drawLine(QLineF(*isometric(*a, 0), *isometric(*b, 0)))
 
         # ── Active working plane overlay ──────────────────────────────────────
         if plane == WorkingPlane.XY and offset != 0.0:
@@ -2873,21 +2918,19 @@ class StructView(QGraphicsView):
         painter.drawEllipse(QPointF(ox, oy), 4.0 / scale, 4.0 / scale)
         painter.setBrush(QBrush())
 
-        # X arm — red
+        # X and Y labels — the axes themselves run across the floor (drawn above)
         xa, ya_x = isometric(arm_m, 0, 0)
-        painter.setPen(_axis3_pen(210, 60, 60))
-        painter.drawLine(QLineF(ox, oy, xa, ya_x))
+        painter.setPen(QPen(QColor(_theme.AXIS_X)))
         painter.drawText(QPointF(xa + 5 / scale, ya_x + 5 / scale), "X")
 
-        # Y arm — green
         ya_x2, ya_y2 = isometric(0, arm_m, 0)
-        painter.setPen(_axis3_pen(60, 190, 60))
-        painter.drawLine(QLineF(ox, oy, ya_x2, ya_y2))
+        painter.setPen(QPen(QColor(_theme.AXIS_Y)))
         painter.drawText(QPointF(ya_x2 - 14 / scale, ya_y2 + 5 / scale), "Y")
 
         # Z arm — blue (straight up in scene space)
         za_sx, za_sy = isometric(0, 0, arm_m)
-        painter.setPen(_axis3_pen(70, 110, 230))
+        _z = QColor(_theme.AXIS_Z)
+        painter.setPen(_axis3_pen(_z.red(), _z.green(), _z.blue()))
         painter.drawLine(QLineF(ox, oy, za_sx, za_sy))
         painter.drawText(QPointF(za_sx + 4 / scale, za_sy - 4 / scale), "Z")
 
@@ -2987,7 +3030,7 @@ class StructView(QGraphicsView):
     def _show_cube_menu(self, global_pt) -> None:
         """Right-click menu on the ViewCube: home, named views, set-as-home."""
         from PyQt6.QtWidgets import QMenu
-        from ui_qt.view_cube import NAMED_VIEWS
+        from ui_qt.nav_gizmo import NAMED_VIEWS
         vc = self._view_cube
         menu = QMenu(self)
         menu.addAction("Home View",
@@ -3015,16 +3058,16 @@ class StructView(QGraphicsView):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         ox, oy, L = cx - 6.0, cy + 10.0, 22.0
-        xpen = QPen(QColor("#FF4444")); xpen.setCosmetic(True); xpen.setWidthF(2.0)
+        xpen = QPen(QColor(_theme.AXIS_X)); xpen.setCosmetic(True); xpen.setWidthF(2.0)
         painter.setPen(xpen)
         painter.drawLine(QPointF(ox, oy), QPointF(ox + L, oy))      # X → right
-        ypen = QPen(QColor("#44EE44")); ypen.setCosmetic(True); ypen.setWidthF(2.0)
+        ypen = QPen(QColor(_theme.AXIS_Y)); ypen.setCosmetic(True); ypen.setWidthF(2.0)
         painter.setPen(ypen)
         painter.drawLine(QPointF(ox, oy), QPointF(ox, oy - L))      # Y ↑ up
         f = painter.font(); f.setPointSize(8); f.setBold(True); painter.setFont(f)
-        painter.setPen(QPen(QColor("#FF4444"))); painter.drawText(QPointF(ox + L + 2, oy + 4), "X")
-        painter.setPen(QPen(QColor("#44EE44"))); painter.drawText(QPointF(ox - 4, oy - L - 3), "Y")
-        painter.setPen(QPen(QColor("#00cccc"))); painter.drawText(QPointF(cx - 20, cy - 24), "2D")
+        painter.setPen(QPen(QColor(_theme.AXIS_X))); painter.drawText(QPointF(ox + L + 2, oy + 4), "X")
+        painter.setPen(QPen(QColor(_theme.AXIS_Y))); painter.drawText(QPointF(ox - 4, oy - L - 3), "Y")
+        painter.setPen(QPen(QColor(_theme.CYAN))); painter.drawText(QPointF(cx - 20, cy - 24), "2D")
         painter.restore()
 
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
