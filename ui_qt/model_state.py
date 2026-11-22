@@ -321,12 +321,30 @@ _SPRING_FIELDS = ("spring_kx", "spring_ky", "spring_ktheta", "spring_kz",
                   "spring_krx", "spring_kry", "spring_krz")
 
 
+SPRING_FOR_DOF: tuple[str, ...] = ("spring_kx", "spring_ky", "spring_kz",
+                                   "spring_krx", "spring_kry", "spring_ktheta")
+
+
+def planar_restraints(ux: bool, uy: bool, rz: bool) -> tuple[bool, ...]:
+    """Six flags for a support ticked in 2D, with sensible out-of-plane restraints for 3D:
+    out-of-plane translation held when any translation is, out-of-plane rotations only when
+    fully fixed.  Reproduces every preset (a wall roller becomes a vertical roller in 3D)."""
+    fixed = ux and uy and rz
+    return (bool(ux), bool(uy), bool(ux or uy), fixed, fixed, bool(rz))
+
+
 def classify_support(restraints: tuple[bool, ...], has_springs: bool,
                      spring_preset: bool = False) -> SupportType:
-    """The preset a set of restraints matches, CUSTOM if none; springs only on a free node."""
+    """The preset a set of restraints matches, CUSTOM if none.
+
+    A rigid preset has no springs, so restraints plus springs (a pin with a rotational
+    spring, say) is CUSTOM: the panel then shows both instead of hiding the springs.
+    """
     restraints = tuple(bool(r) for r in restraints)
     if not any(restraints):
         return SupportType.SPRING if (has_springs or spring_preset) else SupportType.FREE
+    if has_springs:
+        return SupportType.CUSTOM
     for preset, flags in SUPPORT_PRESETS.items():
         if flags == restraints and preset not in (SupportType.FREE, SupportType.SPRING):
             return preset

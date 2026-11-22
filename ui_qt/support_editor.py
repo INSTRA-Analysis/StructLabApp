@@ -1,0 +1,188 @@
+"""Support editor for the Properties panel: a preset plus per-axis restraints and springs.
+
+The preset combo (Free, Fixed, Pinned, rollers, Spring, Custom) is a shortcut that ticks the
+restraint boxes; ticking boxes yourself selects the matching preset, or Custom.  2D shows the
+in-plane freedoms (ux, uy, θz) and keeps sensible out-of-plane restraints for a later switch
+to 3D (``model_state.planar_restraints``); 3D shows all six.  A spring stiffness can be given
+on any free DOF.  Edits are written only when the support was actually changed, so editing a
+selection's loads never overwrites different supports.
+"""
+
+from __future__ import annotations
+
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (
+    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox, QLabel, QVBoxLayout,
+)
+
+from ui_qt.model_state import (
+    DOF_NAMES, PLANAR_DOFS, SPRING_FOR_DOF, SUPPORT_PRESETS, NodeData, SupportType,
+    classify_support, planar_restraints,
+)
+
+_PRESETS_2D = [
+    (SupportType.FREE, "Free"), (SupportType.FIXED, "Fixed"), (SupportType.PIN, "Pinned"),
+    (SupportType.ROLLER, "Roller, free in X (horizontal)"),
+    (SupportType.ROLLER_Y, "Roller, free in Y (vertical)"),
+    (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
+]
+_PRESETS_3D = [
+    (SupportType.FREE, "Free"), (SupportType.FIXED, "Fixed"), (SupportType.PIN, "Pinned"),
+    (SupportType.ROLLER, "Roller, free in X"), (SupportType.ROLLER_Y, "Roller, free in Y"),
+    (SupportType.ROLLER_Z, "Roller, free in Z (vertical)"),
+    (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
+]
+_AXIS = ("X", "Y", "Z", "X", "Y", "Z")
+_LABEL_2D = {0: "ux →", 1: "uy ↑", 5: "θz"}
+
+
+def _spring_spin(value: float) -> QDoubleSpinBox:
+    w = QDoubleSpinBox()
+    w.setRange(0.0, 1e12)
+    w.setSingleStep(1e5)
+    w.setDecimals(0)
+    w.setValue(value)
+    return w
+
+
+class SupportEditor(QGroupBox):
+    """Edits the support of one node, or of a selection (shown from the first node)."""
+
+    changed = pyqtSignal()
+
+    def __init__(self, nodes: list[NodeData], is_2d: bool, parent=None) -> None:
+        super().__init__("Support", parent)
+        self._is_2d = is_2d
+        self._dofs = PLANAR_DOFS if is_2d else tuple(range(6))
+        self._syncing = False
+        self.touched = False
+        first = nodes[0]
+        lay = QVBoxLayout(self)
+
+        self.combo = QComboBox()
+        for preset, text in (_PRESETS_2D if is_2d else _PRESETS_3D):
+            self.combo.addItem(text, preset)
+        lay.addWidget(self.combo)
+
+        lay.addWidget(QLabel("Restrained:"))
+        grid = QGridLayout()
+        self.boxes: dict[int, QCheckBox] = {}
+        for k, dof in enumerate(self._dofs):
+            box = QCheckBox(_LABEL_2D[dof] if is_2d else DOF_NAMES[dof])
+            kind = "translation along" if dof < 3 else "rotation about"
+            box.setToolTip(f"Restrain the {kind} global {_AXIS[dof]}")
+            box.setChecked(first.restraints[dof])
+            box.toggled.connect(self._on_box)
+            row, col = (0, k) if is_2d else divmod(k, 3)
+            grid.addWidget(box, row, col)
+            self.boxes[dof] = box
+        lay.addLayout(grid)
+
+        self.spring_group = QGroupBox("Spring stiffness on free DOFs")
+        form = QFormLayout(self.spring_group)
+        self.springs: dict[int, QDoubleSpinBox] = {}
+        for dof in self._dofs:
+            spin = _spring_spin(getattr(first, SPRING_FOR_DOF[dof]))
+            spin.valueChanged.connect(self._on_spring)
+            unit = "N/m" if dof < 3 else "N·m/rad"
+            name = _LABEL_2D[dof].split()[0] if is_2d else DOF_NAMES[dof]
+            form.addRow(f"k {name} ({unit}):", spin)
+            self.springs[dof] = spin
+        lay.addWidget(self.spring_group)
+
+        if any(n.restraints != first.restraints or n.support_type != first.support_type for n in nodes[1:]):
+            note = QLabel(f"<small>The selected nodes differ: showing node {first.id}. "
+                          "Change the support to apply it to all.</small>")
+            note.setWordWrap(True)
+            lay.addWidget(note)
+
+        lay.addStretch(1)                                # keep the rows packed at the top
+        self._show_preset(first.support_type)
+        self.combo.currentIndexChanged.connect(self._on_preset)
+        self._refresh_springs()
+
+    # ── state ────────────────────────────────────────────────────────────────
+
+    def preset(self) -> SupportType:
+        return self.combo.currentData()
+
+    def flags(self) -> tuple[bool, ...]:
+        """The six restraint flags the ticks describe (2D adds the out-of-plane ones)."""
+        if self._is_2d:
+            return planar_restraints(*(self.boxes[d].isChecked() for d in PLANAR_DOFS))
+        return tuple(self.boxes[d].isChecked() for d in range(6))
+
+    def spring_values(self) -> dict[int, float]:
+        """Stiffness per shown DOF; zero where the DOF is restrained."""
+        flags = self.flags()
+        return {d: (0.0 if flags[d] else spin.value()) for d, spin in self.springs.items()}
+
+    # ── syncing the combo, the ticks and the springs ─────────────────────────
+
+    def _show_preset(self, preset: SupportType) -> None:
+        index = self.combo.findData(preset)
+        self._syncing = True
+        self.combo.setCurrentIndex(index if index >= 0 else self.combo.findData(SupportType.CUSTOM))
+        self._syncing = False
+
+    def _on_preset(self) -> None:
+        if self._syncing:
+            return
+        self.touched = True
+        preset = self.preset()
+        if preset is not SupportType.CUSTOM:
+            self._syncing = True
+            for dof, box in self.boxes.items():
+                box.setChecked(SUPPORT_PRESETS[preset][dof])
+            if preset is not SupportType.SPRING:
+                for spin in self.springs.values():
+                    spin.setValue(0.0)
+            self._syncing = False
+        self._refresh_springs()
+        self.changed.emit()
+
+    def _on_box(self) -> None:
+        if self._syncing:
+            return
+        self.touched = True
+        self._reclassify()
+
+    def _on_spring(self) -> None:
+        if self._syncing:
+            return
+        self.touched = True
+        self._reclassify()
+
+    def _reclassify(self) -> None:
+        has_springs = any(v > 0 for v in self.spring_values().values())
+        self._show_preset(classify_support(self.flags(), has_springs,
+                                           spring_preset=self.preset() is SupportType.SPRING))
+        self._refresh_springs()
+        self.changed.emit()
+
+    def _refresh_springs(self) -> None:
+        preset = self.preset()
+        flags = self.flags()
+        show = preset in (SupportType.SPRING, SupportType.CUSTOM) or any(
+            s.value() > 0 for s in self.springs.values())
+        self.spring_group.setVisible(show)
+        for dof, spin in self.springs.items():
+            spin.setEnabled(not flags[dof])
+
+    # ── writing back ─────────────────────────────────────────────────────────
+
+    def apply_to(self, node: NodeData) -> None:
+        """Write the edited support to ``node`` (nothing if the support was not changed)."""
+        if not self.touched:
+            return
+        preset = self.preset()
+        if preset not in (SupportType.SPRING, SupportType.CUSTOM):
+            node.support_type = preset                   # flags from the preset, springs cleared
+            return
+        if preset is SupportType.SPRING:
+            node.support_type = SupportType.SPRING
+        else:
+            node.set_restraints(self.flags())
+            node._spring_preset = False
+        for dof, value in self.spring_values().items():
+            setattr(node, SPRING_FOR_DOF[dof], value)

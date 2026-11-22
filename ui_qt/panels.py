@@ -154,7 +154,8 @@ class PropertiesPanel(QWidget):
                                   self.divide_callback))
 
     def show_nodes(self, nodes: list) -> None:
-        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply))
+        is_2d = bool(self._model_state and self._model_state.is_2d)
+        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply, is_2d=is_2d))
 
     def show_members(self, members: list) -> None:
         self._replace(_MultiMemberForm(members, self._model_state, self._on_apply))
@@ -218,35 +219,10 @@ class _NodeForm(QWidget):
             form.addRow("z (m):", self._z)
         layout.addWidget(coord_box)
 
-        # ── support ──────────────────────────────────────────────────────────
-        sup_box = QGroupBox("Support")
-        sup_layout = QVBoxLayout(sup_box)
-        self._sup_combo = QComboBox()
-        self._sup_names = ["FREE","FIXED","PIN","ROLLER","ROLLER_Y","ROLLER_Z","SPRING"]
-        self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
-        _cur = node.support_type.name
-        _cur_idx = self._sup_names.index(_cur) if _cur in self._sup_names else 0
-        self._sup_combo.setCurrentIndex(_cur_idx)
-        self._sup_combo.currentIndexChanged.connect(self._toggle_spring)
-        sup_layout.addWidget(self._sup_combo)
-
-        self._spring_group = QGroupBox("Spring stiffness")
-        sg = QFormLayout(self._spring_group)
-        self._kx    = _spin(node.spring_kx,     0, 1e12, 1e5, 0)
-        self._ky    = _spin(node.spring_ky,     0, 1e12, 1e5, 0)
-        self._kz    = _spin(node.spring_kz,     0, 1e12, 1e5, 0)
-        self._kth   = _spin(node.spring_ktheta, 0, 1e12, 1e5, 0)
-        self._krx   = _spin(node.spring_krx,    0, 1e12, 1e5, 0)
-        self._kry   = _spin(node.spring_kry,    0, 1e12, 1e5, 0)
-        sg.addRow("k_x (N/m):",      self._kx)
-        sg.addRow("k_y (N/m):",      self._ky)
-        sg.addRow("k_z (N/m):",      self._kz)
-        sg.addRow("k_θz (N·m/rad):", self._kth)
-        sg.addRow("k_rx (N·m/rad):", self._krx)
-        sg.addRow("k_ry (N·m/rad):", self._kry)
-        sup_layout.addWidget(self._spring_group)
-        layout.addWidget(sup_box)
-        self._toggle_spring()
+        # ── support: preset + per-axis restraints + springs ───────────────────
+        from ui_qt.support_editor import SupportEditor
+        self.support_editor = SupportEditor([node], is_2d)
+        layout.addWidget(self.support_editor)
 
         # ── applied loads (read from active load case) ────────────────────────
         nl = load_case.get_node_load(node.id) if load_case else NodeLoad()
@@ -276,22 +252,12 @@ class _NodeForm(QWidget):
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
 
-    def _toggle_spring(self) -> None:
-        is_spring = self._sup_combo.currentText() == "Spring"
-        self._spring_group.setVisible(is_spring)
-
     def _apply(self) -> None:
         node = self._node
         node.x = self._x.value()
         node.y = self._y.value()
         node.z = self._z.value()
-        node.support_type  = SupportType[self._sup_names[self._sup_combo.currentIndex()]]
-        node.spring_kx     = self._kx.value()
-        node.spring_ky     = self._ky.value()
-        node.spring_kz     = self._kz.value()
-        node.spring_ktheta = self._kth.value()
-        node.spring_krx    = self._krx.value()
-        node.spring_kry    = self._kry.value()
+        self.support_editor.apply_to(node)
         if self._load_case is not None:
             self._load_case.set_node_load(node.id, NodeLoad(
                 fx=self._fx.value() * 1e3,
@@ -1431,7 +1397,7 @@ class _MultiNodeForm(QWidget):
     """Edit shared support and load properties across multiple selected nodes."""
 
     def __init__(self, nodes: list, load_case: LoadCase | None,
-                 on_apply) -> None:
+                 on_apply, is_2d: bool = False) -> None:
         super().__init__()
         self._nodes     = nodes
         self._load_case = load_case
@@ -1446,36 +1412,10 @@ class _MultiNodeForm(QWidget):
         hdr.setWordWrap(True)
         layout.addWidget(hdr)
 
-        # ── support ───────────────────────────────────────────────────────
-        sup_box = QGroupBox("Support")
-        sup_layout = QVBoxLayout(sup_box)
-        self._sup_combo = QComboBox()
-        self._sup_names = ["FREE", "FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"]
-        self._sup_combo.addItems(["Free", "Fixed", "Pinned", "Roller (vert)", "Roller (horiz)", "Roller (Z)", "Spring"])
-        all_same_sup = all(n.support_type == first.support_type for n in nodes)
-        _cur = first.support_type.name
-        _cur_idx = self._sup_names.index(_cur) if (all_same_sup and _cur in self._sup_names) else 0
-        self._sup_combo.setCurrentIndex(_cur_idx)
-        self._sup_combo.currentIndexChanged.connect(self._toggle_spring)
-        sup_layout.addWidget(self._sup_combo)
-
-        self._spring_group = QGroupBox("Spring stiffness")
-        sg = QFormLayout(self._spring_group)
-        self._kx  = _spin(first.spring_kx,     0, 1e12, 1e5, 0)
-        self._ky  = _spin(first.spring_ky,     0, 1e12, 1e5, 0)
-        self._kz  = _spin(first.spring_kz,     0, 1e12, 1e5, 0)
-        self._kth = _spin(first.spring_ktheta, 0, 1e12, 1e5, 0)
-        self._krx = _spin(first.spring_krx,    0, 1e12, 1e5, 0)
-        self._kry = _spin(first.spring_kry,    0, 1e12, 1e5, 0)
-        sg.addRow("k_x (N/m):",      self._kx)
-        sg.addRow("k_y (N/m):",      self._ky)
-        sg.addRow("k_z (N/m):",      self._kz)
-        sg.addRow("k_θz (N·m/rad):", self._kth)
-        sg.addRow("k_rx (N·m/rad):", self._krx)
-        sg.addRow("k_ry (N·m/rad):", self._kry)
-        sup_layout.addWidget(self._spring_group)
-        layout.addWidget(sup_box)
-        self._toggle_spring()
+        # ── support: preset + per-axis restraints + springs ───────────────
+        from ui_qt.support_editor import SupportEditor
+        self.support_editor = SupportEditor(nodes, is_2d)
+        layout.addWidget(self.support_editor)
 
         # ── applied loads (read from active load case for first node) ─────
         first_nl = load_case.get_node_load(first.id) if load_case else NodeLoad()
@@ -1499,17 +1439,7 @@ class _MultiNodeForm(QWidget):
         btn.clicked.connect(self._apply)
         layout.addWidget(btn)
 
-    def _toggle_spring(self) -> None:
-        self._spring_group.setVisible(self._sup_combo.currentText() == "Spring")
-
     def _apply(self) -> None:
-        sup_type = SupportType[self._sup_names[self._sup_combo.currentIndex()]]
-        kx  = self._kx.value()
-        ky  = self._ky.value()
-        kz  = self._kz.value()
-        kth = self._kth.value()
-        krx = self._krx.value()
-        kry = self._kry.value()
         fx  = self._fx.value() * 1e3
         fy  = self._fy.value() * 1e3
         fz  = self._fz.value() * 1e3
@@ -1517,13 +1447,7 @@ class _MultiNodeForm(QWidget):
         mx  = self._mx.value() * 1e3
         my  = self._my.value() * 1e3
         for nd in self._nodes:
-            nd.support_type  = sup_type
-            nd.spring_kx     = kx
-            nd.spring_ky     = ky
-            nd.spring_kz     = kz
-            nd.spring_ktheta = kth
-            nd.spring_krx    = krx
-            nd.spring_kry    = kry
+            self.support_editor.apply_to(nd)            # only if the support was changed
             if self._load_case is not None:
                 self._load_case.set_node_load(nd.id, NodeLoad(
                     fx=fx, fy=fy, fz=fz, moment=m, moment_x=mx, moment_y=my
