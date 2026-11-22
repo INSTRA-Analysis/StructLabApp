@@ -25,6 +25,15 @@ def test_mark_svg_is_valid_and_renders(qapp):
     assert 0.2 < share < 0.9                     # drawn, on a transparent ground
 
 
+def test_mark_survives_its_cached_renderer_being_deleted(qapp):
+    """Regression: the cached QSvgRenderer died with a torn-down QApplication and the next
+    window crashed (RuntimeError: wrapped C/C++ object has been deleted)."""
+    from PyQt6 import sip
+    from ui_qt import brand
+    sip.delete(brand._mark_renderer())
+    assert not brand.mark_pixmap(32).isNull()
+
+
 def test_hub_is_cyan_and_the_corners_are_clear(qapp):
     from ui_qt.brand import mark_pixmap
     img = mark_pixmap(64).toImage()

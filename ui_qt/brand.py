@@ -23,8 +23,10 @@ _renderer: QSvgRenderer | None = None
 
 
 def _mark_renderer() -> QSvgRenderer:
+    """Cached renderer, rebuilt if Qt deleted it (e.g. with a QApplication that was torn down)."""
+    from PyQt6 import sip
     global _renderer
-    if _renderer is None:
+    if _renderer is None or sip.isdeleted(_renderer):
         _renderer = QSvgRenderer(str(MARK_SVG))
     return _renderer
 
