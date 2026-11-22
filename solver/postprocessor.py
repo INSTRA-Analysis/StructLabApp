@@ -119,6 +119,57 @@ class SFDBMDResult:
     M: np.ndarray   # bending moment M_z at each x (N·m)
 
 
+def bending_profile(
+    end_forces: np.ndarray,
+    element_loads: list[ElementLoad],
+    length: float,
+    x: np.ndarray,
+    plane: str = "z",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Exact shear V(x) and moment M(x) along one element in one bending plane.
+
+    ``end_forces`` is an ElementResult's vector (6 entries in 2D, 12 in 3D, moments at
+    node i already in the sagging convention).  ``plane`` "z" is bending about local z
+    (V_y, M_z, loads along LOCAL_Y: the only plane in 2D); "y" is bending about local y
+    (V_z, M_y, loads along LOCAL_Z), whose moment slope is −V_z.  Every element load type
+    is included: UDL, UVL, point force and point moment (a step in M at its position, so
+    sample both sides of it to draw the step).  M(L) equals the solver's j-end moment.
+    """
+    f = end_forces
+    x = np.asarray(x, dtype=float)
+    if len(f) == 12 and plane == "y":
+        m0, v0, slope_sign, direction = f[4], f[2], -1.0, LoadDirection.LOCAL_Z
+    elif len(f) == 12:
+        m0, v0, slope_sign, direction = f[5], f[1], 1.0, LoadDirection.LOCAL_Y
+    else:
+        m0, v0, slope_sign, direction = f[2], f[1], 1.0, LoadDirection.LOCAL_Y
+    V = np.full_like(x, v0)
+    M = m0 + slope_sign * v0 * x
+    for load in element_loads:
+        if load.direction != direction:
+            continue
+        if load.load_type == LoadType.UDL:
+            w = load.magnitude                               # positive = downward
+            V = V - w * x
+            M = M - slope_sign * w * x ** 2 / 2
+        elif load.load_type == LoadType.UVL:
+            w1, w2 = load.magnitude, load.position           # w at i and at j
+            V = V - w1 * x - (w2 - w1) * x ** 2 / (2 * length)
+            M = M - slope_sign * (w1 * x ** 2 / 2 + (w2 - w1) * x ** 3 / (6 * length))
+        elif load.load_type == LoadType.POINT_FORCE:
+            beyond = x >= load.position
+            V = np.where(beyond, V - load.magnitude, V)
+            M = np.where(beyond, M - slope_sign * load.magnitude * (x - load.position), M)
+        elif load.load_type == LoadType.POINT_MOMENT:
+            M = np.where(x >= load.position, M + _POINT_MOMENT_STEP * load.magnitude, M)
+    return V, M
+
+
+# Sign of the step a point moment makes in M (fixed by the FEF convention in fem_loads;
+# pinned by tests/test_bending_profile.py, which checks M(L) against the solver).
+_POINT_MOMENT_STEP = -1.0
+
+
 class Postprocessor:
     """Back-substitute displacements to recover internal element forces."""
 

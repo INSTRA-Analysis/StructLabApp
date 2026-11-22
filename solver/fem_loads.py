@@ -43,38 +43,40 @@ def _correct_for_pins(f: np.ndarray, L: float,
     if is_3d:
         # 3D: two independent bending planes to correct
         # xy-plane bending about z: V_y(1,7), M_z(5,11)
-        # xz-plane bending about y: V_z(2,8), M_y(4,10)
-        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=1, m_i=5, v_j=7, m_j=11)
-        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=2, m_i=4, v_j=8, m_j=10)
+        # xz-plane bending about y: V_z(2,8), M_y(4,10) — opposite moment sign (θ_y = −dw/dx)
+        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=1, m_i=5, v_j=7, m_j=11, sign=1.0)
+        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=2, m_i=4, v_j=8, m_j=10, sign=-1.0)
     else:
         # 2D: single bending plane
-        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=1, m_i=2, v_j=4, m_j=5)
+        _pin_correct_plane(f_out, L, pin_i, pin_j, v_i=1, m_i=2, v_j=4, m_j=5, sign=1.0)
 
     return f_out
 
 
 def _pin_correct_plane(f: np.ndarray, L: float,
                        pin_i: bool, pin_j: bool,
-                       v_i: int, m_i: int, v_j: int, m_j: int) -> None:
-    """Correct FEF for one bending plane (in-place)."""
+                       v_i: int, m_i: int, v_j: int, m_j: int, sign: float) -> None:
+    """Correct FEF for one bending plane (in-place).
+
+    Releasing an end moment M distributes −M to that end and, through the far end's
+    carry-over factor ½, −M/2 to a fixed far end (none when both ends are released).  The
+    end moments change by ΔM_i, ΔM_j, so the end shears change by ±(ΔM_i + ΔM_j)/L
+    (``sign`` +1 in the x-y plane, −1 in the x-z plane), keeping the element in equilibrium.
+    """
     M_i = f[m_i]
     M_j = f[m_j]
 
     if pin_i and pin_j:
-        f[v_i] = (f[v_i] * L + M_i - M_j) / L
-        f[v_j] = (f[v_j] * L - M_i + M_j) / L
-        f[m_i] = 0.0
-        f[m_j] = 0.0
+        dM_i, dM_j = -M_i, -M_j
     elif pin_j:
-        f[m_i] = M_i - 0.5 * M_j
-        f[m_j] = 0.0
-        f[v_i] = f[v_i] + f[m_i] / L
-        f[v_j] = f[v_j] - f[m_i] / L
-    elif pin_i:
-        f[m_j] = M_j - 0.5 * M_i
-        f[m_i] = 0.0
-        f[v_i] = f[v_i] + f[m_j] / L
-        f[v_j] = f[v_j] - f[m_j] / L
+        dM_i, dM_j = -0.5 * M_j, -M_j
+    else:                                    # pin_i only
+        dM_i, dM_j = -M_i, -0.5 * M_i
+    dV = sign * (dM_i + dM_j) / L
+    f[m_i] = M_i + dM_i
+    f[m_j] = M_j + dM_j
+    f[v_i] += dV
+    f[v_j] -= dV
 
 
 def _check_direction(load: ElementLoad, is_3d: bool) -> None:
@@ -156,10 +158,11 @@ def _fef_2d(load: ElementLoad, L: float, pin_i: bool, pin_j: bool) -> np.ndarray
     elif load.load_type == LoadType.UVL:
         w1 = load.magnitude
         w2 = load.position
+        # Same sign pattern as the UDL (w1 = w2 = w reproduces it exactly).
         f[1] =  L * (7 * w1 + 3 * w2) / 20
-        f[2] = -L**2 * (3 * w1 + 2 * w2) / 60
+        f[2] =  L**2 * (3 * w1 + 2 * w2) / 60
         f[4] =  L * (3 * w1 + 7 * w2) / 20
-        f[5] =  L**2 * (2 * w1 + 3 * w2) / 60
+        f[5] = -L**2 * (2 * w1 + 3 * w2) / 60
 
     if pin_i or pin_j:
         f = _correct_for_pins(f, L, pin_i, pin_j, is_3d=False)
@@ -226,15 +229,16 @@ def _fef_3d(load: ElementLoad, L: float, pin_i: bool, pin_j: bool) -> np.ndarray
         w1 = load.magnitude
         w2 = load.position
         if load.direction.name in ("LOCAL_Y",):
+            # Same sign pattern as the UDL in each plane (w1 = w2 reproduces it).
             f[1] =  L * (7 * w1 + 3 * w2) / 20
-            f[5] = -L**2 * (3 * w1 + 2 * w2) / 60
+            f[5] =  L**2 * (3 * w1 + 2 * w2) / 60
             f[7] =  L * (3 * w1 + 7 * w2) / 20
-            f[11] =  L**2 * (2 * w1 + 3 * w2) / 60
+            f[11] = -L**2 * (2 * w1 + 3 * w2) / 60
         else:
             f[2] =  L * (7 * w1 + 3 * w2) / 20
-            f[4] =  L**2 * (3 * w1 + 2 * w2) / 60
+            f[4] = -L**2 * (3 * w1 + 2 * w2) / 60
             f[8] =  L * (3 * w1 + 7 * w2) / 20
-            f[10] = -L**2 * (2 * w1 + 3 * w2) / 60
+            f[10] =  L**2 * (2 * w1 + 3 * w2) / 60
 
     if pin_i or pin_j:
         f = _correct_for_pins(f, L, pin_i, pin_j, is_3d=True)
