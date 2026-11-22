@@ -73,10 +73,13 @@ def _node_scene(model: "Model", node_id: int) -> tuple[float, float]:
 
 
 def _find_element(model: "Model", element_id: int):
-    for el in model.elements:
-        if el.id == element_id:
-            return el
-    return None
+    """Element by id, from a lookup built once per model (a linear search here made the
+    axial-force overlay quadratic in the number of elements)."""
+    cached = getattr(model, "_elements_by_id_cache", None)
+    if cached is None or cached[0] != len(model.elements):
+        cached = (len(model.elements), {el.id: el for el in model.elements})
+        model._elements_by_id_cache = cached
+    return cached[1].get(element_id)
 
 
 
@@ -130,26 +133,18 @@ def compute_auto_scales(
 
     median_span_px = float(np.median(spans_px)) if spans_px else PX_PER_M
 
-    # Diagram scale: based on maximum |M| across all sub-results
+    # Diagram scale: based on maximum |M| across all sub-results (exact along each element;
+    # one pass over the loads and a dict lookup, not a search per element).
+    el_by_id = {el.id: el for el in model.elements}
+    load_map: dict[int, list] = {}
+    for eload in model.element_loads:
+        load_map.setdefault(eload.element_id, []).append(eload)
     max_M = 0.0
     for res in sub_results:
-        el = _find_element(model, res.element_id)
+        el = el_by_id.get(res.element_id)
         if el is None:
             continue
-        ni = _nodes_by_id(model)[el.node_i.id]
-        nj = _nodes_by_id(model)[el.node_j.id]
-        L  = math.hypot(nj.x - ni.x, nj.y - ni.y)
-        # Sample M(x) at 20 points to find true maximum (UDL produces mid-span peak)
-        xs = np.linspace(0.0, L, 20)
-        M_vals = res.M_i + res._bmd_V_i * xs
-        for eload in model.element_loads:
-            if eload.element_id == res.element_id:
-                from core.load import LoadType
-                if eload.load_type == LoadType.UDL:
-                    M_vals = M_vals - eload.magnitude * xs ** 2 / 2
-                elif eload.load_type == LoadType.UVL:
-                    w1, w2 = eload.magnitude, eload.position
-                    M_vals = M_vals - w1 * xs**2 / 2 - (w2 - w1) * xs**3 / (6 * L)
+        _, _, M_vals = _sub_profile(res, el, load_map.get(res.element_id, []))
         max_M = max(max_M, float(np.max(np.abs(M_vals))))
 
     if max_M > 0.0:
@@ -272,6 +267,21 @@ def _member_scene_geometry(
     return ix_s, iy_s, jx_s, jy_s, L_px, cos_s, sin_s, perp_x, perp_y, L_total
 
 
+def _sub_profile(res, el, loads) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(x, V, M) along one sub-element, exact for every load type, sampled on both sides of
+    point loads (solver.postprocessor.bending_profile / sample_points)."""
+    from solver.postprocessor import bending_profile, sample_points
+    xs = sample_points(el.length, loads)
+    plane = "y" if res.is_3d and res._weak_plane else "z"
+    V, M = bending_profile(res.end_forces, loads, el.length, xs, plane)
+    return xs, V, M
+
+
+def _bmd_shear(res, V: np.ndarray) -> np.ndarray:
+    """The shear drawn on the SFD: dM/dx of the plotted moment (−V_z in the x-z plane)."""
+    return -V if res.is_3d and res._weak_plane else V
+
+
 def _stitch_M(
     el_ids: list[int],
     res_by_id: dict,
@@ -279,7 +289,6 @@ def _stitch_M(
     load_map: dict,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (t_norm, M_vals) stitched across all sub-elements, t in [0,1]."""
-    from core.load import LoadType
     all_t: list[float] = []
     all_M: list[float] = []
     x_acc = 0.0
@@ -293,14 +302,7 @@ def _stitch_M(
         if res is None or el is None:
             continue
         L_sub = el.length
-        xs    = np.linspace(0.0, L_sub, 12)
-        M_sub = res.M_i + res._bmd_V_i * xs
-        for eload in load_map.get(el_id, []):
-            if eload.load_type == LoadType.UDL:
-                M_sub = M_sub - eload.magnitude * xs ** 2 / 2
-            elif eload.load_type == LoadType.UVL:
-                w1, w2 = eload.magnitude, eload.position
-                M_sub = M_sub - w1 * xs**2 / 2 - (w2 - w1) * xs**3 / (6 * L_sub)
+        xs, _, M_sub = _sub_profile(res, el, load_map.get(el_id, []))
         t_vals = (x_acc + xs) / L_total
         # exclude last point on all but final sub-element to avoid duplication
         end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
@@ -371,11 +373,9 @@ def _stitch_V(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (t_norm, V_vals) stitched across all sub-elements, t in [0,1].
 
-    V(x) = _bmd_V_i - w*x is the derivative of M(x) = M_i + _bmd_V_i*x - w*x²/2.
-    FEM equilibrium at internal nodes guarantees _bmd_V_i(k+1) = _bmd_V_i(k) - w*L(k),
-    so the stitched profile is continuous with no stagger at sub-element boundaries.
+    V is dM/dx of the drawn moment (``_bmd_shear``), exact for every load type; equilibrium
+    at the sub-nodes keeps the stitched profile continuous except at point loads.
     """
-    from core.load import LoadType
     all_t: list[float] = []
     all_V: list[float] = []
     x_acc = 0.0
@@ -389,14 +389,8 @@ def _stitch_V(
         if res is None or el is None:
             continue
         L_sub = el.length
-        xs    = np.linspace(0.0, L_sub, 12)
-        V_sub = np.full(len(xs), res._bmd_V_i)
-        for eload in load_map.get(el_id, []):
-            if eload.load_type == LoadType.UDL:
-                V_sub = V_sub - eload.magnitude * xs
-            elif eload.load_type == LoadType.UVL:
-                w1, w2 = eload.magnitude, eload.position
-                V_sub = V_sub - w1 * xs - (w2 - w1) * xs**2 / (2 * L_sub)
+        xs, V_sub, _ = _sub_profile(res, el, load_map.get(el_id, []))
+        V_sub = _bmd_shear(res, V_sub)
         t_vals = (x_acc + xs) / L_total
         end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
         all_t.extend(t_vals[:end].tolist())

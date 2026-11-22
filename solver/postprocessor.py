@@ -260,29 +260,19 @@ class Postprocessor:
     def _vm_along_element(
         self, el: FrameElement, er: ElementResult, x: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Compute V(x) and M(x) along element from end forces and element loads."""
-        V = np.full_like(x, er.V_i)
-        M = er.M_i + er._bmd_V_i * x
+        """V(x) and M(x) along the element, in the plane its results are reported in
+        (``ElementResult._weak_plane`` in 3D), with every element load included."""
+        plane = "y" if er.is_3d and er._weak_plane else "z"
+        return bending_profile(er.end_forces, self._load_map.get(el.id, []), el.length, x, plane)
 
-        # 3D: the diagram is drawn in one bending plane (see ElementResult._weak_plane);
-        # only element loads acting in that plane contribute. In the x-z plane the
-        # moment slope is -V_z, so the load terms enter M with the opposite sign.
-        weak = er.is_3d and er._weak_plane
-        plane = LoadDirection.LOCAL_Z if weak else LoadDirection.LOCAL_Y
-        m_sign = -1.0 if weak else 1.0
 
-        for eload in self._load_map.get(el.id, []):
-            if er.is_3d and eload.direction != plane:
-                continue
-            if eload.load_type == LoadType.UDL:
-                w = eload.magnitude  # positive = downward
-                V -= w * x
-                M -= m_sign * w * x**2 / 2
-            elif eload.load_type == LoadType.POINT_FORCE:
-                P = eload.magnitude   # positive = downward
-                a = eload.position    # m from node_i
-                mask = x >= a
-                V[mask] -= P
-                M[mask] -= m_sign * P * (x[mask] - a)
-
-        return V, M
+def sample_points(length: float, loads: list[ElementLoad], n: int = 12) -> np.ndarray:
+    """Positions along an element for drawing its V / M: ``n`` even points plus both sides of
+    every point load, so a kink or a step is drawn where the load is, not smoothed away."""
+    xs = list(np.linspace(0.0, length, n))
+    eps = 1e-9 * max(length, 1.0)
+    for load in loads:
+        if load.load_type in (LoadType.POINT_FORCE, LoadType.POINT_MOMENT) \
+                and 0.0 < load.position < length:
+            xs += [load.position - eps, load.position]
+    return np.array(sorted(xs))
