@@ -7,11 +7,9 @@ by name). Section/material data comes from the caller (wizards.py resolves
 it via section_library.py's full profile library) — this module only builds
 geometry and applies whatever properties it's given.
 
-Convention (must match the auto-detecting engine):
-  * **2D presets** keep every node at z = 0 → the engine analyses them in
-    2D mode (3 DOF/node), with **Y vertical**. Downward loads are fy < 0.
-  * **3D presets** set ``mode_3d`` and use a non-zero z → 6 DOF/node, with
-    **Z vertical**. Downward loads are fz < 0.
+Convention: every wizard builds a 3D model with **Z vertical** in the XZ plane (y = 0),
+analysed as a **plane frame** (``analysis_type = "plane_xz"``). Downward loads are fz < 0;
+member 'w' loads act downward on beams.
 """
 
 from __future__ import annotations
@@ -32,6 +30,14 @@ def _apply_min_reinforcement(m: MemberData) -> None:
     if m.b_sec > 0.0 and m.d_eff > 0.0:
         m.As_tension = min_reinforcement_area(m.b_sec, m.d_eff, m.fy, m.fyk)
         m.reinforcement_estimated = True
+
+def _plane_frame() -> ModelState:
+    """Every wizard builds a frame in the XZ plane (y = 0, Z up): analysed as a plane frame
+    (uy, θx, θz held at every node), so a pinned-base portal has no out-of-plane mechanism."""
+    s = ModelState()
+    s.analysis_type = "plane_xz"
+    return s
+
 
 # ── Material constants ────────────────────────────────────────────────────────
 _E_C30  = 32_000_000_000.0     # Pa — Ecm for C30/37
@@ -87,7 +93,7 @@ def frame_wizard(n_bays: int, n_stories: int,
     density: kg/m3 — must be concrete-range (~2500) for the Design tab to
     run the concrete check instead of misreading the member as steel.
     """
-    s = ModelState()
+    s = _plane_frame()
     base_sup = SupportType.FIXED if fixed_base else SupportType.PIN
     node_grid: list[list[NodeData]] = []
     for story in range(n_stories + 1):
@@ -143,7 +149,7 @@ def beam_wizard(
                    (Design tab shows "N/A" for bending until a real profile is set).
     b_sec, h_sec:  concrete section width/depth [m]; 0 = not concrete.
     """
-    s = ModelState()
+    s = _plane_frame()
     s.load_cases[0].name = "Permanent (G)"
     lc_g = s.load_cases[0]
     needs_q = udl_q > 0.0 or point_q > 0.0
@@ -216,7 +222,7 @@ def portal_wizard(
     frames, or the Design tab infers "steel" from density=0 and shows the
     wrong capacity check regardless of col_b_sec/h_sec being set.
     """
-    s = ModelState()
+    s = _plane_frame()
     s.load_cases[0].name = "Permanent (G)"
     lc_g = s.load_cases[0]
     lc_q = s.add_load_case("Variable (Q)", category="Q") if udl_q > 0.0 else None
@@ -281,7 +287,7 @@ def truss_wizard(
     chord_fy/web_fy: steel yield strength [Pa] — Design tab's axial capacity
                    check, independent per role since chord/web may differ.
     """
-    s = ModelState()
+    s = _plane_frame()
     s.load_cases[0].name = "Panel Loads (Q)"
     s.load_cases[0].category = "Q"
     lc_q = s.load_cases[0]
