@@ -59,16 +59,10 @@ _Z_LABEL    = 4.0   # text labels
 # Utility helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _model_to_scene(x: float, y: float) -> tuple[float, float]:
-    return x * PX_PER_M, -y * PX_PER_M
-
-
 def _node_to_scene(node, model: "Model") -> tuple[float, float]:
-    """Return (scene_x, scene_y) using isometric projection for 3D models."""
-    if model.is_3d:
-        from ui_qt.projection import isometric
-        return isometric(node.x, node.y, node.z)
-    return _model_to_scene(node.x, node.y)
+    """(scene_x, scene_y) of a node: its isometric projection (the canvas holds 3D models)."""
+    from ui_qt.projection import isometric
+    return isometric(node.x, node.y, node.z)
 
 
 def _node_scene(model: "Model", node_id: int) -> tuple[float, float]:
@@ -84,17 +78,6 @@ def _find_element(model: "Model", element_id: int):
             return el
     return None
 
-
-def _make_T6(angle: float) -> np.ndarray:
-    """Standard 6×6 rotation matrix for a 2-D frame element."""
-    c = math.cos(angle)
-    s = math.sin(angle)
-    T = np.zeros((6, 6))
-    for b in (0, 3):
-        T[b,     b]     =  c;  T[b,     b + 1] =  s
-        T[b + 1, b]     = -s;  T[b + 1, b + 1] =  c
-        T[b + 2, b + 2] = 1.0
-    return T
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,7 +210,7 @@ def _member_scene_geometry(
     keeps the BMD/SFD fixed in the plane of bending regardless of the orbit
     angle — a gravity-loaded horizontal beam always draws its diagram below itself.
 
-    For 2D members the classical screen-space perpendicular is used (unchanged).
+    When local y points straight at the viewer, the screen-space perpendicular is used.
     """
     first_el = el_by_id.get(el_ids[0])
     last_el  = el_by_id.get(el_ids[-1])
@@ -247,7 +230,7 @@ def _member_scene_geometry(
     cos_s = dx_s / L_px
     sin_s = dy_s / L_px
 
-    if model.is_3d and hasattr(first_el, '_R3'):
+    if hasattr(first_el, '_R3'):
         # Project the element's structural local y-axis (3D world space) through
         # the current isometric transform.  The result gives the on-screen
         # direction that corresponds to +local_y in 3D.
@@ -277,8 +260,8 @@ def _member_scene_geometry(
                 perp_x = -perp_x
                 perp_y = -perp_y
     else:
-        # 2D model: standard screen-space perpendicular, normalised so that
-        # sagging (positive M) always draws toward the lower-right on screen.
+        # No 3D basis (should not happen): screen-space perpendicular, sagging toward
+        # the lower right on screen.
         perp_x = -sin_s
         perp_y =  cos_s
         if perp_y < -1e-9 or (abs(perp_y) < 1e-9 and perp_x < 0):
@@ -334,9 +317,11 @@ def _stitch_deform(
     displacements: np.ndarray,
     dpn: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (t_norm, local_transverse_m) using Hermite interpolation.
+    """Return (t_norm, local_y_deflection_m) along a member, t in [0, 1].
 
-    Only valid for 2D elements (is_3d=False). Returns empty arrays for 3D members.
+    Hermite interpolation of each sub-element's displacement along its local y axis (the
+    plane the diagrams are drawn in; a plane frame's in-plane deflection), as the deformed
+    shape draws it.  Used for the peak-δ label.
     """
     n_dofs = len(displacements)
     all_t: list[float] = []
@@ -346,45 +331,33 @@ def _stitch_deform(
     if L_total < 1e-10:
         return np.array([]), np.array([])
 
-    _rot = 5 if dpn == 6 else 2
+    def _get(nid: int, dof: int) -> float:
+        idx = nid * dpn + dof
+        return float(displacements[idx]) if idx < n_dofs else 0.0
 
     for k, el_id in enumerate(el_ids):
         el = el_by_id.get(el_id)
-        if el is None or getattr(el, 'is_3d', False):
+        if el is None or not hasattr(el, "_R3"):
             continue
-
         L = el.length
         ts = np.linspace(0.0, 1.0, 12)
-        N1 = 1.0 - 3*ts**2 + 2*ts**3
-        N2 = L * (ts - 2*ts**2 + ts**3)
-        N3 = 3*ts**2 - 2*ts**3
-        N4 = L * (-ts**2 + ts**3)
-
-        ni_id = el.node_i.id
-        nj_id = el.node_j.id
-
-        def _get(nid: int, dof: int) -> float:
-            idx = nid * dpn + dof
-            return float(displacements[idx]) if idx < n_dofs else 0.0
-
-        d_global = np.array([
-            _get(ni_id, 0), _get(ni_id, 1), _get(ni_id, _rot),
-            _get(nj_id, 0), _get(nj_id, 1), _get(nj_id, _rot),
-        ])
-        T6 = _make_T6(el.angle)
-        dl = T6 @ d_global
-        v_i, th_i = dl[1], dl[2]
-        v_j, th_j = dl[4], dl[5]
-
-        if getattr(el, 'pin_i', False) and getattr(el, 'pin_j', False):
-            v_vals = (1.0 - ts) * v_i + ts * v_j
+        R3 = el._R3
+        d_i = np.array([_get(el.node_i.id, k6) for k6 in range(6)])
+        d_j = np.array([_get(el.node_j.id, k6) for k6 in range(6)])
+        v_i, th_i = (R3.T @ d_i[:3])[1], (R3.T @ d_i[3:])[2]      # local v, θz
+        v_j, th_j = (R3.T @ d_j[:3])[1], (R3.T @ d_j[3:])[2]
+        if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
+            v = (1.0 - ts) * v_i + ts * v_j
         else:
-            v_vals = N1*v_i + N2*th_i + N3*v_j + N4*th_j
-
+            N1 = 1.0 - 3 * ts ** 2 + 2 * ts ** 3
+            N2 = L * (ts - 2 * ts ** 2 + ts ** 3)
+            N3 = 3 * ts ** 2 - 2 * ts ** 3
+            N4 = L * (-ts ** 2 + ts ** 3)
+            v = N1 * v_i + N2 * th_i + N3 * v_j + N4 * th_j
         t_vals = (x_acc + ts * L) / L_total
-        end = len(t_vals) if k == len(el_ids) - 1 else len(t_vals) - 1
+        end = len(ts) if k == len(el_ids) - 1 else len(ts) - 1
         all_t.extend(t_vals[:end].tolist())
-        all_v.extend(v_vals[:end].tolist())
+        all_v.extend(v[:end].tolist())
         x_acc += L
 
     return np.array(all_t), np.array(all_v)
@@ -712,75 +685,45 @@ def draw_deformed(
         N3 = 3.0 * ts ** 2 - 2.0 * ts ** 3
         N4 = L * (-ts ** 2 + ts ** 3)
 
-        if el.is_3d:
-            # ── 3D: use element's full rotation matrix R3 ─────────────────────
-            # Every element of a 3D model works in 3D (declared dimension), so it has
-            # a valid _R3 basis even when it lies at z = 0.
-            from ui_qt.projection import isometric as _iso
-            R3 = el._R3  # 3×3 columns = [x_hat, y_hat, z_hat] in global coords
+        # ── 3D: use element's full rotation matrix R3 ─────────────────────
+        # Every element of a 3D model works in 3D (declared dimension), so it has
+        # a valid _R3 basis even when it lies at z = 0.
+        from ui_qt.projection import isometric as _iso
+        R3 = el._R3  # 3×3 columns = [x_hat, y_hat, z_hat] in global coords
 
-            d_gi = np.array([_get_d(ni.id, k) for k in range(6)])
-            d_gj = np.array([_get_d(nj.id, k) for k in range(6)])
+        d_gi = np.array([_get_d(ni.id, k) for k in range(6)])
+        d_gj = np.array([_get_d(nj.id, k) for k in range(6)])
 
-            d_li = R3.T @ d_gi[:3]   # [u_i, v_i, w_i] local translations
-            r_li = R3.T @ d_gi[3:]   # [θx_i, θy_i, θz_i] local rotations
-            d_lj = R3.T @ d_gj[:3]
-            r_lj = R3.T @ d_gj[3:]
+        d_li = R3.T @ d_gi[:3]   # [u_i, v_i, w_i] local translations
+        r_li = R3.T @ d_gi[3:]   # [θx_i, θy_i, θz_i] local rotations
+        d_lj = R3.T @ d_gj[:3]
+        r_lj = R3.T @ d_gj[3:]
 
-            u_i, v_yi, v_zi = d_li
-            _,   thy_i, thz_i = r_li
-            u_j, v_yj, v_zj = d_lj
-            _,   thy_j, thz_j = r_lj
+        u_i, v_yi, v_zi = d_li
+        _,   thy_i, thz_i = r_li
+        u_j, v_yj, v_zj = d_lj
+        _,   thy_j, thz_j = r_lj
 
-            u_t = (1.0 - ts) * u_i + ts * u_j
-            if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
-                vy_t = (1.0 - ts) * v_yi + ts * v_yj
-                vz_t = (1.0 - ts) * v_zi + ts * v_zj
-            else:
-                vy_t = N1 * v_yi + N2 * thz_i + N3 * v_yj + N4 * thz_j
-                # 3D local stiffness uses dw/dx = −θ_y convention
-                vz_t = N1 * v_zi - N2 * thy_i + N3 * v_zj - N4 * thy_j
-
-            x_hat, y_hat, z_hat = R3[:, 0], R3[:, 1], R3[:, 2]
-            x3d = ni.x + ts*(nj.x - ni.x) + def_scale*(u_t*x_hat[0] + vy_t*y_hat[0] + vz_t*z_hat[0])
-            y3d = ni.y + ts*(nj.y - ni.y) + def_scale*(u_t*x_hat[1] + vy_t*y_hat[1] + vz_t*z_hat[1])
-            z3d = ni.z + ts*(nj.z - ni.z) + def_scale*(u_t*x_hat[2] + vy_t*y_hat[2] + vz_t*z_hat[2])
-
-            def_path = QPainterPath()
-            s0x, s0y = _iso(float(x3d[0]), float(y3d[0]), float(z3d[0]))
-            def_path.moveTo(s0x, s0y)
-            for _k in range(1, N_pts):
-                skx, sky = _iso(float(x3d[_k]), float(y3d[_k]), float(z3d[_k]))
-                def_path.lineTo(skx, sky)
-
+        u_t = (1.0 - ts) * u_i + ts * u_j
+        if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
+            vy_t = (1.0 - ts) * v_yi + ts * v_yj
+            vz_t = (1.0 - ts) * v_zi + ts * v_zj
         else:
-            # ── 2D: Hermite interpolation in screen space ─────────────────────
-            _rot = 5 if _dpn == 6 else 2
-            d_global = np.array([
-                _get_d(ni.id, 0), _get_d(ni.id, 1), _get_d(ni.id, _rot),
-                _get_d(nj.id, 0), _get_d(nj.id, 1), _get_d(nj.id, _rot),
-            ])
-            T6 = _make_T6(el.angle)
-            dl = T6 @ d_global
+            vy_t = N1 * v_yi + N2 * thz_i + N3 * v_yj + N4 * thz_j
+            # 3D local stiffness uses dw/dx = −θ_y convention
+            vz_t = N1 * v_zi - N2 * thy_i + N3 * v_zj - N4 * thy_j
 
-            u_i, v_i, th_i = dl[0], dl[1], dl[2]
-            u_j, v_j, th_j = dl[3], dl[4], dl[5]
+        x_hat, y_hat, z_hat = R3[:, 0], R3[:, 1], R3[:, 2]
+        x3d = ni.x + ts*(nj.x - ni.x) + def_scale*(u_t*x_hat[0] + vy_t*y_hat[0] + vz_t*z_hat[0])
+        y3d = ni.y + ts*(nj.y - ni.y) + def_scale*(u_t*x_hat[1] + vy_t*y_hat[1] + vz_t*z_hat[1])
+        z3d = ni.z + ts*(nj.z - ni.z) + def_scale*(u_t*x_hat[2] + vy_t*y_hat[2] + vz_t*z_hat[2])
 
-            if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
-                w_x = (1.0 - ts) * v_i + ts * v_j
-            else:
-                w_x = N1 * v_i + N2 * th_i + N3 * v_j + N4 * th_j
-
-            u_x = (1.0 - ts) * u_i + ts * u_j
-            base_sx = ix_s + cos_s * ts * L_px
-            base_sy = iy_s + sin_s * ts * L_px
-            def_sx = base_sx + def_scale * (u_x * cos_s + w_x * sin_s) * PX_PER_M
-            def_sy = base_sy + def_scale * (u_x * sin_s - w_x * cos_s) * PX_PER_M
-
-            def_path = QPainterPath()
-            def_path.moveTo(float(def_sx[0]), float(def_sy[0]))
-            for sx, sy in zip(def_sx[1:], def_sy[1:]):
-                def_path.lineTo(float(sx), float(sy))
+        def_path = QPainterPath()
+        s0x, s0y = _iso(float(x3d[0]), float(y3d[0]), float(z3d[0]))
+        def_path.moveTo(s0x, s0y)
+        for _k in range(1, N_pts):
+            skx, sky = _iso(float(x3d[_k]), float(y3d[_k]), float(z3d[_k]))
+            def_path.lineTo(skx, sky)
 
         def_item = QGraphicsPathItem(def_path)
         def_item.setPen(deform_pen)
