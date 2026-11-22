@@ -70,6 +70,43 @@ def _summary_table(rows: list[tuple[str, str]]) -> str:
     return f"<table cellspacing='2'>{cells}</table>"
 
 
+_EMPTY_HINT = "Click a node or member to inspect it."
+
+
+def model_summary_html(state) -> str:
+    """What the Properties panel shows when nothing is selected: the model at a glance."""
+    if state is None or not state.nodes:
+        return _EMPTY_HINT
+    import math as _m
+    from ui_qt.model_state import SupportType, analysis_label
+    nodes = {n.id: n for n in state.nodes}
+    length = mass = 0.0
+    for mb in state.members:
+        a, b = nodes.get(mb.node_i), nodes.get(mb.node_j)
+        if a is None or b is None:
+            continue
+        L = _m.dist((a.x, a.y, a.z), (b.x, b.y, b.z))
+        length += L
+        mass += L * mb.A * mb.density
+    bars = sum(mb.element_type == ElementType.BAR for mb in state.members)
+    supports = sum(n.support_type != SupportType.FREE for n in state.nodes)
+    lc = state.active_case
+    rows = [
+        ("Analysis", analysis_label(state)[0]),
+        ("Nodes", f"{len(state.nodes)}  ({supports} supported)"),
+        ("Members", f"{len(state.members)}" + (f"  ({bars} bars)" if bars else "")),
+        ("Total length", f"{length:.2f} m"),
+    ]
+    if mass > 0:
+        rows.append(("Mass", f"{mass / 1e3:.3f} t" if mass >= 1e3 else f"{mass:.1f} kg"))
+    rows.append(("Load cases", f"{len(state.load_cases)}  (active: {lc.name})" if lc
+                 else f"{len(state.load_cases)}"))
+    if state.combinations:
+        rows.append(("Combinations", str(len(state.combinations))))
+    return (f"<p style='margin:0 0 6px 0'><b>Model</b></p>{_summary_table(rows)}"
+            f"<p style='color:#8a93a6; margin-top:8px'>{_EMPTY_HINT}</p>")
+
+
 def _member_summary_html(m: MemberData) -> str:
     """Read-only summary of a member's *current saved* properties."""
     rows: list[tuple[str, str]] = [
@@ -124,7 +161,8 @@ class PropertiesPanel(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._placeholder = QLabel("Click a node or member to inspect.")
+        self._placeholder = QLabel(_EMPTY_HINT)       # the model summary when one is loaded
+        self._placeholder.setTextFormat(Qt.TextFormat.RichText)
         self._placeholder.setWordWrap(True)
         self._layout.addWidget(self._placeholder)
         self._content: QWidget | None = None
@@ -133,8 +171,14 @@ class PropertiesPanel(QWidget):
         self._model_state = None          # set by MainWindow via set_model_state()
 
     def set_model_state(self, state) -> None:
-        """Keep a reference so forms can read/write the active load case."""
+        """Keep a reference so forms can read/write the active load case (called on every
+        model change, so the summary shown with nothing selected stays current)."""
         self._model_state = state
+        self.refresh_summary()
+
+    def refresh_summary(self) -> None:
+        """Update the model summary shown when nothing is selected."""
+        self._placeholder.setText(model_summary_html(self._model_state))
 
     def _active_case(self) -> LoadCase | None:
         return self._model_state.active_case if self._model_state else None
@@ -173,6 +217,7 @@ class PropertiesPanel(QWidget):
             self._content = None
 
         if widget is None:
+            self.refresh_summary()
             self._placeholder.show()
         else:
             self._placeholder.hide()
