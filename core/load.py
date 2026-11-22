@@ -9,6 +9,8 @@ class LoadType(Enum):
     POINT_MOMENT = auto()
     UDL = auto()   # uniformly distributed load
     UVL = auto()   # uniformly varying load
+    PARTIAL = auto()   # linearly varying load over part of the element: [position, end_position],
+                       # intensity magnitude → magnitude_end (transverse directions only)
 
 
 class LoadDirection(Enum):
@@ -67,5 +69,7 @@ class ElementLoad:
     element_id: int
     load_type: LoadType
     magnitude: float                         # N/m for distributed, N or N·m for point
-    position: float = field(default=0.0)     # m from start node (point loads only)
+    position: float = field(default=0.0)     # m from start node (point loads, PARTIAL start)
     direction: LoadDirection = field(default=LoadDirection.LOCAL_Y)
+    end_position: float = field(default=0.0)  # m from start node (PARTIAL only)
+    magnitude_end: float = field(default=0.0)  # N/m at end_position (PARTIAL only)

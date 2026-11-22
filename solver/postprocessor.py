@@ -6,7 +6,7 @@ import numpy as np
 
 from core.load import ElementLoad, LoadDirection, LoadType
 from elements.frame_element import FrameElement
-from solver.fem_loads import fixed_end_forces
+from solver.fem_loads import GAUSS_3, fixed_end_forces, partial_intensity
 
 
 @dataclass
@@ -171,6 +171,16 @@ def bending_profile(
             M = np.where(beyond, M - slope_sign * load.magnitude * (x - load.position), M)
         elif load.load_type == LoadType.POINT_MOMENT:
             M = np.where(x >= load.position, M + _POINT_MOMENT_STEP * load.magnitude, M)
+        elif load.load_type == LoadType.PARTIAL:
+            # ∫ over the loaded part up to x of w(s) and w(s)(x − s): Gauss, exact (degree ≤ 2)
+            a = load.position
+            upper = np.clip(x, a, load.end_position)
+            half = 0.5 * (upper - a)
+            for xi, weight in GAUSS_3:
+                s = a + half * (xi + 1.0)
+                w = partial_intensity(load, s) * half * weight
+                V = V - w
+                M = M - slope_sign * w * (x - s)
     return V, M
 
 
@@ -284,4 +294,6 @@ def sample_points(length: float, loads: list[ElementLoad], n: int = 12) -> np.nd
         if load.load_type in (LoadType.POINT_FORCE, LoadType.POINT_MOMENT) \
                 and 0.0 < load.position < length:
             xs += [load.position - eps, load.position]
+        elif load.load_type == LoadType.PARTIAL:      # where the loading starts and stops
+            xs += [p for p in (load.position, load.end_position) if 0.0 < p < length]
     return np.array(sorted(xs))

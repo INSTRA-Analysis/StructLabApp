@@ -90,6 +90,7 @@ def _check_direction(load: ElementLoad, is_3d: bool) -> None:
     allowed = ((LoadDirection.LOCAL_X, LoadDirection.LOCAL_Y, LoadDirection.LOCAL_Z) if is_3d
                else (LoadDirection.LOCAL_X, LoadDirection.LOCAL_Y))
     if load.direction == LoadDirection.LOCAL_X and load.load_type not in (LoadType.UDL, LoadType.UVL):
+        # (PARTIAL axial loads are not generated: partial loads act across the member)
         raise ValueError(f"Element load on element {load.element_id}: an axial (LOCAL_X) load "
                          "must be distributed (UDL or UVL).")
     if load.direction not in allowed:
@@ -123,10 +124,41 @@ def fixed_end_forces(load: ElementLoad, length: float,
     L = length
     _check_direction(load, is_3d)
 
+    if load.load_type == LoadType.PARTIAL:
+        return _fef_partial(load, L, pin_i, pin_j, is_3d)
     if is_3d:
         return _fef_3d(load, L, pin_i, pin_j)
     else:
         return _fef_2d(load, L, pin_i, pin_j)
+
+
+# Three-point Gauss–Legendre on [-1, 1]: exact up to degree 5.
+GAUSS_3 = ((-np.sqrt(0.6), 5 / 9), (0.0, 8 / 9), (np.sqrt(0.6), 5 / 9))
+
+
+def partial_intensity(load: ElementLoad, s: np.ndarray | float) -> np.ndarray | float:
+    """Intensity (N/m) of a PARTIAL load at position s (linear from position to end_position)."""
+    a, b = load.position, load.end_position
+    return load.magnitude + (s - a) / (b - a) * (load.magnitude_end - load.magnitude)
+
+
+def _fef_partial(load: ElementLoad, L: float, pin_i: bool, pin_j: bool, is_3d: bool) -> np.ndarray:
+    """Fixed-end forces of a linearly varying load over [a, b]: the point-force FEF integrated
+    along the loaded length.  The point FEF is cubic in the load position and the intensity
+    linear, so three Gauss points are exact (pin corrections are linear, so they carry over)."""
+    a, b = load.position, load.end_position
+    if not 0.0 <= a < b <= L + 1e-12:
+        raise ValueError(f"Partial load on element {load.element_id}: need 0 <= a < b <= L, "
+                         f"got a = {a}, b = {b}, L = {L}")
+    half = 0.5 * (b - a)
+    f = np.zeros(12 if is_3d else 6)
+    for xi, weight in GAUSS_3:
+        s = a + half * (xi + 1.0)
+        point = ElementLoad(load.element_id, LoadType.POINT_FORCE,
+                            float(partial_intensity(load, s)) * half * weight,
+                            position=s, direction=load.direction)
+        f += fixed_end_forces(point, L, pin_i, pin_j, is_3d)
+    return f
 
 
 def _fef_2d(load: ElementLoad, L: float, pin_i: bool, pin_j: bool) -> np.ndarray:

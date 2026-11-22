@@ -288,9 +288,8 @@ def build_model(state: ModelState,
         # Each PartialDistLoad specifies an intensity ramp over a fraction [a, b] of
         # the member.  Strategy:
         #   • Sub-elements fully within [a, b] → exact UDL / UVL.
-        #   • Sub-elements partially overlapping [a, b] → single equivalent point
-        #     force at the centroid of the loaded portion (error O(L_sub²), <1 % with
-        #     n_sub ≥ 10).
+        #   • Sub-elements partially overlapping [a, b] → an exact PARTIAL element load on
+        #     the covered stretch (it used to be a point force at its centroid).
         for pdl in ml.partial_loads:
             a = max(0.0, min(1.0, pdl.start_pos))
             b = max(0.0, min(1.0, pdl.end_pos))
@@ -327,19 +326,16 @@ def build_model(state: ModelState,
                             position=w_ol_e,
                         ))
                 else:
-                    # Partial overlap → equivalent point force at centroid
-                    overlap_len = (ol_e - ol_s) * member_length
-                    w_avg = (w_ol_s + w_ol_e) / 2.0
-                    P = w_avg * overlap_len
-                    if abs(P) < 1e-12:
+                    # Partial overlap → the exact partial load on that stretch of the element
+                    if abs(w_ol_s) < 1e-12 and abs(w_ol_e) < 1e-12:
                         continue
-                    centroid_t = (ol_s + ol_e) / 2.0
-                    local_pos  = (centroid_t - t_k) * member_length
                     model.element_loads.append(ElementLoad(
                         element_id=el_ids[k],
-                        load_type=LoadType.POINT_FORCE,
-                        magnitude=P,
-                        position=local_pos,
+                        load_type=LoadType.PARTIAL,
+                        magnitude=w_ol_s,
+                        position=(ol_s - t_k) * member_length,
+                        end_position=(ol_e - t_k) * member_length,
+                        magnitude_end=w_ol_e,
                     ))
 
         # Global distributed loads qx / qy / qz: exact element loads on every sub-element of
