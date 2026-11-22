@@ -1666,16 +1666,12 @@ class MainWindow(QMainWindow):
             else:
                 self._scene.clear_member_colours()
 
-            disp = cache['displacements']
             member_results = cache['member_results']
-            v = self._vertical_dof(dpn)
-            max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
-            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
-            from ui_qt.solve_actions import largest_member_moment
+            from ui_qt.solve_actions import deflection_summary, largest_member_moment
             max_m, max_m_member = largest_member_moment(member_results)
             self._sb.showMessage(
                 f"[{combo.limit_state}] {combo.name}  |  "
-                f"Max deflection: {max_dy_mm:.2f} mm (node {max_dy_node.id})  |  "
+                f"{deflection_summary(cache)}  |  "
                 f"Max moment: {max_m/1000:.2f} kN·m "
                 f"(member {max_m_member if max_m_member is not None else '-'})"
             )
@@ -2073,16 +2069,12 @@ class MainWindow(QMainWindow):
                 self._scene.clear_member_colours()
 
             # Results summary for status bar
-            disp = cache['displacements']
             member_results = cache['member_results']
-            v = self._vertical_dof(dpn)
-            max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
-            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
-            from ui_qt.solve_actions import largest_member_moment
+            from ui_qt.solve_actions import deflection_summary, largest_member_moment
             max_m, max_m_member = largest_member_moment(member_results)
             summary = (
                 f"Solved  |  "
-                f"Max deflection: {max_dy_mm:.2f} mm (node {max_dy_node.id})  |  "
+                f"{deflection_summary(cache)}  |  "
                 f"Max moment: {max_m/1000:.2f} kN·m "
                 f"(member {max_m_member if max_m_member is not None else '-'})"
             )
@@ -2257,11 +2249,6 @@ class MainWindow(QMainWindow):
         self._sb.showMessage("Analysis type: " + ("Plane frame (XZ) — uy, θx, θz restrained "
                              "at every node" if checked else "Space frame — all six DOFs"))
 
-    @staticmethod
-    def _vertical_dof(dpn: int) -> int:
-        """Index of the vertical displacement in a node's DOFs: uy in 2D, uz in 3D."""
-        return 2 if dpn == 6 else 1
-
     def _update_status_stats(self) -> None:
         """Update the status bar permanent widget with live model + results stats."""
         self._sync_analysis_type()
@@ -2272,16 +2259,10 @@ class MainWindow(QMainWindow):
 
         if self._solve_cache is not None:
             cache = self._solve_cache
-            disp = cache["displacements"]
             member_results = cache["member_results"]
-            _dpn = cache["model"].dofs_per_node
             if n_nodes > 0:
-                v = self._vertical_dof(_dpn)
-                max_dy = max(
-                    (abs(disp[n.id * _dpn + v]) * 1000 for n in state.nodes),
-                    default=0,
-                )
-                parts.append(f"δ max: {max_dy:.1f} mm")
+                from ui_qt.solve_actions import largest_vertical_deflection
+                parts.append(f"δ max: {largest_vertical_deflection(cache)[0] * 1e3:.2f} mm")
             if member_results:
                 from ui_qt.solve_actions import largest_member_moment
                 max_m = largest_member_moment(member_results)[0]

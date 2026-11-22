@@ -528,89 +528,99 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     def _ref_len(nid: int) -> float:
         return max(node_members.get(nid, [1.0]))
 
-    # Collect deflections for all free nodes
-    vert_data  = []   # (|dy|, node_id, L_ref)
-    horiz_data = []   # (|dx|, node_id, L_ref)
-
+    # Vertical check candidates (δ, location, reference length): every member's deflection
+    # relative to the chord between its ends over its length (a beam's mid-span, where no
+    # node is), and every free node's vertical displacement over its longest member (a
+    # cantilever tip, which the chord measure cannot see).  The worst δ/L governs.
+    from ui_qt.solve_actions import describe_location
+    vert_data: list[tuple[float, str, float]] = []
+    for r in cache.get("member_results", []):
+        md = getattr(r, "deflection", None)
+        L = member_len.get(r.element_id, 0.0)
+        if md is not None and L > 0:
+            vert_data.append((md.span, describe_location(r.element_id, md.span_at), L))
+    horiz_data = []   # (|d_h|, node_id, L_ref)
     for n in free_nodes:
-        L  = _ref_len(n.id)
-        vert_data.append( (abs(float(disps[n.id * dpn + v_idx])), n.id, L) )
-        horiz_data.append((abs(_sway(n.id)), n.id, L) )
+        L = _ref_len(n.id)
+        vert_data.append((abs(float(disps[n.id * dpn + v_idx])), f"node {n.id}", L))
+        horiz_data.append((abs(_sway(n.id)), n.id, L))
 
     if not vert_data:
-        fig.text(0.5, 0.5, "No free nodes — checks not applicable.",
+        fig.text(0.5, 0.5, "No members — checks not applicable.",
                  ha="center", va="center", fontsize=10, color=_GREY,
                  transform=fig.transFigure)
         pdf.savefig(fig, bbox_inches="tight", dpi=150)
         plt.close(fig)
         return
 
-    # ── Deflection summary table ──────────────────────────────────────────────
-    y = _section_label(fig, "Nodal Displacements", y)
-
-    disp_rows = []
     plane = _is_plane_frame(state)
-    for n in free_nodes:
-        d = [float(disps[n.id * dpn + k]) for k in range(dpn)]
-        if plane:                                    # in-plane: dx, dz, θy
-            disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[2]*1e3:.3f}",
-                              f"{math.degrees(d[4]):.4f}"])
-        else:
-            disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
-    headers = (["Node", "dx (mm)", "dz (mm)", "θy (°)"] if plane
-               else ["Node", "dx (mm)", "dy (mm)", "dz (mm)"])
-    y = _draw_table(fig, headers, disp_rows, y,
-                    col_widths=[0.10, 0.20, 0.20, 0.22])
-    y -= 0.020
+    # ── Deflection summary table ──────────────────────────────────────────────
+    if free_nodes:
+        y = _section_label(fig, "Nodal Displacements", y)
+        disp_rows = []
+        for n in free_nodes:
+            d = [float(disps[n.id * dpn + k]) for k in range(dpn)]
+            if plane:                                    # in-plane: dx, dz, θy
+                disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[2]*1e3:.3f}",
+                                  f"{math.degrees(d[4]):.4f}"])
+            else:
+                disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
+        headers = (["Node", "dx (mm)", "dz (mm)", "θy (°)"] if plane
+                   else ["Node", "dx (mm)", "dy (mm)", "dz (mm)"])
+        y = _draw_table(fig, headers, disp_rows, y,
+                        col_widths=[0.10, 0.20, 0.20, 0.22])
+        y -= 0.020
 
     # ── Vertical (transverse) deflection check ────────────────────────────────
-    y = _section_label(fig, "Vertical Deflection Check  (limit L / 300)", y)
+    y = _section_label(fig, "Deflection Check  (limit L / 300)", y)
 
-    max_dy, ctrl_nid_v, ctrl_L_v = max(vert_data, key=lambda t: t[0])
+    max_dy, ctrl_where_v, ctrl_L_v = max(vert_data, key=lambda c: c[0] / c[2])
     ratio_v = (ctrl_L_v / max_dy) if max_dy > 1e-9 else float("inf")
     pass_v  = max_dy < ctrl_L_v / _SLS_VERT_LIMIT
     tag_v   = "PASS ✓" if pass_v else "FAIL ✗"
     col_v   = _GREEN   if pass_v else _RED
 
     y = _draw_table(fig,
-                    ["Max |dz|", "Node", "Ref. length L", "δ/L",
-                     "Limit", "Result"],
-                    [[f"{max_dy*1e3:.2f} mm", str(ctrl_nid_v),
+                    ["δ", "Where", "Ref. length L", "δ/L", "Limit", "Result"],
+                    [[f"{max_dy*1e3:.2f} mm", ctrl_where_v,
                       f"{ctrl_L_v:.3f} m",
                       f"L/{ratio_v:.0f}" if ratio_v < 1e6 else "—",
                       f"L/{_SLS_VERT_LIMIT}",
                       tag_v]],
                     y,
-                    col_widths=[0.16, 0.10, 0.18, 0.14, 0.12, 0.12],
+                    col_widths=[0.13, 0.22, 0.15, 0.12, 0.10, 0.12],
                     highlight_col=5, highlight_color=col_v)
     y -= 0.020
 
     # ── Horizontal (sway) deflection check ────────────────────────────────────
     y = _section_label(fig, "Lateral Sway Check  (limit H / 300)", y)
-
-    max_dx, ctrl_nid_h, ctrl_L_h = max(horiz_data, key=lambda t: t[0])
-    ratio_h = (ctrl_L_h / max_dx) if max_dx > 1e-9 else float("inf")
-    pass_h  = max_dx < ctrl_L_h / _SLS_SWAY_LIMIT
-    tag_h   = "PASS ✓" if pass_h else "FAIL ✗"
-    col_h   = _GREEN   if pass_h else _RED
-
-    y = _draw_table(fig,
-                    ["Max |dx|" if plane else "Max |d_xy|", "Node", "Ref. height H", "δ/H",
-                     "Limit", "Result"],
-                    [[f"{max_dx*1e3:.2f} mm", str(ctrl_nid_h),
-                      f"{ctrl_L_h:.3f} m",
-                      f"H/{ratio_h:.0f}" if ratio_h < 1e6 else "—",
-                      f"H/{_SLS_SWAY_LIMIT}",
-                      tag_h]],
-                    y,
-                    col_widths=[0.16, 0.10, 0.18, 0.14, 0.12, 0.12],
-                    highlight_col=5, highlight_color=col_h)
+    if horiz_data:
+        max_dx, ctrl_nid_h, ctrl_L_h = max(horiz_data, key=lambda c: c[0] / c[2])
+        ratio_h = (ctrl_L_h / max_dx) if max_dx > 1e-9 else float("inf")
+        pass_h  = max_dx < ctrl_L_h / _SLS_SWAY_LIMIT
+        tag_h   = "PASS ✓" if pass_h else "FAIL ✗"
+        col_h   = _GREEN   if pass_h else _RED
+        y = _draw_table(fig,
+                        ["Max |dx|" if plane else "Max |d_xy|", "Node", "Ref. height H", "δ/H",
+                         "Limit", "Result"],
+                        [[f"{max_dx*1e3:.2f} mm", str(ctrl_nid_h),
+                          f"{ctrl_L_h:.3f} m",
+                          f"H/{ratio_h:.0f}" if ratio_h < 1e6 else "—",
+                          f"H/{_SLS_SWAY_LIMIT}",
+                          tag_h]],
+                        y,
+                        col_widths=[0.16, 0.10, 0.18, 0.14, 0.12, 0.12],
+                        highlight_col=5, highlight_color=col_h)
+    else:
+        fig.text(_L + 0.02, y - 0.010, "(No free nodes — every node is supported.)",
+                 fontsize=8.5, color=_GREY, va="top", transform=fig.transFigure)
+        y -= 0.030
     y -= 0.020
 
     # ── Disclaimer ────────────────────────────────────────────────────────────
     fig.text(0.5, y - 0.005,
-             "Reference length = longest member connected to the controlling node.  "
-             "Checks are SLS only (linear-elastic).",
+             "Members: deflection from the chord between their ends, over their length.  "
+             "Nodes: displacement over the longest connected member.  SLS only (linear-elastic).",
              fontsize=7.5, color=_GREY, ha="center", va="top",
              transform=fig.transFigure)
 

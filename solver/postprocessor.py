@@ -34,6 +34,7 @@ class ElementResult:
     peak_moment: float | None = None
     peak_moment_signed: float | None = None
     moment_stations: np.ndarray | None = None
+    deflection: object | None = None       # ui_qt.solve_actions.MemberDeflection on members
 
     @property
     def is_3d(self) -> bool:

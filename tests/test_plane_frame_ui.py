@@ -116,8 +116,25 @@ def test_solve_reports_the_vertical_deflection_of_a_plane_frame(win):
     win._scene.load_state(s)
     win._on_solve()
     assert win._solve_cache is not None
-    assert "δ max: 2.1 mm" in win._sb_stats.text()
-    assert "Max deflection: 2.14 mm (node 1)" in win._sb.currentMessage()
+    assert "δ max: 2.14 mm" in win._sb_stats.text()
+    assert "Max deflection: 2.14 mm (member 0, end j)" in win._sb.currentMessage()
+
+
+def test_solve_reports_a_beams_midspan_deflection(win):
+    """One member, simply supported, UDL: the deflection is mid-span, where there is no node.
+    δ = 5wL⁴/384EI; the node-only summary used to report 0."""
+    s = ModelState()
+    s.analysis_type = "plane_xz"
+    a, b = s.add_node(0, 0, 0), s.add_node(6, 0, 0)
+    a.support_type, b.support_type = SupportType.PIN, SupportType.ROLLER
+    m = s.add_member(a.id, b.id)
+    m.E, m.A, m.I, m.I_y, m.J = 210e9, 8e-3, 2e-4, 2e-4, 1e-5
+    from ui_qt.model_state import DistLoad, MemberLoad
+    s.active_case.member_loads[m.id] = MemberLoad(dist_loads=[DistLoad("w", 10e3, 10e3)])
+    win._scene.load_state(s)
+    win._on_solve()
+    delta = 5 * 10e3 * 6 ** 4 / (384 * 210e9 * 2e-4)
+    assert f"Max deflection: {delta * 1e3:.2f} mm (member 0 at 0.50 L)" in win._sb.currentMessage()
 
 
 def test_pdf_title_page_states_the_analysis(tmp_path):

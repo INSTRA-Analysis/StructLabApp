@@ -274,6 +274,102 @@ def peak_from_stations(stations: np.ndarray) -> float:
     return float(np.abs(stations[:, 0]).max())
 
 
+# ── Deflection along a member ─────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class MemberDeflection:
+    """Displacements along one member (m), from its sub-elements' end displacements.
+
+    ``span``      largest deflection relative to the chord joining the member's displaced
+                  ends (what an L/300 span check compares), at fraction ``span_at`` of L.
+    ``vertical``  largest vertical displacement anywhere along the member (signed; Z up in
+                  3D, Y up in 2D), at fraction ``vertical_at`` of L.
+    """
+    span: float
+    span_at: float
+    vertical: float
+    vertical_at: float
+
+
+def _sub_element_shape(el, displacements: np.ndarray, dpn: int, ts: np.ndarray) -> np.ndarray:
+    """Global translations (len(ts), 3) along one element: axial linear, transverse Hermite
+    from the end rotations (linear across an element with a moment release)."""
+    L = el.length
+    ni, nj = el.node_i.id * dpn, el.node_j.id * dpn
+    d_i, d_j = displacements[ni:ni + dpn], displacements[nj:nj + dpn]
+    linear = getattr(el, "pin_i", False) or getattr(el, "pin_j", False)
+    n1, n3 = 1 - 3 * ts ** 2 + 2 * ts ** 3, 3 * ts ** 2 - 2 * ts ** 3
+    n2, n4 = L * (ts - 2 * ts ** 2 + ts ** 3), L * (-ts ** 2 + ts ** 3)
+
+    def hermite(v_i, th_i, v_j, th_j):
+        if linear:
+            return (1 - ts) * v_i + ts * v_j
+        return n1 * v_i + n2 * th_i + n3 * v_j + n4 * th_j
+
+    if dpn == 6:
+        R = el._R3                                            # columns: local x, y, z
+        ti, tj = R.T @ d_i[:3], R.T @ d_j[:3]
+        ri, rj = R.T @ d_i[3:], R.T @ d_j[3:]
+        u = (1 - ts) * ti[0] + ts * tj[0]
+        v = hermite(ti[1], ri[2], tj[1], rj[2])               # v' = θz
+        w = hermite(ti[2], -ri[1], tj[2], -rj[1])             # w' = −θy
+        return (R @ np.vstack([u, v, w])).T
+    c, s = np.cos(el.angle), np.sin(el.angle)
+    ui, vi = c * d_i[0] + s * d_i[1], -s * d_i[0] + c * d_i[1]
+    uj, vj = c * d_j[0] + s * d_j[1], -s * d_j[0] + c * d_j[1]
+    u = (1 - ts) * ui + ts * uj
+    v = hermite(vi, d_i[2], vj, d_j[2])
+    return np.column_stack([c * u - s * v, s * u + c * v, np.zeros_like(ts)])
+
+
+def member_deflection(el_ids, el_by_id, displacements: np.ndarray, dpn: int) -> MemberDeflection:
+    """Deflections along one member (see MemberDeflection)."""
+    ts = np.linspace(0.0, 1.0, _STATIONS_PER_SUB)
+    lengths = [el_by_id[e].length for e in el_ids]
+    total = sum(lengths)
+    shapes, fractions, x0 = [], [], 0.0
+    for e, L in zip(el_ids, lengths):
+        shapes.append(_sub_element_shape(el_by_id[e], displacements, dpn, ts))
+        fractions.append((x0 + ts * L) / total)
+        x0 += L
+    d = np.vstack(shapes)
+    t = np.concatenate(fractions)
+    chord = np.outer(1 - t, d[0]) + np.outer(t, d[-1])
+    rel = np.linalg.norm(d - chord, axis=1)
+    k = int(np.argmax(rel))
+    vert = d[:, 2] if dpn == 6 else d[:, 1]
+    kv = int(np.argmax(np.abs(vert)))
+    return MemberDeflection(float(rel[k]), float(t[k]), float(vert[kv]), float(t[kv]))
+
+
+def largest_vertical_deflection(cache) -> tuple[float, int | None, float]:
+    """(largest |vertical displacement| anywhere along any member in m, member id, fraction of
+    its length) — the summaries' "max deflection", which nodes alone would miss mid-span."""
+    best = (0.0, None, 0.0)
+    for r in cache["member_results"]:
+        md = getattr(r, "deflection", None)
+        if md is not None and abs(md.vertical) > best[0]:
+            best = (abs(md.vertical), r.element_id, md.vertical_at)
+    return best
+
+
+def deflection_summary(cache) -> str:
+    """'Max deflection: 0.83 mm (member 1 at 0.50 L)' — vertical, anywhere along the members."""
+    value, member, at = largest_vertical_deflection(cache)
+    return f"Max deflection: {value * 1e3:.2f} mm ({describe_location(member, at)})"
+
+
+def describe_location(member_id: int | None, at: float) -> str:
+    """'member 3 at 0.50 L' / 'member 3, end i' for the summaries."""
+    if member_id is None:
+        return "-"
+    if at < 1e-6:
+        return f"member {member_id}, end i"
+    if at > 1 - 1e-6:
+        return f"member {member_id}, end j"
+    return f"member {member_id} at {at:.2f} L"
+
+
 # ── Solve engine pipeline ─────────────────────────────────────────────────────
 
 def solve_engine(model, member_el_map, state) -> dict[str, Any]:
@@ -328,6 +424,8 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
         peaks = member_moment_peaks(el_ids, res_by_id, el_by_id, load_map)
         member_results[-1].peak_moment, member_results[-1].peak_moment_signed, \
             member_results[-1].moment_stations = peaks
+        member_results[-1].deflection = member_deflection(
+            el_ids, el_by_id, result.displacements, model.dofs_per_node)
 
     return {
         'model':          model,
