@@ -23,7 +23,7 @@ from ui_qt.model_state import (
     SupportType, ElementType, PointLoadData,
     LoadCase, NodeLoad, MemberLoad,
 )
-from ui_qt.projection import isometric, is_3d_model, inverse_isometric
+from ui_qt.projection import isometric
 import ui_qt.projection as _proj_mod
 
 # ── local axis triad toggle ───────────────────────────────────────────────────
@@ -210,33 +210,9 @@ def _make_label(text: str, sx: float, sy: float, z: float = 1.8,
     return lbl
 
 
-def m_to_px(m: float) -> float:
-    return m * PX_PER_M
-
-
-def px_to_m(px: float) -> float:
-    return px / PX_PER_M
-
-
-def _display_3d(ms) -> bool:
-    """True when the model should be drawn with the 3D isometric projection.
-
-    2D models (native XY plane, z == 0) are always drawn flat.
-    """
-    if getattr(ms, "is_2d", False):
-        return False
-    return ms.mode_3d or is_3d_model(ms.nodes)
-
-
 def _node_pos(node: NodeData, scene=None) -> tuple[float, float]:
-    """Return (scene_x, scene_y) for a node.
-
-    3D → isometric; 2D → flat (X right, Y up). 2D is the native XY plane.
-    """
-    if scene is not None and scene.model_state is not None:
-        if _display_3d(scene.model_state):
-            return isometric(node.x, node.y, node.z)
-    return (m_to_px(node.x), -m_to_px(node.y))
+    """(scene_x, scene_y) of a node: its isometric projection (the canvas holds 3D models)."""
+    return isometric(node.x, node.y, node.z)
 
 
 def _proj_x_screen_dir() -> tuple[float, float]:
@@ -296,12 +272,9 @@ class NodeItem(QGraphicsEllipseItem):
     def tooltip_text(self) -> str:
         """Node id, coordinates (m) and support, built fresh on hover."""
         n = self.node
-        if is_3d_model(self._scene.model_state.nodes):
-            coords = f"x = {n.x:.3f}   y = {n.y:.3f}   z = {n.z:.3f} m"
-        else:
-            coords = f"x = {n.x:.3f}   y = {n.y:.3f} m"
+        coords = f"x = {n.x:.3f}   y = {n.y:.3f}   z = {n.z:.3f} m"
         from ui_qt.model_state import describe_support
-        support = describe_support(n, is_2d=not _display_3d(self._scene.model_state))
+        support = describe_support(n, is_2d=False)
         return "\n".join([f"Node {n.id}", coords, f"Support: {support}"] + self._result_lines())
 
     def _result_lines(self) -> list[str]:
@@ -324,10 +297,10 @@ class NodeItem(QGraphicsEllipseItem):
         return lines
 
     def set_movable(self, movable: bool) -> None:
-        ms = self._scene.model_state
-        if movable and is_3d_model(ms.nodes) and not self._is_plane_frame():
-            movable = False  # space frame: no drag, coordinates in the Properties panel
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
+        """Only a plane frame's nodes drag (in its plane, in elevation); a space frame's
+        coordinates are edited in the Properties panel."""
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
+                     movable and self._is_plane_frame())
 
     # A position change is a user drag only between mouse press and release; re-projection
     # (orbit, refresh) also calls setPos and must never snap or edit the node's coordinates.
@@ -373,16 +346,7 @@ class NodeItem(QGraphicsEllipseItem):
         self.setScale(1.0 / s ** 0.3)
 
     def itemChange(self, change, value):
-        ms = self._scene.model_state
-        in_3d = _display_3d(ms)
-
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
-            if not in_3d:
-                # Snap dragged position to 2D grid
-                step = PX_PER_M * 0.25
-                x = round(value.x() / step) * step
-                y = round(value.y() / step) * step
-                return QPointF(x, y)
             if self._is_plane_frame() and self._dragging:
                 xz = self._plane_drag_xz(value)
                 if xz is None:
@@ -391,12 +355,7 @@ class NodeItem(QGraphicsEllipseItem):
 
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             moved = False
-            if not in_3d:
-                # Sync NodeData coordinates from 2D scene position (XY plane).
-                self.node.x = px_to_m(self.pos().x())
-                self.node.y = -px_to_m(self.pos().y())
-                moved = True
-            elif self._is_plane_frame() and self._dragging:
+            if self._is_plane_frame() and self._dragging:
                 xz = self._plane_drag_xz(self.pos())
                 if xz is not None and xz != (self.node.x, self.node.z):
                     self.node.x, self.node.z = xz      # stays in the frame's plane (y unchanged)
@@ -435,12 +394,11 @@ class NodeItem(QGraphicsEllipseItem):
         if self.node.support_type == SupportType.FREE:
             return
         from ui_qt import support_glyphs as sg
-        in_3d = _display_3d(self._scene.model_state)
-        cam = sg.Camera.from_angles(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION) if in_3d else None
+        cam = sg.Camera.from_angles(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION)
         ms = self._scene.model_state
         elevation = (sg.elevation_side(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION)
-                     if in_3d and ms.analysis_type == "plane_xz" else 0)   # 2D symbols, front view
-        ops = sg.support_ops(self.node, in_3d, cam, _SHOW_RESTRAINTS, elevation)
+                     if ms.analysis_type == "plane_xz" else 0)   # 2D symbols, front view
+        ops = sg.support_ops(self.node, True, cam, _SHOW_RESTRAINTS, elevation)
         if ops:
             self._support_items.append(SupportGlyphItem(ops, self))
 
@@ -494,7 +452,6 @@ class NodeItem(QGraphicsEllipseItem):
         sx, sy = self.pos().x(), self.pos().y()
 
         ms = self._scene.model_state
-        in_3d = _display_3d(ms)
 
         # Scale arrow length relative to the largest nodal force in this load case
         # so different magnitudes are visually distinguishable.
@@ -515,7 +472,7 @@ class NodeItem(QGraphicsEllipseItem):
             _r = max(0.35, abs(nl.fx) / _max_nf)
             _len = ARROW_LEN * _r
             sdx = 1.0 if nl.fx > 0 else -1.0
-            dir_x, dir_y = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
+            dir_x, dir_y = _proj_x_screen_dir()
             tail_x = -sdx * dir_x * _len
             tail_y = -sdx * dir_y * _len
             back_x = -sdx * dir_x * ah
@@ -537,7 +494,7 @@ class NodeItem(QGraphicsEllipseItem):
             _r = max(0.35, abs(nl.fy) / _max_nf)
             _len = ARROW_LEN * _r
             sdy = 1.0 if nl.fy > 0 else -1.0
-            dir_x, dir_y = _proj_y_screen_dir() if in_3d else (0.0, -1.0)
+            dir_x, dir_y = _proj_y_screen_dir()
             tail_x = -sdy * dir_x * _len
             tail_y = -sdy * dir_y * _len
             back_x = -sdy * dir_x * ah
@@ -553,7 +510,7 @@ class NodeItem(QGraphicsEllipseItem):
             self._scene.addItem(lbl)
             self._load_label_items.append(lbl)
 
-        if nl.fz != 0.0 and in_3d:
+        if nl.fz != 0.0:
             # fz is global Z (vertical); always projects straight up/down on screen.
             _r = max(0.35, abs(nl.fz) / _max_nf)
             _len = ARROW_LEN * _r
@@ -760,7 +717,7 @@ class MemberItem(QGraphicsLineItem):
     def paint(self, painter, option, widget=None) -> None:
         option.state = option.state & ~QStyle.StateFlag.State_Selected
         super().paint(painter, option, widget)
-        if self._scene.model_state.mode_3d and (_SHOW_LOCAL_AXES_ALL or self._is_selected):
+        if _SHOW_LOCAL_AXES_ALL or self._is_selected:
             ni = self._scene.model_state.get_node(self.member.node_i)
             nj = self._scene.model_state.get_node(self.member.node_j)
             if ni and nj:
@@ -912,11 +869,7 @@ class MemberItem(QGraphicsLineItem):
         px_n_m, py_n_m = -uy, ux
         # Arrow direction: gravity (screen-down) in 3D, member-perpendicular in 2D
         ms = self._scene.model_state
-        in_3d = _display_3d(ms)
-        if in_3d:
-            px_n, py_n = 0.0, 1.0
-        else:
-            px_n, py_n = px_n_m, py_n_m
+        px_n, py_n = 0.0, 1.0
 
         w_ref = w_start if abs(w_start) >= abs(w_end) else w_end
         sign = 1.0 if w_ref > 0 else -1.0
@@ -1001,7 +954,6 @@ class MemberItem(QGraphicsLineItem):
 
         ml = self._scene.model_state.active_case.get_member_load(self.member.id)
         ms = self._scene.model_state
-        in_3d = _display_3d(ms)
 
         # Pre-compute model-wide maxima per direction so arrows on different
         # members scale proportionally to each other (same logic as w_global_max).
@@ -1016,7 +968,7 @@ class MemberItem(QGraphicsLineItem):
         # Draw qx arrows
         qxs, qxe = ml.net("qx")
         if qxs != 0.0 or qxe != 0.0:
-            gdir = _proj_x_screen_dir() if in_3d else (1.0, 0.0)
+            gdir = _proj_x_screen_dir()
             self._draw_global_axis_arrows(
                 qxs, qxe, gdir,
                 self._qx_items, self._qx_label_items,
@@ -1024,9 +976,9 @@ class MemberItem(QGraphicsLineItem):
                 global_max=_gmax("qx"),
             )
 
-        # Draw qy arrows (3D only)
+        # Draw qy arrows
         qys, qye = ml.net("qy")
-        if in_3d and (qys != 0.0 or qye != 0.0):
+        if qys != 0.0 or qye != 0.0:
             gdir = _proj_y_screen_dir()
             self._draw_global_axis_arrows(
                 qys, qye, gdir,
@@ -1035,9 +987,9 @@ class MemberItem(QGraphicsLineItem):
                 global_max=_gmax("qy"),
             )
 
-        # Draw qz arrows (3D only) — positive = downward (gravity convention, same as w)
+        # Draw qz arrows — positive = downward (gravity convention, same as w)
         qzs, qze = ml.net("qz")
-        if in_3d and (qzs != 0.0 or qze != 0.0):
+        if qzs != 0.0 or qze != 0.0:
             self._draw_global_axis_arrows(
                 qzs, qze, (0.0, 1.0),  # screen-down = gravity direction
                 self._qz_items, self._qz_label_items,
@@ -1239,12 +1191,7 @@ class MemberItem(QGraphicsLineItem):
 
         ux, uy = dx / L_px, dy / L_px
         ms    = self._scene.model_state
-        in_3d = _display_3d(ms)
-
-        if in_3d:
-            px_n, py_n = 0.0, 1.0
-        else:
-            px_n, py_n = -uy, ux
+        px_n, py_n = 0.0, 1.0
 
         # Model-wide max across full-span and partial loads so sizes are comparable
         _lc2   = ms.active_case

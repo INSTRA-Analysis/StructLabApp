@@ -208,11 +208,6 @@ def inverse_isometric_yz(sx: float, sy: float, x_fixed: float,
     return y, z
 
 
-def is_3d_model(nodes: list) -> bool:
-    """Return True if any node in the model has a non-zero z coordinate."""
-    return any(getattr(n, 'z', 0.0) != 0.0 for n in nodes)
-
-
 def camera_dir(azimuth_deg: float | None = None,
                elevation_deg: float | None = None) -> tuple[float, float, float]:
     """Unit vector pointing FROM the origin TOWARD the camera, in model space.

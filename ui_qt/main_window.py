@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
     def _build_viewport_strips(self) -> None:
         """Floating tools / view / results strips inside the canvas (shared actions)."""
         from ui_qt.viewport_overlay import ViewportStrips
-        self._strips = ViewportStrips(self._view, self._act, self._scene._is_3d_mode)
+        self._strips = ViewportStrips(self._view, self._act)
         self._scene.model_changed.connect(self._strips.refresh)
 
     # ── menu bar ─────────────────────────────────────────────────────────────
@@ -437,7 +437,7 @@ class MainWindow(QMainWindow):
         if not nodes:
             self._sb.showMessage("Select nodes or members to rotate first.")
             return
-        dlg = RotateDialog(self, is_3d=self._scene._is_3d_mode(),
+        dlg = RotateDialog(self, is_3d=True,
                            centroid=self._scene.selection_centroid(nodes))
         if dlg.exec() != dlg.DialogCode.Accepted:
             return

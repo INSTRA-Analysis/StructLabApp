@@ -25,7 +25,7 @@ from ui_qt.model_state import (
 
 from ui_qt.canvas_items import (
     PX_PER_M, GRID_STEP, SNAP_PX,
-    _GHOST_PEN, m_to_px, px_to_m,
+    _GHOST_PEN,
     NodeItem, MemberItem, _node_pos, group_colour,
 )
 import ui_qt.projection as _proj
@@ -471,14 +471,6 @@ class StructCanvas(QGraphicsScene):
 
         if self._mode == CanvasMode.ADD_NODE:
             snapped = self._snap(pos)
-            # 2D mode: flat placement on the XY plane (Y up, z=0).
-            if not self._is_3d_mode():
-                mx = round(snapped.x() / PX_PER_M / 0.25) * 0.25
-                my = round(-snapped.y() / PX_PER_M / 0.25) * 0.25
-                if not self.model_state.node_at(mx, my, 0.0, tol=0.05):
-                    self.save_snapshot()
-                    self._add_node_item(self.model_state.add_node(mx, my, 0.0))
-                return
             ms = self.model_state
             plane  = self._working_plane
             offset = self._plane_offset
@@ -550,8 +542,6 @@ class StructCanvas(QGraphicsScene):
         """Model coordinates (m) under scene point ``pos``, on the active working plane in 3D.
 
         Empty when the view is edge-on to the plane (no unique point)."""
-        if not self._is_3d_mode():
-            return f"x = {pos.x() / PX_PER_M:.2f}   y = {-pos.y() / PX_PER_M:.2f} m"
         az, el = _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION
         sx, sy, off = pos.x(), pos.y(), self._plane_offset
         degen = 0.09
@@ -579,8 +569,7 @@ class StructCanvas(QGraphicsScene):
             self._apply_scale(event.scenePos())
         if self._mode == CanvasMode.ADD_MEMBER and self._ghost_line and self._member_start_node:
             pos = event.scenePos()
-            sx = m_to_px(self._member_start_node.x)
-            sy = -m_to_px(self._member_start_node.y)
+            sx, sy = _node_pos(self._member_start_node, self)
             self._ghost_line.setLine(sx, sy, pos.x(), pos.y())
         if self._mode == CanvasMode.MEASURE and self._measure_line and self._measure_start_node:
             self._update_measure_preview(event.scenePos())
@@ -650,10 +639,8 @@ class StructCanvas(QGraphicsScene):
             self._start_extrude()
         elif key == Qt.Key.Key_S and not ctrl and not shift:
             self._start_scale()
-        elif self._is_3d_mode():
-            self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
         else:
-            super().keyPressEvent(event)
+            self._handle_view_key(key, ctrl) or super().keyPressEvent(event)
 
     # ── G-grab ────────────────────────────────────────────────────────────────
 
@@ -798,10 +785,7 @@ class StructCanvas(QGraphicsScene):
         """Metres along the locked member for a screen drag (dsx, dsy) — projection onto
         the member's on-screen direction."""
         vx, vy, vz = self._grab_dir
-        if self._is_3d_mode():
-            ex, ey = _proj.isometric(vx, vy, vz)
-        else:
-            ex, ey = vx * PX_PER_M, -vy * PX_PER_M
+        ex, ey = _proj.isometric(vx, vy, vz)
         mag2 = ex * ex + ey * ey
         if mag2 < 1e-9:                         # member points at the viewer
             return 0.0
@@ -821,69 +805,59 @@ class StructCanvas(QGraphicsScene):
     def _move_grabbed_nodes_screen(self, dsx: float, dsy: float) -> None:
         """Convert a screen (dsx, dsy) delta to world (dx, dy, dz) and apply."""
         axis  = self._grab_axis
-        is_3d = self._is_3d_mode()
         ppm   = PX_PER_M
 
-        if is_3d:
-            az = math.radians(_proj.ISO_AZIMUTH)
-            el = math.radians(_proj.ISO_ELEVATION)
-            cos_az, sin_az = math.cos(az), math.sin(az)
-            cos_el, sin_el = math.cos(el), math.sin(el)
+        az = math.radians(_proj.ISO_AZIMUTH)
+        el = math.radians(_proj.ISO_ELEVATION)
+        cos_az, sin_az = math.cos(az), math.sin(az)
+        cos_el, sin_el = math.cos(el), math.sin(el)
 
-            if axis == 'X':
-                # screen dir of X axis: (cos_az, -sin_az*sin_el)
-                mag2 = cos_az**2 + (sin_az * sin_el)**2
-                if mag2 < 1e-9: return
-                dx = (dsx * cos_az + dsy * (-sin_az * sin_el)) / (ppm * mag2)
-                dy = dz = 0.0
-            elif axis == 'Y':
-                # screen dir of Y axis: (sin_az, cos_az*sin_el)
-                mag2 = sin_az**2 + (cos_az * sin_el)**2
-                if mag2 < 1e-9: return
-                dy = (dsx * sin_az + dsy * cos_az * sin_el) / (ppm * mag2)
-                dx = dz = 0.0
-            elif axis == 'Z':
-                # screen dir of Z axis: (0, -cos_el)
-                if abs(cos_el) < 1e-9: return
-                dz = -dsy / (ppm * cos_el)
-                dx = dy = 0.0
-            else:
-                # Free: project onto active workplane
-                plane = self._working_plane
-                z_val = self._plane_offset
-                if plane == WorkingPlane.XZ:
-                    # Solve: dsx = cos_az*dx*ppm ; dsy = (-sin_az*sin_el*dx - cos_el*dz)*ppm
-                    if abs(cos_az * cos_el) < 1e-9: return
-                    dx = (dsx / ppm) / cos_az
-                    dz = (dsy / ppm - (-sin_az * sin_el) * dx) / (-cos_el)
-                    dy = 0.0
-                elif plane == WorkingPlane.YZ:
-                    # Solve: dsx = sin_az*dy*ppm ; dsy = (cos_az*sin_el*dy - cos_el*dz)*ppm
-                    if abs(sin_az * cos_el) < 1e-9: return
-                    dy = (dsx / ppm) / sin_az
-                    dz = (dsy / ppm - cos_az * sin_el * dy) / (-cos_el)
-                    dx = 0.0
-                else:
-                    # XY / FREE — use inverse projection at fixed z
-                    assert self._grab_origin_pos is not None
-                    ox, oy = inverse_isometric(
-                        self._grab_origin_pos.x(), self._grab_origin_pos.y(),
-                        z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
-                    )
-                    cx, cy = inverse_isometric(
-                        self._grab_origin_pos.x() + dsx,
-                        self._grab_origin_pos.y() + dsy,
-                        z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
-                    )
-                    dx, dy, dz = cx - ox, cy - oy, 0.0
+        if axis == 'X':
+            # screen dir of X axis: (cos_az, -sin_az*sin_el)
+            mag2 = cos_az**2 + (sin_az * sin_el)**2
+            if mag2 < 1e-9: return
+            dx = (dsx * cos_az + dsy * (-sin_az * sin_el)) / (ppm * mag2)
+            dy = dz = 0.0
+        elif axis == 'Y':
+            # screen dir of Y axis: (sin_az, cos_az*sin_el)
+            mag2 = sin_az**2 + (cos_az * sin_el)**2
+            if mag2 < 1e-9: return
+            dy = (dsx * sin_az + dsy * cos_az * sin_el) / (ppm * mag2)
+            dx = dz = 0.0
+        elif axis == 'Z':
+            # screen dir of Z axis: (0, -cos_el)
+            if abs(cos_el) < 1e-9: return
+            dz = -dsy / (ppm * cos_el)
+            dx = dy = 0.0
         else:
-            # 2D mode (XY plane): screen-vertical → world Y
-            if axis == 'X':
-                dx, dy, dz = dsx / ppm, 0.0, 0.0
-            elif axis == 'Y':
-                dx, dy, dz = 0.0, -dsy / ppm, 0.0
+            # Free: project onto active workplane
+            plane = self._working_plane
+            z_val = self._plane_offset
+            if plane == WorkingPlane.XZ:
+                # Solve: dsx = cos_az*dx*ppm ; dsy = (-sin_az*sin_el*dx - cos_el*dz)*ppm
+                if abs(cos_az * cos_el) < 1e-9: return
+                dx = (dsx / ppm) / cos_az
+                dz = (dsy / ppm - (-sin_az * sin_el) * dx) / (-cos_el)
+                dy = 0.0
+            elif plane == WorkingPlane.YZ:
+                # Solve: dsx = sin_az*dy*ppm ; dsy = (cos_az*sin_el*dy - cos_el*dz)*ppm
+                if abs(sin_az * cos_el) < 1e-9: return
+                dy = (dsx / ppm) / sin_az
+                dz = (dsy / ppm - cos_az * sin_el * dy) / (-cos_el)
+                dx = 0.0
             else:
-                dx, dy, dz = dsx / ppm, -dsy / ppm, 0.0
+                # XY / FREE — use inverse projection at fixed z
+                assert self._grab_origin_pos is not None
+                ox, oy = inverse_isometric(
+                    self._grab_origin_pos.x(), self._grab_origin_pos.y(),
+                    z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
+                )
+                cx, cy = inverse_isometric(
+                    self._grab_origin_pos.x() + dsx,
+                    self._grab_origin_pos.y() + dsy,
+                    z_val, ppm, _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION,
+                )
+                dx, dy, dz = cx - ox, cy - oy, 0.0
 
         self._apply_delta_to_grabbed(dx, dy, dz)
 
@@ -1231,9 +1205,6 @@ class StructCanvas(QGraphicsScene):
             self._scale_typed = (self._scale_typed[1:] if self._scale_typed.startswith('-')
                                  else '-' + self._scale_typed)
             self._apply_scale_typed_value()
-
-    def _is_3d_mode(self) -> bool:
-        return self.model_state.analysis_mode == "3D"
 
     def _handle_view_key(self, key: int, ctrl: bool) -> bool:
         """Handle numpad-style view shortcuts (3D mode only).
@@ -1653,18 +1624,6 @@ class StructCanvas(QGraphicsScene):
         """Reset orbit to the default isometric view (↙ SW)."""
         self.set_view()
 
-    def set_analysis_mode(self, mode: str) -> bool:
-        """Take a 2D model to 3D live: it becomes the same structure as a plane frame in the
-        XZ plane (rotated so every load keeps its direction), shown from the front.  Going to
-        2D is refused: StructLab no longer makes 2D models (use Plane Frame (XZ)).
-        Returns True if it changed."""
-        if mode != "3D" or not self.model_state.convert_to_plane_frame():
-            return False
-        self.clear_overlays()
-        self.set_view(0.0, 2.0)          # front elevation of the plane frame (also reprojects)
-        self.model_changed.emit()
-        return True
-
     def update_depth_order(self) -> None:
         """Update member Z-values so nearer members render on top."""
         from ui_qt.projection import depth_order
@@ -1989,7 +1948,12 @@ class StructCanvas(QGraphicsScene):
         it before rebuilding, so that would wipe the very data you meant to
         redraw. Use redraw() instead when the model_state object is already
         current and only the visuals need to catch up (e.g. after an
-        out-of-band edit via the Python console)."""
+        out-of-band edit via the Python console).
+
+        The canvas holds 3D models only: a 2D one becomes the same structure as a plane
+        frame in the XZ plane first (``converted_from_2d`` is then set on the state)."""
+        if state.convert_to_plane_frame():
+            state.converted_from_2d = True
         self.clear_model()
         self.model_state = state
         self._rebuild_items()
@@ -2392,10 +2356,7 @@ class StructView(QGraphicsView):
                              "Press N to add a node  |  Ctrl+O to open  |  Presets menu to start")
             return
 
-        if self.scene()._is_3d_mode():
-            self._draw_iso_grid(painter, rect)
-        else:
-            self._draw_flat_grid(painter, rect)
+        self._draw_iso_grid(painter, rect)
 
         if self.scene()._grab_active:
             self._draw_grab_status(painter, rect)
@@ -2440,14 +2401,11 @@ class StructView(QGraphicsView):
                     painter.setBrush(QBrush(QColor(0, 120, 200, 28)))
                 painter.drawRect(rb)
 
-        # ── 2. ViewCube (top-right corner) — 3D only; 2D shows an axis badge ──
+        # ── 2. Navigation gizmo (top-right corner) ──────────────────────────────
         vc = self._view_cube
         vc_cx = float(w - (vc.MARGIN + vc.HALF))
         vc_cy = float(vc.MARGIN + vc.HALF)
-        if scene._is_3d_mode():
-            vc.paint(painter, vc_cx, vc_cy, 1.0)
-        else:
-            self._draw_2d_axis_badge(painter, vc_cx, vc_cy)
+        vc.paint(painter, vc_cx, vc_cy, 1.0)
 
         # (The working-plane offset is shown on the floating view strip, see
         #  viewport_overlay.py and MainWindow._update_plane_offset_action.)
@@ -2724,65 +2682,6 @@ class StructView(QGraphicsView):
         painter.restore()
         return box
 
-    def _draw_flat_grid(self, painter: QPainter, rect) -> None:
-        """Standard rectangular 2D grid."""
-        # ── adaptive grid spacing ─────────────────────────────────────────────
-        scale = self.transform().m11()
-        px_per_m = PX_PER_M * scale
-        target_px = 30
-
-        sub_spacing = 0.25
-        best_diff = 1e9
-        for s in self._SUB_SPACINGS:
-            spx = px_per_m * s
-            diff = abs(spx - target_px)
-            if diff < best_diff:
-                best_diff = diff
-                sub_spacing = s
-
-        minor_step = int(round(sub_spacing * PX_PER_M))
-        if minor_step < 1:
-            minor_step = 1
-        major_step = GRID_STEP
-
-        fade_c, fade_r = self._grid_fade()
-        minor_pen = _fade_pen(QColor(_GRID_MINOR), fade_c, fade_r)
-        major_pen = _fade_pen(QColor(_GRID_MAJOR), fade_c, fade_r, 1.2)
-
-        left = int(math.floor(rect.left()   / minor_step)) * minor_step
-        right = int(math.ceil( rect.right()  / minor_step)) * minor_step
-        top   = int(math.floor(rect.top()    / minor_step)) * minor_step
-        bot   = int(math.ceil( rect.bottom() / minor_step)) * minor_step
-
-        minor_v, major_v, minor_h, major_h = [], [], [], []
-        x = left
-        while x <= right:
-            line = QLineF(x, rect.top(), x, rect.bottom())
-            (major_v if x % major_step == 0 else minor_v).append(line)
-            x += minor_step
-        y = top
-        while y <= bot:
-            line = QLineF(rect.left(), y, rect.right(), y)
-            (major_h if y % major_step == 0 else minor_h).append(line)
-            y += minor_step
-
-        painter.setPen(minor_pen)
-        if minor_v: painter.drawLines(minor_v)
-        if minor_h: painter.drawLines(minor_h)
-        painter.setPen(major_pen)
-        if major_v: painter.drawLines(major_v)
-        if major_h: painter.drawLines(major_h)
-
-        # ── World-origin axes (drawn on top of the grid) ──────────────────────
-        def _axis_pen(colour: str) -> QPen:
-            c = QColor(colour); c.setAlpha(210)
-            return _fade_pen(c, fade_c, fade_r, 2.0)
-
-        painter.setPen(_axis_pen(_theme.AXIS_X))   # X axis — red, horizontal at y=0
-        painter.drawLine(QLineF(rect.left(), 0, rect.right(), 0))
-        painter.setPen(_axis_pen(_theme.AXIS_Y))   # Y axis — green, vertical at x=0
-        painter.drawLine(QLineF(0, rect.top(), 0, rect.bottom()))
-
     def _draw_iso_grid(self, painter: QPainter, rect) -> None:
         """Isometric grid: adaptive spacing + viewport-following extent."""
 
@@ -2961,9 +2860,7 @@ class StructView(QGraphicsView):
 
     def restore_view(self, view: dict) -> None:
         """Return to a camera captured by ``capture_view``."""
-        sc = self.scene()
-        if sc._is_3d_mode():
-            sc.set_view(view["az"], view["el"])
+        self.scene().set_view(view["az"], view["el"])
         self.resetTransform()
         self.scale(view["scale"], view["scale"])
         self.centerOn(view["cx"], view["cy"])
@@ -3071,29 +2968,11 @@ class StructView(QGraphicsView):
         self._view_cube.home_az = _proj.ISO_AZIMUTH
         self._view_cube.home_el = _proj.ISO_ELEVATION
 
-    def _draw_2d_axis_badge(self, painter, cx: float, cy: float) -> None:
-        """X→ / Y↑ orientation badge shown in 2D mode (replaces the ViewCube)."""
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        ox, oy, L = cx - 6.0, cy + 10.0, 22.0
-        xpen = QPen(QColor(_theme.AXIS_X)); xpen.setCosmetic(True); xpen.setWidthF(2.0)
-        painter.setPen(xpen)
-        painter.drawLine(QPointF(ox, oy), QPointF(ox + L, oy))      # X → right
-        ypen = QPen(QColor(_theme.AXIS_Y)); ypen.setCosmetic(True); ypen.setWidthF(2.0)
-        painter.setPen(ypen)
-        painter.drawLine(QPointF(ox, oy), QPointF(ox, oy - L))      # Y ↑ up
-        f = painter.font(); f.setPointSize(8); f.setBold(True); painter.setFont(f)
-        painter.setPen(QPen(QColor(_theme.AXIS_X))); painter.drawText(QPointF(ox + L + 2, oy + 4), "X")
-        painter.setPen(QPen(QColor(_theme.AXIS_Y))); painter.drawText(QPointF(ox - 4, oy - L - 3), "Y")
-        painter.setPen(QPen(QColor(_theme.CYAN))); painter.drawText(QPointF(cx - 20, cy - 24), "2D")
-        painter.restore()
-
     # ── middle-mouse pan (ScrollHandDrag only works with left button) ─────────
 
     def mousePressEvent(self, event) -> None:
-        cube_live = self.scene()._is_3d_mode()   # cube hidden/inert in 2D
         # ── ViewCube right-click → context menu ───────────────────────────────
-        if cube_live and event.button() == Qt.MouseButton.RightButton:
+        if event.button() == Qt.MouseButton.RightButton:
             vc = self._view_cube
             vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
             vc_cy = float(vc.MARGIN + vc.HALF)
@@ -3103,7 +2982,7 @@ class StructView(QGraphicsView):
                 return
 
         # ── ViewCube click — hit-test in stable viewport pixels ───────────────
-        if cube_live and event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             vc = self._view_cube
             vc_cx = float(self.viewport().width()  - (vc.MARGIN + vc.HALF))
             vc_cy = float(vc.MARGIN + vc.HALF)
@@ -3133,7 +3012,7 @@ class StructView(QGraphicsView):
         # ── Middle mouse: orbit (3D) or pan ──────────────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
             shift = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            if shift and self.scene()._is_3d_mode():   # orbit disabled in 2D
+            if shift:
                 self._orbit_last = event.pos()
                 self._orbit_center = self._selected_centroid()
                 self.scene().clear_overlays()

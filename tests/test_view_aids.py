@@ -26,13 +26,6 @@ def _scene(z_top=0.0):
     return sc
 
 
-def test_cursor_text_2d_reads_model_coordinates(qapp):
-    from ui_qt.canvas_items import PX_PER_M
-    sc = _scene()
-    sc.model_state.analysis_mode = "2D"
-    assert sc.cursor_text(QPointF(2 * PX_PER_M, -1.5 * PX_PER_M)) == "x = 2.00   y = 1.50 m"
-
-
 def test_cursor_text_3d_inverts_the_projection_on_the_working_plane(qapp):
     import ui_qt.projection as proj
     from ui_qt.canvas_items import PX_PER_M
@@ -276,12 +269,12 @@ def _solved_cantilever():
     from ui_qt.model_state import ModelState, NodeLoad, SupportType
     from ui_qt.solve_actions import solve_engine
     state = ModelState()
-    state.analysis_mode = "2D"                    # fy = down: a 2D cantilever
+    state.analysis_type = "plane_xz"              # a cantilever in the XZ plane, Z up
     a, b = state.add_node(0, 0, 0), state.add_node(4, 0, 0)
     a.support_type = SupportType.FIXED
     m = state.add_member(a.id, b.id)
     m.E, m.A, m.I, m.W_pl, m.fy = 210e9, 0.01, 1e-4, 4e-4, 275e6
-    state.load_cases[0].set_node_load(b.id, NodeLoad(fy=-10e3))     # 10 kN down at the tip
+    state.load_cases[0].set_node_load(b.id, NodeLoad(fz=-10e3))     # 10 kN down at the tip
     sc = StructCanvas()
     sc.load_state(state)
     model, emap = build_model(state, state.load_cases[0])
@@ -297,9 +290,9 @@ def test_tooltips_show_results_only_when_a_solve_is_current(qapp):
     assert "M max = 40.00 kN·m" in text and "N = 0.0 kN" in text
     assert "utilisation = 0.36" in text                                          # 40 kN·m / (4e-4·275e6)
     tip = nt()
-    assert "u = (0.00, -" in tip and "mm" in tip                                 # tip deflects down
+    assert "u = (0.00, 0.00, -" in tip and "mm" in tip                           # tip deflects down (z)
     assert "R =" not in tip                                                      # free node: no reaction
-    assert "R = (0.0, 10.0" in sc._node_items[a.id].tooltip_text()               # fixed support reaction
+    assert "R = (0.0, 0.0, 10.0" in sc._node_items[a.id].tooltip_text()          # fixed support reaction
     sc.results_provider = lambda: None                                           # edit invalidated the cache
     assert "current results" not in mt()
 

@@ -126,10 +126,10 @@ def test_tooltip_handles_missing_section_and_group(qapp):
     assert "no group" in tip and "no section set" in tip and "kg" not in tip
 
 
-def test_node_tooltip_shows_coordinates_and_support_in_3d_and_2d(qapp):
+def test_node_tooltip_shows_coordinates_and_support(qapp):
     from ui_qt.canvas import StructCanvas
     from ui_qt.model_state import ModelState, SupportType
-    for z, expect in ((2.5, "z = 2.500"), (0.0, None)):
+    for z, expect in ((2.5, "z = 2.500"), (0.0, "z = 0.000")):      # 3D models only
         state = ModelState()
         n = state.add_node(1.25, -3.0, z)
         n.support_type = SupportType.PIN
@@ -138,4 +138,4 @@ def test_node_tooltip_shows_coordinates_and_support_in_3d_and_2d(qapp):
         sc.load_state(state)
         tip = sc._node_items[n.id].tooltip_text()
         assert "x = 1.250" in tip and "y = -3.000" in tip and "Support: Pin" in tip
-        assert (expect in tip) if expect else ("z =" not in tip)
+        assert expect in tip

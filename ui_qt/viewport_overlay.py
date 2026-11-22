@@ -12,7 +12,6 @@ the scene never moves them. They are re-placed whenever the view is resized.
 
 from __future__ import annotations
 
-from typing import Callable
 
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, QSize, Qt
@@ -103,10 +102,9 @@ class FloatingStrip(QFrame):
 class ViewportStrips(QObject):
     """Builds the three strips on ``view`` and keeps them placed inside its viewport."""
 
-    def __init__(self, view, actions: dict[str, QAction], is_3d: Callable[[], bool]) -> None:
+    def __init__(self, view, actions: dict[str, QAction]) -> None:
         super().__init__(view)
         self._view = view
-        self._is_3d = is_3d
         self.left = self._build(LEFT_KEYS, actions, vertical=True, name="Tools")
         self.top = self._build(TOP_KEYS, actions, vertical=False, name="View")
         self.right = self._build(RIGHT_KEYS, actions, vertical=True, name="Results")
@@ -136,7 +134,7 @@ class ViewportStrips(QObject):
         return strip
 
     def refresh(self) -> None:
-        """Re-evaluate the view strip (3D only) and re-place everything."""
+        """Re-evaluate the view strip and re-place everything."""
         if not self._alive():
             return
         self.reposition()
@@ -150,9 +148,6 @@ class ViewportStrips(QObject):
     def _fit_top(self, free_width: int) -> bool:
         """Fit the view strip into ``free_width``: drop the view presets (the gizmo does
         the same job) before hiding the strip. True if it is shown."""
-        if not self._is_3d():
-            self.top.hide()
-            return False
         self.top.set_group_visible(0, True)
         if self.top.fresh_size().width() > free_width:
             self.top.set_group_visible(0, False)

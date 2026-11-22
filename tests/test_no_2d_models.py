@@ -18,14 +18,8 @@ def qapp():
     yield app
 
 
-def test_canvas_refuses_to_switch_to_2d(qapp):
-    from ui_qt.canvas import StructCanvas
-    sc = StructCanvas()
-    assert sc.set_analysis_mode("2D") is False
-    assert sc.model_state.analysis_mode == "3D"
-
-
-def test_canvas_takes_a_2d_model_to_a_plane_frame(qapp):
+def test_the_canvas_holds_3d_models_only(qapp):
+    """A 2D model put on the canvas becomes the same structure as a plane frame."""
     from ui_qt.canvas import StructCanvas
     s = ModelState()
     s.analysis_mode = "2D"
@@ -34,9 +28,10 @@ def test_canvas_takes_a_2d_model_to_a_plane_frame(qapp):
     s.active_case.set_node_load(b.id, NodeLoad(fy=-5e3))
     sc = StructCanvas()
     sc.load_state(s)
-    assert sc.set_analysis_mode("3D") is True
+    assert sc.model_state is s and s.converted_from_2d
     assert (s.analysis_mode, s.analysis_type) == ("3D", "plane_xz")
     assert (b.z, s.active_case.get_node_load(b.id).fz) == (3.0, -5e3)
+    assert not hasattr(sc, "set_analysis_mode")                  # no switch back to 2D
 
 
 def test_a_console_edit_to_2d_comes_back_as_a_plane_frame(qapp, monkeypatch):

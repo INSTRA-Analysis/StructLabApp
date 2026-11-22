@@ -85,13 +85,6 @@ def test_a_wizard_frame_opens_on_the_front_view(win):
     assert win._act["plane_frame"].isChecked()
 
 
-def test_the_toggle_is_disabled_for_a_2d_model(win):
-    win._scene.load_state(_portal("2D"))
-    win._update_status_stats()
-    act = win._act["plane_frame"]
-    assert not act.isEnabled() and win._sb_analysis.text() == "2D frame"
-
-
 def test_a_saved_plane_frame_reopens_as_one(win, tmp_path):
     from ui_qt.io import save_model
     s = _portal()
