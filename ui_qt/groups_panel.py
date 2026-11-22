@@ -77,7 +77,8 @@ def apply_section(members: list[MemberData], result: tuple, extra: dict | None) 
     ``result`` is ``SectionPickerDialog.get_result()``:
     (E, A, I, W_pl, W_el, b, h, density, fy, material_type); ``extra`` its get_extra()
     (angles: I_y = minor principal moment, J). Optional values the picker leaves at 0
-    keep what the member already had.
+    keep what the member already had — except I_y and J: a profile without them (I-/H-sections)
+    clears them, so a member never keeps another section's weak axis (flagged in space frames).
     """
     E, A, I, W_pl, W_el, b, h, density, fy, _material = result
     for m in members:
@@ -92,6 +93,8 @@ def apply_section(members: list[MemberData], result: tuple, extra: dict | None) 
             m.h_sec = h
         if extra:
             m.I_y, m.J = extra["I_y"], extra["J"]
+        else:
+            m.I_y, m.J = None, 0.0
 
 
 class GroupsPanel(QWidget):

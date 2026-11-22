@@ -2084,9 +2084,12 @@ class MainWindow(QMainWindow):
                 f"Max moment: {max_m/1000:.2f} kN·m "
                 f"(member {max_m_member if max_m_member is not None else '-'})"
             )
-            from ui_qt.solve_actions import lock_force_note
+            from ui_qt.solve_actions import lock_force_note, solve_notes
             note = lock_force_note(cache)          # plane frame: anything the locks absorbed
-            self._sb.showMessage(summary + (f"  |  ⚠ {note}" if note else ""))
+            for extra in (note, solve_notes(getattr(self, "_last_issues", []))):
+                if extra:
+                    summary += f"  |  ⚠ {extra}"
+            self._sb.showMessage(summary)
             self._update_status_stats()
             self._show_results_workspace()
         except Exception as exc:

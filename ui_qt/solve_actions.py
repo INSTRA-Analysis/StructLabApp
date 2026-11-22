@@ -16,7 +16,7 @@ import numpy as np
 @dataclass(frozen=True)
 class Issue:
     """One validation finding, with the nodes / members it is about (for select-and-zoom)."""
-    severity: str                       # "error" | "warning"
+    severity: str                       # "error" (blocks) | "warning" (asks) | "note" (told after)
     text: str
     node_ids: tuple[int, ...] = ()
     member_ids: tuple[int, ...] = ()
@@ -44,7 +44,7 @@ def validate_model_issues(state) -> list[Issue]:
         def append(self, text: str, nodes=(), members=()) -> None:     # type: ignore[override]
             issues.append(Issue(self._severity, text, tuple(nodes), tuple(members)))
 
-    errors, warnings = _Sink("error"), _Sink("warning")
+    errors, warnings, notes = _Sink("error"), _Sink("warning"), _Sink("note")
 
     # Connected node IDs
     connected = {m.node_i for m in state.members} | {m.node_j for m in state.members}
@@ -156,8 +156,37 @@ def validate_model_issues(state) -> list[Issue]:
 
     if not state.is_2d and state.analysis_type == "plane_xz" and state.nodes:
         _check_plane_frame(state, lc, errors, warnings)
+    if not state.is_2d and state.analysis_type == "space":
+        _check_space_frame_sections(state, notes)
 
     return issues
+
+
+def solve_notes(issues) -> str | None:
+    """One status-bar line for the 'note' findings (do not block or ask; told after the solve)."""
+    notes = [i for i in issues if i.severity == "note"]
+    if not notes:
+        return None
+    return " ".join(i.text.split("\n")[0] for i in notes)
+
+
+def _check_space_frame_sections(state, notes) -> None:
+    """Space frame: bending members need a real weak-axis I_y and torsion constant J.  The
+    library has no verified I_y / J for I- and H-sections, so after picking one (or for a
+    member never given them) I_y falls back to the strong-axis I — an IPE 300 would be ~14×
+    too stiff sideways — and J = 0 gives no torsional stiffness at all."""
+    from ui_qt.model_state import ElementType
+    missing = [m.id for m in state.members
+               if m.element_type != ElementType.BAR and (m.I_y is None or m.J <= 0.0)]
+    if missing:
+        notes.append(
+            f"Space frame: member(s) {', '.join(map(str, missing[:12]))}"
+            f"{' …' if len(missing) > 12 else ''} have no weak-axis I_y (taken equal to I) "
+            "and/or no torsion constant J.\nTheir sideways bending and torsion are then not "
+            "real. Enter I_y and J from the manufacturer's tables (Section tab); the library "
+            "has them for angles only.",
+            members=missing,
+        )
 
 
 # A node counts as in the frame's XZ plane within this distance (m) of the median y.

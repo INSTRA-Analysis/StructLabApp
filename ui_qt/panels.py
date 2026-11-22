@@ -502,7 +502,8 @@ def _run_section_picker(parent: QWidget, *, E: QDoubleSpinBox, A: QDoubleSpinBox
     widgets. on_material_change(mat_type) updates Design-tab visibility;
     on_done() saves immediately, without an extra Apply click. on_extra(dict) receives
     the section's extra properties (angles: I_y = minor principal moment, J, i_v ...)
-    before on_done runs; it is only called when the section has any."""
+    before on_done runs — an empty dict when the profile has none (I-/H-sections: the library
+    has no verified I_y / J yet), so the form drops the previous section's values."""
     from ui_qt.section_picker import SectionPickerDialog
     dlg = SectionPickerDialog(
         current_E=E.value() * 1e9, current_A=A.value(), current_I=I.value() * 1e-6,
@@ -527,8 +528,8 @@ def _run_section_picker(parent: QWidget, *, E: QDoubleSpinBox, A: QDoubleSpinBox
     fy_lbl.setText(_MAT_TYPE_LABELS.get(mat_type, "fy (MPa):"))
     on_material_change(mat_type)
     extra = dlg.get_extra()
-    if extra and on_extra is not None:
-        on_extra(extra)
+    if on_extra is not None:
+        on_extra(extra or {})          # {} = this profile carries no I_y / J data
     on_done()
 
 
@@ -843,9 +844,15 @@ class _MemberForm(QWidget):
         )
 
     def _apply_section_extra(self, extra: dict) -> None:
-        """Angle picked: the minor principal moment is the weak-axis I_y; set J too."""
-        self._Iy.setValue(extra["I_y"] * 1e6)
-        self._J.setValue(extra["J"] * 1e6)
+        """Angle picked: the minor principal moment is the weak-axis I_y; set J too.  A profile
+        without that data clears them (I_y = I, J = 0 — flagged in a space frame) instead of
+        keeping the previous section's values."""
+        if extra:
+            self._Iy.setValue(extra["I_y"] * 1e6)
+            self._J.setValue(extra["J"] * 1e6)
+        else:
+            self._Iy.setValue(self._I.value())
+            self._J.setValue(0.0)
 
     def _add_pl_row(self, load_type: str, position: float, magnitude_kn: float) -> None:
         row = self._pl_table.rowCount()
@@ -1398,6 +1405,8 @@ class _MultiMemberForm(QWidget):
             if extra:
                 m.I_y = extra["I_y"]
                 m.J   = extra["J"]
+            elif extra is not None:          # a profile without I_y / J: drop the old ones
+                m.I_y, m.J = None, 0.0
             if self._model_state:
                 for lc in self._model_state.load_cases:
                     old_ml = lc.get_member_load(m.id)
