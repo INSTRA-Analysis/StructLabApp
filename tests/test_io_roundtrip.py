@@ -282,9 +282,9 @@ def test_validate_model_detects_zero_length():
 
 @pytest.mark.parametrize("mode", ["2D", "3D"])
 def test_analysis_mode_roundtrips_through_save_load(mode):
-    """The 2D/3D project type must survive a save/load cycle exactly — it's
-    now a sticky, one-time choice (no in-session toggle), so opening a file
-    must always reproduce the mode it was saved in, never silently default."""
+    """The 2D/3D project type survives a save/load cycle exactly in the file (read with
+    keep_2d=True), never silently defaulting.  Opening normally turns a 2D model into the
+    same structure as a 3D plane frame in XZ (see tests/test_open_2d_files.py)."""
     s = ModelState()
     s.analysis_mode = mode
     n0 = s.add_node(0.0, 0.0, 0.0)
@@ -298,11 +298,14 @@ def test_analysis_mode_roundtrips_through_save_load(mode):
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "roundtrip.slab"
         save_model(s, path)
-        loaded = load_model(path)
+        loaded = load_model(path, keep_2d=True)
+        opened = load_model(path)
 
     assert loaded.analysis_mode == mode
     assert loaded.mode_3d == (mode == "3D")
     assert loaded.is_2d == (mode == "2D")
+    assert opened.analysis_mode == "3D"
+    assert opened.analysis_type == ("plane_xz" if mode == "2D" else "space")
 
 
 def test_reinforcement_estimated_flag_roundtrips_through_save_load():

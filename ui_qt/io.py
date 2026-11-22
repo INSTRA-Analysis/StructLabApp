@@ -31,11 +31,21 @@ def save_model(state: ModelState, filepath: str | Path) -> None:
     Path(filepath).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def load_model(filepath: str | Path) -> ModelState:
+def load_model(filepath: str | Path, keep_2d: bool = False) -> ModelState:
     """Deserialize a .slab JSON file into a ModelState.
 
     Handles v3 (full 3D), v2 (EN 1990 loads, 2D-only), and v1 (legacy).
+    A 2D model (XY plane, Y up) opens as the same structure in 3D: a plane frame in the XZ
+    plane (``ModelState.convert_to_plane_frame``), with identical results.  The returned
+    state then has ``converted_from_2d = True`` (not saved) so the window can say so.
+    ``keep_2d=True`` returns the model as stored.
     """
+    state = _read_model(filepath)
+    state.converted_from_2d = (not keep_2d) and state.convert_to_plane_frame()
+    return state
+
+
+def _read_model(filepath: str | Path) -> ModelState:
     raw = json.loads(Path(filepath).read_text(encoding="utf-8"))
     version = raw.get("version", 1)
 
@@ -91,4 +101,5 @@ def load_model(filepath: str | Path) -> ModelState:
                                  max((n.id for n in s.nodes),   default=-1) + 1)
     s._next_member_id = raw.get("_next_member_id",
                                  max((m.id for m in s.members), default=-1) + 1)
+    s.analysis_mode = "2D"              # v1 files are always 2D (XY plane, Y up)
     return s

@@ -661,6 +661,17 @@ class ModelState:
                     for pl in ml.point_loads:
                         pl.magnitude = -pl.magnitude + 0.0
 
+    def convert_to_plane_frame(self) -> bool:
+        """Turn a 2D model (XY, Y up) into the same structure as a 3D plane frame in the XZ
+        plane (Z up), solved with uy, θx, θz locked: identical results, one axis convention.
+        Returns True if it converted, False if the model was not 2D."""
+        if not self.is_2d:
+            return False
+        self.rotate_axes("3D")
+        self.analysis_mode = "3D"
+        self.analysis_type = "plane_xz"
+        return True
+
     def _members_with_reversed_local_y(self) -> set[int]:
         """Members of a planar model (in its 3D axes, XZ plane) whose 2D local y (90°
         anticlockwise from the member, mapped into XZ) opposes the 3D local y."""

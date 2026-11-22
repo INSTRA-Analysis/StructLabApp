@@ -928,7 +928,12 @@ class MainWindow(QMainWindow):
             _AUTOSAVE_PATH.unlink(missing_ok=True)
             self._update_title()
             self._update_status_stats()
-            self._sb.showMessage(f"Opened: {path}")
+            if getattr(state, "converted_from_2d", False):
+                self._sb.showMessage(
+                    f"Opened: {path}  |  2D model opened as a plane frame in the XZ plane "
+                    "(Z up) — same results. Save to keep it in this form.")
+            else:
+                self._sb.showMessage(f"Opened: {path}")
             RF.push(path)
         except Exception as exc:
             QMessageBox.critical(self, "Open error", str(exc))
