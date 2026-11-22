@@ -437,7 +437,7 @@ class MainWindow(QMainWindow):
         if not nodes:
             self._sb.showMessage("Select nodes or members to rotate first.")
             return
-        dlg = RotateDialog(self, is_3d=True,
+        dlg = RotateDialog(self,
                            centroid=self._scene.selection_centroid(nodes))
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
@@ -961,7 +961,7 @@ class MainWindow(QMainWindow):
         """A plane frame is shown from the front, working in its XZ plane (once, on opening;
         the user may orbit freely afterwards)."""
         st = self._scene.model_state
-        if not (st.mode_3d and st.analysis_type == "plane_xz"):
+        if st.analysis_type != "plane_xz":
             return
         self._act["view_front"].trigger()
         ys = sorted(n.y for n in st.nodes)
@@ -2239,14 +2239,13 @@ class MainWindow(QMainWindow):
             self._scene.refresh_section_widths()      # a section may have been edited
 
     def _sync_analysis_type(self) -> None:
-        """Plane Frame toggle and status badge follow the model (2D models: toggle disabled)."""
+        """Plane Frame toggle and status badge follow the model."""
         from ui_qt.model_state import analysis_label
         state = self._scene.model_state
         act = self._act.get("plane_frame")
         if act is not None:
             act.blockSignals(True)
-            act.setChecked(not state.is_2d and state.analysis_type == "plane_xz")
-            act.setEnabled(not state.is_2d)
+            act.setChecked(state.analysis_type == "plane_xz")
             act.blockSignals(False)
         if hasattr(self, "_sb_analysis"):
             short, long = analysis_label(state)
@@ -2255,11 +2254,7 @@ class MainWindow(QMainWindow):
 
     def _on_plane_frame_toggled(self, checked: bool) -> None:
         state = self._scene.model_state
-        if state.is_2d:
-            self._sync_analysis_type()
-            self._sb.showMessage("A 2D model is a plane frame already.")
-            return
-        wanted = "plane_xz" if checked else "space"
+        wanted ="plane_xz" if checked else "space"
         if state.analysis_type == wanted:
             return
         self._scene.save_snapshot()                     # undoable like any model edit
@@ -2638,7 +2633,7 @@ class MainWindow(QMainWindow):
             self._sb.showMessage("Select nodes or members to duplicate  (Ctrl+D)")
             return
 
-        dlg = DuplicateDialog(self, is_3d=True)
+        dlg = DuplicateDialog(self)
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 

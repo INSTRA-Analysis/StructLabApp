@@ -124,13 +124,13 @@ def test_describe_support_names_presets_and_lists_custom_restraints():
     n.support_type = SupportType.ROLLER_Y
     assert describe_support(n) == "Roller, free in Y"
     n.support_type = SupportType.ROLLER_Z
-    assert describe_support(n, is_2d=True) == "Pinned"          # what 2D actually solves
+    assert describe_support(n) == "Roller, free in Z"
     n.set_restraints((True, True, True, False, False, False))
     n.spring_ktheta = 4e5
     assert describe_support(n) == "Restrains ux, uy, uz + springs θz"
     n.spring_ktheta = 0.0
     n.set_restraints((False, False, False, False, False, True))
-    assert describe_support(n, is_2d=True) == "Restrains θz"
+    assert describe_support(n) == "Restrains θz"
     n.set_restraints((False,) * 6)
     assert describe_support(n) == "Free"
 

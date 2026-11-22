@@ -101,7 +101,7 @@ COMMANDS: tuple[Command, ...] = (
     Command("plane_frame", "Plane Frame (XZ)", "_on_plane_frame_toggled", "layers", "",
             "Analyse the model as a plane frame in its XZ plane: a 2D analysis in the 3D engine\n"
             "(uy, θx, θz restrained at every node, no out-of-plane supports needed).\n"
-            "Off = space frame, all six DOFs. 3D models only; a 2D model is a plane frame already.",
+            "Off = space frame, all six DOFs.",
             True),
     Command("clear_results", "Clear Results", "_on_clear_results", "eraser"),
     Command("ov_bmd", "BMD", None, "chart-spline", "", "Bending moment diagram", True, True),

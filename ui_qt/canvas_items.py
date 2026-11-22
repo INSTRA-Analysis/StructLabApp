@@ -274,7 +274,7 @@ class NodeItem(QGraphicsEllipseItem):
         n = self.node
         coords = f"x = {n.x:.3f}   y = {n.y:.3f}   z = {n.z:.3f} m"
         from ui_qt.model_state import describe_support
-        support = describe_support(n, is_2d=False)
+        support = describe_support(n)
         return "\n".join([f"Node {n.id}", coords, f"Support: {support}"] + self._result_lines())
 
     def _result_lines(self) -> list[str]:

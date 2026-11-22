@@ -232,7 +232,7 @@ def show_project_info(parent, state) -> bool:
 class DuplicateDialog(QDialog):
     """Ask the user for duplicate axis, offset distance, and copy count."""
 
-    def __init__(self, parent=None, is_3d: bool = False) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Duplicate Selection")
 
@@ -243,13 +243,11 @@ class DuplicateDialog(QDialog):
         axis_box = QGroupBox("Axis")
         axis_row = QHBoxLayout(axis_box)
         self._axis_btns: dict[str, QRadioButton] = {}
-        axes = ["X", "Y", "Z"] if is_3d else ["X", "Y"]
-        for ax in axes:
+        for ax in ("X", "Y", "Z"):
             rb = QRadioButton(ax)
             axis_row.addWidget(rb)
             self._axis_btns[ax] = rb
-        default_ax = "Z" if is_3d else "X"
-        self._axis_btns[default_ax].setChecked(True)
+        self._axis_btns["Z"].setChecked(True)
         layout.addWidget(axis_box)
 
         # ── Offset + Copies ───────────────────────────────────────────────────
@@ -261,7 +259,7 @@ class DuplicateDialog(QDialog):
         self._offset_spin.setSingleStep(0.5)
         self._offset_spin.setDecimals(2)
         self._offset_spin.setSuffix(" m")
-        self._offset_spin.setValue(3.0 if is_3d else 1.0)
+        self._offset_spin.setValue(3.0)
         form.addRow("Offset:", self._offset_spin)
 
         self._copies_spin = QSpinBox()
@@ -350,7 +348,7 @@ class SubdivideDialog(QDialog):
 class MirrorDialog(QDialog):
     """Ask the user for mirror plane, offset, and whether to keep the original."""
 
-    def __init__(self, parent=None, is_3d: bool = True) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Mirror Selection")
 
@@ -360,13 +358,11 @@ class MirrorDialog(QDialog):
         plane_box = QGroupBox("Mirror plane")
         plane_row = QHBoxLayout(plane_box)
         self._plane_btns: dict[str, QRadioButton] = {}
-        planes = ["XY", "XZ", "YZ"] if is_3d else ["XY"]
-        for pl in planes:
+        for pl in ("XY", "XZ", "YZ"):
             rb = QRadioButton(pl)
             plane_row.addWidget(rb)
             self._plane_btns[pl] = rb
-        default = "XZ" if is_3d else "XY"
-        self._plane_btns[default].setChecked(True)
+        self._plane_btns["XZ"].setChecked(True)
         layout.addWidget(plane_box)
 
         form = QFormLayout()
@@ -419,7 +415,7 @@ class RotateDialog(QDialog):
     original and add n rotated copies at angle, 2·angle, … (a polar array).
     """
 
-    def __init__(self, parent=None, is_3d: bool = True,
+    def __init__(self, parent=None,
                  centroid: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
         super().__init__(parent)
         self.setWindowTitle("Rotate Selection")
@@ -430,7 +426,7 @@ class RotateDialog(QDialog):
         axis_box = QGroupBox("Rotation axis (global, through the pivot)")
         axis_row = QHBoxLayout(axis_box)
         self._axis_btns: dict[str, QRadioButton] = {}
-        for ax in (("X", "Y", "Z") if is_3d else ("Z",)):
+        for ax in ("X", "Y", "Z"):
             rb = QRadioButton(ax)
             axis_row.addWidget(rb)
             self._axis_btns[ax] = rb
@@ -466,8 +462,6 @@ class RotateDialog(QDialog):
             spin.setValue(value)
             spin.setPrefix(f"{label} ")
             spin.setEnabled(False)
-            if label == "z" and not is_3d:
-                spin.setVisible(False)
             row.addWidget(spin)
             self._pivot_spins.append(spin)
         pv.addLayout(row)

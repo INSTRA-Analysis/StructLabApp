@@ -304,14 +304,13 @@ class SupportType(Enum):
 
 # ── Support restraints: six flags per node, one table for 2D and 3D ──────────
 # A support is stored as the DOFs it restrains, (ux, uy, uz, θx, θy, θz), in the model's
-# own axes.  2D analyses ux, uy and θz (PLANAR_DOFS); the other three hold the
+# own axes.  A 2D model (read from old files) analyses ux, uy and θz; the other three hold the
 # out-of-plane restraints, so rotate_axes carries a support through a 2D <-> 3D switch with its
 # physical meaning intact (a wall roller stays free vertically).  The presets below are the
 # same six flags in both modes and reproduce the solver's former per-mode tables exactly.
 DOF_NAMES: tuple[str, ...] = ("ux", "uy", "uz", "θx", "θy", "θz")
 # 3D analysis types -> per-node DOFs the solver holds at every node (core Model.locked_dofs).
 ANALYSIS_TYPES: dict[str, tuple[int, ...]] = {"space": (), "plane_xz": (1, 3, 5)}
-PLANAR_DOFS: tuple[int, ...] = (0, 1, 5)
 _T, _F = True, False
 SUPPORT_PRESETS: dict[SupportType, tuple[bool, ...]] = {
     SupportType.FREE:     (_F, _F, _F, _F, _F, _F),
@@ -461,26 +460,19 @@ _SUPPORT_LABELS = {
     SupportType.ROLLER: "Roller, free in X", SupportType.ROLLER_Y: "Roller, free in Y",
     SupportType.ROLLER_Z: "Roller, free in Z", SupportType.SPRING: "Spring",
 }
-_PLANAR_LABELS = {(True, True, True): "Fixed", (True, True, False): "Pinned",
-                  (False, True, False): "Roller, free in X", (True, False, False): "Roller, free in Y"}
 
 
-def describe_support(node: NodeData, is_2d: bool = False) -> str:
-    """Readable support label for reports and tooltips, true to the analysis mode.
+def describe_support(node: NodeData) -> str:
+    """Readable support label for reports and tooltips.
 
-    2D reads the in-plane restraints (a support that differs only out of plane gets its 2D
-    name); anything without a preset name lists what it restrains, and springs alongside
+    A preset reads as its name; anything else lists what it restrains, and springs alongside
     restraints are listed too.
     """
-    dofs = PLANAR_DOFS if is_2d else tuple(range(6))
-    held = [DOF_NAMES[i] for i in dofs if node.restraints[i]]
-    springs = [DOF_NAMES[i] for i in dofs if getattr(node, SPRING_FOR_DOF[i]) > 0]
+    held = [DOF_NAMES[i] for i in range(6) if node.restraints[i]]
+    springs = [DOF_NAMES[i] for i in range(6) if getattr(node, SPRING_FOR_DOF[i]) > 0]
     if not held:
         return "Spring" if (springs or node.support_type is SupportType.SPRING) else "Free"
-    if is_2d:
-        label = _PLANAR_LABELS.get(tuple(node.restraints[i] for i in PLANAR_DOFS))
-    else:
-        label = _SUPPORT_LABELS.get(node.support_type)
+    label = _SUPPORT_LABELS.get(node.support_type)
     if label is None or springs:
         label = "Restrains " + ", ".join(held)
     return label + (f" + springs {', '.join(springs)}" if springs else "")

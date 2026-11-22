@@ -3211,7 +3211,7 @@ class StructView(QGraphicsView):
         if nodes or members:
             act_mir = menu.addAction("Mirror…")
             act_mir.triggered.connect(
-                lambda _checked=False: self._on_mirror(True)
+                lambda _checked=False: self._on_mirror()
             )
             mw_rot = getattr(self.window(), "_act", {}).get("rotate_selection")
             if mw_rot is not None:
@@ -3265,9 +3265,9 @@ class StructView(QGraphicsView):
         for m in members:
             scene.subdivide_member(m.id, dlg.n_divisions, dlg.nodes_only)
 
-    def _on_mirror(self, is_3d: bool) -> None:
+    def _on_mirror(self) -> None:
         from ui_qt.dialogs import MirrorDialog
-        dlg = MirrorDialog(self, is_3d=is_3d)
+        dlg = MirrorDialog(self)
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
         self.scene().mirror_selection(dlg.plane, dlg.offset, dlg.keep_original)

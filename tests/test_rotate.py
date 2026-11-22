@@ -135,7 +135,7 @@ def test_nothing_selected_does_nothing(qapp):
 
 def test_dialog_defaults_and_values(qapp):
     from ui_qt.dialogs import RotateDialog
-    dlg = RotateDialog(is_3d=True, centroid=(1.0, 2.0, 3.0))
+    dlg = RotateDialog(centroid=(1.0, 2.0, 3.0))
     assert dlg.axis == "Z" and dlg.angle == 90.0 and dlg.pivot is None and dlg.copies == 0
     dlg._axis_btns["X"].setChecked(True)
     dlg._angle.setValue(-22.5)
@@ -144,8 +144,6 @@ def test_dialog_defaults_and_values(qapp):
     dlg._duplicate.setChecked(True)
     dlg._copies.setValue(3)
     assert (dlg.axis, dlg.angle, dlg.pivot, dlg.copies) == ("X", -22.5, (1.0, 2.0, 7.0), 3)
-    flat = RotateDialog(is_3d=False)
-    assert list(flat._axis_btns) == ["Z"] and flat._pivot_spins[2].isHidden()
 
 
 def test_window_command_runs_the_rotation(qapp, monkeypatch):

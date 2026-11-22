@@ -91,7 +91,7 @@ def build_ribbon(win) -> RibbonBar:
     g = model.add_group("Geometry")
     mirror = QAction(icon("flip-horizontal-2", theme.GEOMETRY), "Mirror…", win)
     mirror.setToolTip("Mirror the selection about a plane")
-    mirror.triggered.connect(lambda: win._view._on_mirror(True))
+    mirror.triggered.connect(lambda: win._view._on_mirror())
     g.add_small(mirror)
     g.add_small(a["rotate_selection"])
     g.add_small(a["scale_selection"])
