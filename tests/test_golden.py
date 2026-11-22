@@ -44,25 +44,25 @@ def _sum(solved, name, comp) -> float:
 
 
 def test_continuous_beam_equilibrium(solved):
-    assert _sum(solved, "continuous_beam_2d", 1) == pytest.approx(20e3 * 18 + 50e3, rel=1e-9)
-    assert _sum(solved, "continuous_beam_2d", 0) == pytest.approx(0.0, abs=1e-6)
+    assert _sum(solved, "continuous_beam_plane", 2) == pytest.approx(20e3 * 18 + 50e3, rel=1e-9)
+    assert _sum(solved, "continuous_beam_plane", 0) == pytest.approx(0.0, abs=1e-6)
 
 
 def test_portal_frame_equilibrium(solved):
-    assert _sum(solved, "portal_frame_2d", 0) == pytest.approx(-15e3, rel=1e-9)
-    assert _sum(solved, "portal_frame_2d", 1) == pytest.approx(8e3 * 6 + 40e3, rel=1e-9)
+    assert _sum(solved, "portal_frame_plane", 0) == pytest.approx(-15e3, rel=1e-9)
+    assert _sum(solved, "portal_frame_plane", 2) == pytest.approx(8e3 * 6 + 40e3, rel=1e-9)
 
 
 def test_warren_truss_reactions_and_joint_equilibrium(solved):
-    r = np.array(solved["warren_truss_2d"]["reactions"])
-    assert r[0, 1] == pytest.approx(15e3, rel=1e-9) and r[4, 1] == pytest.approx(15e3, rel=1e-9)
-    # Bar forces are axial only: bending ends must be zero.
-    f = np.array(solved["warren_truss_2d"]["member_end_forces"])
-    assert np.abs(f[:, [1, 2, 4, 5]]).max() < 1e-3
+    r = np.array(solved["warren_truss_plane"]["reactions"])
+    assert r[0, 2] == pytest.approx(15e3, rel=1e-9) and r[4, 2] == pytest.approx(15e3, rel=1e-9)
+    # Bar forces are axial only: shear, torsion and bending at both ends must be zero.
+    f = np.array(solved["warren_truss_plane"]["member_end_forces"])
+    assert np.abs(f[:, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]]).max() < 1e-3
 
 
 def test_spring_beam_total_reaction(solved):
-    assert _sum(solved, "spring_supported_beam_2d", 1) == pytest.approx(12e3 * 10 + 30e3, rel=1e-9)
+    assert _sum(solved, "spring_supported_beam_plane", 2) == pytest.approx(12e3 * 10 + 30e3, rel=1e-9)
 
 
 def test_3d_cantilever_reactions_and_torsion(solved):

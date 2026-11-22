@@ -6,18 +6,23 @@ Quick start
 -----------
     import sdk as sl
 
-    m = sl.Model()
-    n0 = m.add_node(0, 0, 0)
+    m = sl.Model()                # a plane frame in the XZ plane (Z up)
+    n0 = m.add_node(0, 0, 0)      # (x, y, z): a plane frame's nodes have y = 0
     n1 = m.add_node(5, 0, 0)
     m.pin(n0)
-    m.roller(n1)
+    m.roller(n1)                  # free in X, held vertically
     m.add_member(n0, n1, E=210e9, A=6.64e-3, I=8.36e-5)
     m.add_udl(0, w=10e3)          # 10 kN/m downward
 
     result = m.solve()
-    print(result.reactions(n0))   # [Fx, Fy, Mz]  (N, N, N·m)
+    print(result.reactions(n0))   # [Fx, Fy, Fz, Mx, My, Mz]  (N, N·m); vertical is Fz
     print(result.max_moment(0))   # peak |M| along member 0
     fig = result.plot("BMD")      # matplotlib Figure
+
+One axis convention everywhere, as in the app: X horizontal, Y depth, Z up.
+``sl.Model()`` is a plane frame (2D analysis in its XZ plane: uy, θx, θz held at every
+node); ``sl.Model(analysis="space")`` is a full 3D space frame.  The SDK no longer builds
+2D (XY, Y up) models.
 """
 
 from __future__ import annotations
@@ -49,13 +54,21 @@ from ui_qt.solve_actions import validate_model, solve_engine
 class Model:
     """Fluent builder for a StructLab structural model.
 
-    Coordinates: X = horizontal, Y = depth (3D), Z = up (vertical).
-    For 2D models leave z = 0 on all nodes and set mode_3d=False.
+    Coordinates: X = horizontal, Y = depth, Z = up (vertical), as in the app.
+
+    analysis : "plane" (default) — a plane frame in the XZ plane: put every node at y = 0
+               (``add_node(x, 0, z)``); loads Fx, Fz, My act in its plane.
+               "space" — a 3D space frame, all six DOFs per node.
+    mode_3d  : older form: True means "space", False means "plane" (no longer 2D).
     """
 
-    def __init__(self, mode_3d: bool = False) -> None:
-        self._state = ModelState()
-        self._state.mode_3d = mode_3d
+    def __init__(self, analysis: str = "plane", *, mode_3d: bool | None = None) -> None:
+        if mode_3d is not None:
+            analysis = "space" if mode_3d else "plane"
+        if analysis not in ("plane", "space"):
+            raise ValueError(f"analysis must be 'plane' or 'space', got {analysis!r}")
+        self._state = ModelState()                      # always 3D (Z up)
+        self._state.analysis_type = "plane_xz" if analysis == "plane" else "space"
         # Rename the auto-created "Permanent (G)" case to 'default'
         self._state.load_cases[0].name = "default"
         self._lc_name_to_id: dict[str, int] = {"default": 0}
@@ -90,15 +103,15 @@ class Model:
         self._node(node_id).support_type = SupportType.PIN
 
     def roller(self, node_id: int) -> None:
-        """Vertical roller — free in X, restrained in Y (and Z in 3D)."""
+        """Roller free in X — held vertically (Z) and in Y."""
         self._node(node_id).support_type = SupportType.ROLLER
 
     def roller_y(self, node_id: int) -> None:
-        """Horizontal roller — free in Y, restrained in X."""
+        """Roller free in Y — held in X and Z (space frames)."""
         self._node(node_id).support_type = SupportType.ROLLER_Y
 
     def roller_z(self, node_id: int) -> None:
-        """Z-roller (3D only) — free in Z, restrained in X and Y."""
+        """Roller free vertically (Z) — held in X and Y (a wall roller in a plane frame)."""
         self._node(node_id).support_type = SupportType.ROLLER_Z
 
     # ── Members ───────────────────────────────────────────────────────────────
@@ -321,18 +334,18 @@ class SolveResult:
     # ── Nodal results ─────────────────────────────────────────────────────────
 
     def reactions(self, node_id: int) -> np.ndarray:
-        """Reaction force/moment vector at a support node.
+        """Reaction force/moment vector at a support node: [Fx, Fy, Fz, Mx, My, Mz].
 
-        Returns array of length 3 (2D: [Fx, Fy, Mz]) or 6 (3D: [Fx,Fy,Fz,Mx,My,Mz]).
-        Non-zero only at restrained DOFs.
+        Non-zero only at restrained DOFs.  In a plane frame the in-plane ones are
+        Fx, Fz (vertical) and My.
         """
         start = node_id * self._dpn
         return self._cache["reactions"][start: start + self._dpn].copy()
 
     def displacement(self, node_id: int) -> np.ndarray:
-        """Displacement/rotation vector at a node.
+        """Displacement/rotation vector at a node: [dx, dy, dz, θx, θy, θz].
 
-        Returns array of length 3 (2D: [dx, dy, θz]) or 6 (3D: [dx,dy,dz,θx,θy,θz]).
+        In a plane frame the in-plane ones are dx, dz (vertical) and θy; the rest are zero.
         """
         start = node_id * self._dpn
         return self._cache["displacements"][start: start + self._dpn].copy()
@@ -342,12 +355,12 @@ class SolveResult:
     def member_forces(self, member_id: int) -> dict[str, float]:
         """End forces at member i- and j-ends in local coordinates.
 
-        2D keys: N_i, V_i, M_i, N_j, V_j, M_j
-        3D keys: N_i, V_y_i, V_z_i, T_i, M_y_i, M_z_i, N_j, V_y_j, V_z_j, T_j, M_y_j, M_z_j
-        Sign: N+ = tension, V+ = up on left face, M+ = sagging.
+        Plane frame keys (in-plane): N_i, V_i, M_i, N_j, V_j, M_j
+        Space frame keys: N_i, V_y_i, V_z_i, T_i, M_y_i, M_z_i, N_j, V_y_j, V_z_j, T_j, M_y_j, M_z_j
+        Sign: N+ = compression, V+ = up on left face, M+ = sagging.
         """
         er = self._member_result_map[member_id]
-        if er.is_3d:
+        if er.is_3d and self._state.analysis_type != "plane_xz":
             return dict(
                 N_i=er.N_i, V_y_i=er.V_y_i, V_z_i=er.V_z_i,
                 T_i=er.T_i, M_y_i=er.M_y_i, M_z_i=er.M_z_i,
@@ -468,7 +481,7 @@ __all__ = ["Model", "SolveResult"]
 if __name__ == "__main__":
     print("StructLab SDK — self-test: simply supported beam, UDL 10 kN/m, L = 6 m")
 
-    m = Model(mode_3d=False)
+    m = Model()                       # plane frame in XZ
     n0 = m.add_node(0, 0, 0)
     n1 = m.add_node(6, 0, 0)
     m.pin(n0)
@@ -492,12 +505,12 @@ if __name__ == "__main__":
     R1 = result.reactions(n1)
     M_peak = result.max_moment(mid)
 
-    print(f"  Reaction at n0 (Fy): {R0[1]/1e3:+.3f} kN  (expected {R_analytical/1e3:+.3f} kN)")
-    print(f"  Reaction at n1 (Fy): {R1[1]/1e3:+.3f} kN  (expected {R_analytical/1e3:+.3f} kN)")
+    print(f"  Reaction at n0 (Fz): {R0[2]/1e3:+.3f} kN  (expected {R_analytical/1e3:+.3f} kN)")
+    print(f"  Reaction at n1 (Fz): {R1[2]/1e3:+.3f} kN  (expected {R_analytical/1e3:+.3f} kN)")
     print(f"  Peak moment:          {M_peak/1e3:.3f} kN·m  (expected {M_mid_analytical/1e3:.3f} kN·m)")
 
     tol = 0.001  # 0.1%
-    assert abs(R0[1] - R_analytical) / R_analytical < tol, "Reaction check failed"
+    assert abs(R0[2] - R_analytical) / R_analytical < tol, "Reaction check failed"
     assert abs(M_peak - M_mid_analytical) / M_mid_analytical < tol, "Moment check failed"
     print("  All checks passed.")
 

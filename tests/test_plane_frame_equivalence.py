@@ -203,7 +203,7 @@ def test_the_comparison_catches_a_wrong_moment_sign(monkeypatch):
 
 # ── the 2D golden models, through the app's own path ─────────────────────────
 
-GOLDEN_2D = ["continuous_beam_2d", "portal_frame_2d", "warren_truss_2d", "spring_supported_beam_2d"]
+from tests.golden.models import PLANE_MODELS as GOLDEN_2D        # rebuilt as 2D by as_2d
 
 
 @pytest.mark.parametrize("name", GOLDEN_2D)
@@ -211,7 +211,7 @@ def test_golden_model_switched_to_a_plane_frame_equals_2d(name):
     from tests.golden import models as golden
     from ui_qt.model_builder import build_model
     from ui_qt.solve_actions import solve_engine
-    s = getattr(golden, name)()._state
+    s = golden.as_2d(getattr(golden, name)())
     assert s.is_2d
     c2 = solve_engine(*build_model(s, s.active_case), s)
     s.rotate_axes("3D")

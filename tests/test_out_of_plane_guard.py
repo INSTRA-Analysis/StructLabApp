@@ -2,8 +2,8 @@
 
 A 3D model is solved in 3D (6 DOF/node) even when every node lies at z = 0 (a grillage, a
 floor, a beam drawn on the ground plane): its vertical loads act and match hand results.
-Only a 2D model has no out-of-plane freedoms; there nodal Fz/Mx/My and 'qz' member loads
-cannot act, and validate_model WARNS (does not block) so they are never dropped silently.
+A plane frame holds its out-of-plane freedoms, so loads out of its plane (Fy, Mx, Mz, 'qy')
+are WARNED (not blocked); so are Fz/Mx/My and 'qz' on a 2D model (an old file read as stored).
 """
 import warnings
 
@@ -51,31 +51,54 @@ def test_flat_3d_model_carries_a_qz_member_load():
     assert r.displacement(n1)[2] == pytest.approx(-10e3 * L ** 4 / (8 * E * I), rel=1e-2)
 
 
-@pytest.mark.parametrize("load", [{"Fz": -8e3}, {"Mx": 5e3}])
-def test_out_of_plane_nodal_load_on_a_2d_model_is_warned(load):
-    m, _, n1 = _flat_cantilever(mode_3d=False)
+@pytest.mark.parametrize("load", [{"Fy": 3e3}, {"Mx": 5e3}, {"Mz": 2e3}])
+def test_out_of_plane_nodal_load_on_a_plane_frame_is_warned(load):
+    m, _, n1 = _flat_cantilever(mode_3d=False)                 # a plane frame in XZ
     m.add_point_load(n1, **load)
     errors, warns = validate_model(m._state)
     assert not _has_oop(errors) and _has_oop(warns)
 
 
-def test_qz_member_load_on_a_2d_model_is_warned():
+def test_qy_member_load_on_a_plane_frame_is_warned():
     m, _, _ = _flat_cantilever(mode_3d=False)
-    m.add_udl(0, w=10e3, direction="qz")
+    m.add_udl(0, w=10e3, direction="qy")
     _, warns = validate_model(m._state)
     assert _has_oop(warns)
 
 
-def test_inplane_load_on_a_2d_model_is_clean():
-    """No false positive: an ordinary 2D load must not warn."""
+def test_inplane_loads_on_a_plane_frame_are_clean():
+    """No false positive: Fx, Fz and My act in a plane frame's plane."""
     m, n0, n1 = _flat_cantilever(mode_3d=False)
-    m.add_point_load(n1, Fy=-8e3)
+    m.add_point_load(n1, Fx=1e3, Fz=-8e3, My=2e3)
     errors, warns = validate_model(m._state)
     assert not _has_oop(errors) and not _has_oop(warns)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         r = m.solve()
-    assert abs(r.reactions(n0)[1] - 8e3) / 8e3 < 1e-6
+    assert abs(r.reactions(n0)[2] - 8e3) / 8e3 < 1e-6
+
+
+def _model_2d(load):
+    """A 2D model (as read from an old file with keep_2d=True)."""
+    from ui_qt.model_state import ModelState, NodeLoad, SupportType
+    s = ModelState()
+    s.analysis_mode = "2D"
+    a, b = s.add_node(0, 0, 0), s.add_node(L, 0, 0)
+    a.support_type = SupportType.FIXED
+    s.add_member(a.id, b.id)
+    s.active_case.set_node_load(b.id, NodeLoad(**load))
+    return s
+
+
+@pytest.mark.parametrize("load", [{"fz": -8e3}, {"moment_x": 5e3}])
+def test_out_of_plane_load_on_a_2d_model_is_warned(load):
+    errors, warns = validate_model(_model_2d(load))
+    assert not _has_oop(errors) and _has_oop(warns)
+
+
+def test_inplane_load_on_a_2d_model_is_clean():
+    _, warns = validate_model(_model_2d({"fy": -8e3}))
+    assert not _has_oop(warns)
 
 
 def test_genuine_3d_column_is_clean():

@@ -19,7 +19,7 @@ from ui_qt.model_state import ModelState, NodeLoad, SupportType
 from ui_qt.solve_actions import solve_engine
 
 TOL = 1e-9
-GOLDEN_2D = ["continuous_beam_2d", "portal_frame_2d", "warren_truss_2d", "spring_supported_beam_2d"]
+from tests.golden.models import PLANE_MODELS as GOLDEN_2D        # saved as 2D files via as_2d
 
 
 def _same_results(two_d: ModelState, plane: ModelState, axial_ends: bool = True) -> None:
@@ -49,7 +49,7 @@ def _same_results(two_d: ModelState, plane: ModelState, axial_ends: bool = True)
 @pytest.mark.parametrize("name", GOLDEN_2D)
 def test_a_2d_file_opens_as_a_plane_frame_with_the_same_results(name, tmp_path):
     from tests.golden import models as golden
-    two_d = getattr(golden, name)()._state
+    two_d = golden.as_2d(getattr(golden, name)())
     path = tmp_path / f"{name}.slab"
     save_model(two_d, path)
     opened = load_model(path)
@@ -134,7 +134,7 @@ def test_the_window_says_the_model_was_converted(tmp_path, monkeypatch):
     monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
     monkeypatch.setattr(rf, "push", lambda p: None)                 # keep the user's recent list
     path = tmp_path / "portal.slab"
-    save_model(golden.portal_frame_2d()._state, path)
+    save_model(golden.as_2d(golden.portal_frame_plane()), path)
     win = MainWindow()
     try:
         win._open_file(str(path))

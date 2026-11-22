@@ -4,7 +4,7 @@ Each builder returns a fully loaded ``sdk.Model``. They are deliberately plain a
 frozen: change one only together with a deliberate regeneration of ``golden.json``
 (``python tests/golden/generate.py``) and say why in the commit message.
 
-Together they cover: 2D beam / frame / truss / spring support, and 3D cantilever
+Together they cover: plane-frame beam / frame / truss / spring support (XZ, Z up), and 3D cantilever
 (torsion, rotated section), space frame (node loads, qz/qx/'w' UDL, partial and
 point member loads, self-weight, bar braces), pin releases, and the L8 tower.
 """
@@ -30,10 +30,10 @@ def _member(m: sl.Model, i, j, kind="BEAM", n_sub=10, **kw) -> int:
     return m.add_member(i, j, n_sub=n_sub, element_type=kind, **props)
 
 
-def continuous_beam_2d() -> sl.Model:
-    """Three equal 6 m spans, UDL on all spans plus a nodal load mid-span-2."""
+def continuous_beam_plane() -> sl.Model:
+    """Three equal 6 m spans, UDL on all spans plus a nodal load mid-span-2 (plane frame, XZ)."""
     m = sl.Model()
-    n = [m.add_node(x, 0) for x in (0, 6, 9, 12, 18)]
+    n = [m.add_node(x, 0, 0) for x in (0, 6, 9, 12, 18)]
     m.pin(n[0])
     for k in (1, 3, 4):
         m.roller(n[k])
@@ -41,26 +41,27 @@ def continuous_beam_2d() -> sl.Model:
                _member(m, n[2], n[3]), _member(m, n[3], n[4])]
     for mid in members:
         m.add_udl(mid, 20e3)
-    m.add_point_load(n[2], Fy=-50e3)
+    m.add_point_load(n[2], Fz=-50e3)
     return m
 
 
-def portal_frame_2d() -> sl.Model:
+def portal_frame_plane() -> sl.Model:
     m = sl.Model()
-    n0, n1, n2, n3 = (m.add_node(0, 0), m.add_node(0, 4), m.add_node(6, 4), m.add_node(6, 0))
+    n0, n1, n2, n3 = (m.add_node(0, 0, 0), m.add_node(0, 0, 4),
+                      m.add_node(6, 0, 4), m.add_node(6, 0, 0))
     m.pin(n0), m.pin(n3)
     cols = [_member(m, n0, n1), _member(m, n3, n2)]
     beam = _member(m, n1, n2)
     m.add_udl(beam, 8e3)
-    m.add_point_load(n1, Fx=15e3, Fy=-20e3)
-    m.add_point_load(n2, Fy=-20e3, Mz=12e3)
+    m.add_point_load(n1, Fx=15e3, Fz=-20e3)
+    m.add_point_load(n2, Fz=-20e3, My=-12e3)      # the former 2D anticlockwise 12 kN·m
     return m
 
 
-def warren_truss_2d() -> sl.Model:
+def warren_truss_plane() -> sl.Model:
     m = sl.Model()
-    bottom = [m.add_node(4.0 * k, 0) for k in range(5)]
-    top = [m.add_node(2.0 + 4.0 * k, 3.0) for k in range(4)]
+    bottom = [m.add_node(4.0 * k, 0, 0) for k in range(5)]
+    top = [m.add_node(2.0 + 4.0 * k, 0, 3.0) for k in range(4)]
     m.pin(bottom[0]), m.roller(bottom[4])
     bar = dict(kind="BAR", n_sub=1, A=0.004, I=1e-9)
     for k in range(4):
@@ -70,21 +71,21 @@ def warren_truss_2d() -> sl.Model:
     for k in range(3):
         _member(m, top[k], top[k + 1], **bar)
     for k in (1, 2, 3):
-        m.add_point_load(bottom[k], Fy=-10e3)
+        m.add_point_load(bottom[k], Fz=-10e3)
     return m
 
 
-def spring_supported_beam_2d() -> sl.Model:
+def spring_supported_beam_plane() -> sl.Model:
     m = sl.Model()
-    a, b, c = m.add_node(0, 0), m.add_node(5, 0), m.add_node(10, 0)
+    a, b, c = m.add_node(0, 0, 0), m.add_node(5, 0, 0), m.add_node(10, 0, 0)
     m.pin(a)
     m._state.get_node(c).support_type = SupportType.SPRING
-    m._state.get_node(c).spring_ky = 5e6
+    m._state.get_node(c).spring_kz = 5e6           # vertical spring
     p = _member(m, a, b)
     q = _member(m, b, c)
     m.add_udl(p, 12e3)
     m.add_udl(q, 12e3)
-    m.add_point_load(b, Fy=-30e3)
+    m.add_point_load(b, Fz=-30e3)
     return m
 
 
@@ -148,11 +149,26 @@ def l8_tower() -> sl.Model:
     return sl.Model.from_state(state)
 
 
+def as_2d(model: sl.Model):
+    """A plane-frame model as the equivalent 2D model (XY, Y up): the native 2D engine's input,
+    used by the tests that check a plane frame equals the 2D engine.  The SDK itself no longer
+    builds 2D models."""
+    import copy
+    state = copy.deepcopy(model._state)
+    state.rotate_axes("2D")
+    state.analysis_mode, state.analysis_type = "2D", "space"
+    return state
+
+
+PLANE_MODELS = ["continuous_beam_plane", "portal_frame_plane", "warren_truss_plane",
+                "spring_supported_beam_plane"]
+
+
 MODELS = {
-    "continuous_beam_2d": continuous_beam_2d,
-    "portal_frame_2d": portal_frame_2d,
-    "warren_truss_2d": warren_truss_2d,
-    "spring_supported_beam_2d": spring_supported_beam_2d,
+    "continuous_beam_plane": continuous_beam_plane,
+    "portal_frame_plane": portal_frame_plane,
+    "warren_truss_plane": warren_truss_plane,
+    "spring_supported_beam_plane": spring_supported_beam_plane,
     "cantilever_3d_torsion": cantilever_3d_torsion,
     "space_frame_3d": space_frame_3d,
     "pin_release_frame_3d": pin_release_frame_3d,

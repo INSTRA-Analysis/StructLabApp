@@ -12,10 +12,10 @@ pytestmark = pytest.mark.filterwarnings("ignore")
 
 
 def test_unsupported_beam_raises_friendly_singular_error():
-    m = sl.Model(mode_3d=False)
-    a, b = m.add_node(0, 0), m.add_node(4, 0)
+    m = sl.Model()                # plane frame in XZ
+    a, b = m.add_node(0, 0, 0), m.add_node(4, 0, 0)
     m.add_member(a, b, E=210e9, A=0.01, I=1e-4)
-    m.add_point_load(b, Fy=-1000.0)
+    m.add_point_load(b, Fz=-1000.0)
     m.pin(a)                      # one pin only: rigid-body rotation about it
     with pytest.raises(UnstableStructureError, match="Singular matrix"):
         m.solve()
