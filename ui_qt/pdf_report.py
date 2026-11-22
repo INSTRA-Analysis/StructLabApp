@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch
 
-from ui_qt.model_state import ModelState, SupportType, describe_support
+from ui_qt.model_state import ModelState, SupportType, analysis_label, describe_support
 
 # ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ def generate_report(
     date_str = now.strftime("%d %B %Y")
 
     with PdfPages(filepath) as pdf:
-        _page_title(pdf, meta, date_str, report_basis, "3D" if _is_3d(state) else "2D")
+        _page_title(pdf, meta, date_str, report_basis, "3D" if _is_3d(state) else "2D", state)
         _page_model(pdf, meta, state, date_str, report_basis)
         if canvas_image_path and Path(canvas_image_path).exists():
             _page_diagram(pdf, meta, canvas_image_path, date_str, report_basis)
@@ -155,7 +155,7 @@ def _footer(fig: plt.Figure, date_str: str, page_note: str = "") -> None:
 # ── Page 1: Title ─────────────────────────────────────────────────────────────
 
 def _page_title(pdf: PdfPages, meta: Any, date_str: str,
-                report_basis: str, dimension: str = "2D") -> None:
+                report_basis: str, dimension: str = "2D", state: ModelState | None = None) -> None:
     fig, ax = _new_fig()
 
     # Brand
@@ -175,6 +175,7 @@ def _page_title(pdf: PdfPages, meta: Any, date_str: str,
         ("Company",        meta.company     or "—"),
         ("Status",         meta.status),
         ("Date",           date_str),
+        ("Analysis",       analysis_label(state)[1]),
     ]
     if report_basis:
         rows.append(("Report basis", report_basis))
@@ -405,12 +406,9 @@ MAX_DIAGRAM_PAGES = 24     # per-member SFD/BMD pages before the report keeps on
 
 
 def _is_3d(state: ModelState) -> bool:
-    """True when the engine analyses this model in 3D (any node has z != 0).
-
-    Mirrors ``Model.dofs_per_node`` so the report describes what was solved, not
-    the UI mode flag.
-    """
-    return any(n.z != 0.0 for n in state.nodes)
+    """True when the engine analyses this model in 3D: the declared mode (the engine no
+    longer guesses from z, so a flat 3D model is still a 3D analysis)."""
+    return state.mode_3d
 
 
 # ── Page 5: Support reactions ─────────────────────────────────────────────────

@@ -123,6 +123,8 @@ def build_ribbon(win) -> RibbonBar:
     g = analysis.add_group("Run")
     g.add_large(a["solve"])
     g.add_large(a["combinations"])
+    g = analysis.add_group("Analysis Type")
+    g.add_large(a["plane_frame"])
     g = analysis.add_group("Results")
     g.add_small(a["clear_results"])
 

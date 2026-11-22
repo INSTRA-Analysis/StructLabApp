@@ -494,6 +494,16 @@ def describe_support(node: NodeData, is_2d: bool = False) -> str:
     return label + (f" + springs {', '.join(springs)}" if springs else "")
 
 
+def analysis_label(state) -> tuple[str, str]:
+    """(short, long) description of what the solver analyses, for the status bar and reports."""
+    if state.is_2d:
+        return "2D frame", "2D frame (XY plane, Y up): 3 DOF per node (ux, uy, θz)"
+    if state.analysis_type == "plane_xz":
+        return ("Plane frame (XZ)",
+                "Plane frame (XZ): 3D engine, uy, θx, θz restrained at every node")
+    return "Space frame", "Space frame (Z up): 6 DOF per node"
+
+
 def node_from_dict(nd: dict) -> NodeData:
     """A node from its saved form.
 

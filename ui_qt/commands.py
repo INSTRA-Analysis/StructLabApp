@@ -98,6 +98,11 @@ COMMANDS: tuple[Command, ...] = (
             "Manage EN 1990 load combinations and solve them"),
     # ── analysis and results ──────────────────────────────────────────────────
     Command("solve", "Solve", "_on_solve", "play", "F5", "Solve the active load case (F5)"),
+    Command("plane_frame", "Plane Frame (XZ)", "_on_plane_frame_toggled", "layers", "",
+            "Analyse the model as a plane frame in its XZ plane: a 2D analysis in the 3D engine\n"
+            "(uy, θx, θz restrained at every node, no out-of-plane supports needed).\n"
+            "Off = space frame, all six DOFs. 3D models only; a 2D model is a plane frame already.",
+            True),
     Command("clear_results", "Clear Results", "_on_clear_results", "eraser"),
     Command("ov_bmd", "BMD", None, "chart-spline", "", "Bending moment diagram", True, True),
     Command("ov_sfd", "SFD", None, "chart-column", "", "Shear force diagram", True),

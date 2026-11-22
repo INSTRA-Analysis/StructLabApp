@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
             edit_menu.addAction(a[key])
         edit_menu.addSeparator()
         edit_menu.addAction(a["solve"])
+        edit_menu.addAction(a["plane_frame"])
         edit_menu.addAction(a["zoom_fit"])
 
     # ── Selection menu ────────────────────────────────────────────────────────
@@ -1312,6 +1313,9 @@ class MainWindow(QMainWindow):
         self._sb_cursor.setMinimumWidth(260)
         self._sb.addPermanentWidget(self._sb_cursor)
         self._scene.cursor_coords.connect(self._sb_cursor.setText)
+        self._sb_analysis = QLabel("")             # what the solver analyses (badge)
+        self._sb_analysis.setStyleSheet("color: #4fd1c5; padding-right: 10px;")
+        self._sb.addPermanentWidget(self._sb_analysis)
         self._sb.addPermanentWidget(self._sb_stats)
         self.setStatusBar(self._sb)
 
@@ -1629,8 +1633,9 @@ class MainWindow(QMainWindow):
 
             disp = cache['displacements']
             member_results = cache['member_results']
-            max_dy_mm = max((abs(disp[n.id * dpn + 1]) * 1000 for n in state.nodes), default=0)
-            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + 1]))
+            v = self._vertical_dof(dpn)
+            max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
+            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
             max_m = max(
                 (max(abs(r.M_i), abs(r.M_j)) for r in member_results), default=0
             )
@@ -2038,8 +2043,9 @@ class MainWindow(QMainWindow):
             # Results summary for status bar
             disp = cache['displacements']
             member_results = cache['member_results']
-            max_dy_mm = max((abs(disp[n.id * dpn + 1]) * 1000 for n in state.nodes), default=0)
-            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + 1]))
+            v = self._vertical_dof(dpn)
+            max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
+            max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
             max_m = max(
                 (max(abs(r.M_i), abs(r.M_j)) for r in member_results),
                 default=0
@@ -2053,7 +2059,9 @@ class MainWindow(QMainWindow):
                 f"Max deflection: {max_dy_mm:.2f} mm (node {max_dy_node.id})  |  "
                 f"Max moment: {max_m/1000:.2f} kN·m (member {max_m_member.element_id if max_m_member else '-'})"
             )
-            self._sb.showMessage(summary)
+            from ui_qt.solve_actions import lock_force_note
+            note = lock_force_note(cache)          # plane frame: anything the locks absorbed
+            self._sb.showMessage(summary + (f"  |  ⚠ {note}" if note else ""))
             self._update_status_stats()
             self._show_results_workspace()
         except Exception as exc:
@@ -2195,8 +2203,44 @@ class MainWindow(QMainWindow):
         if self._scene._thickness_by_section and not getattr(self._scene, "_suppress_changed", False):
             self._scene.refresh_section_widths()      # a section may have been edited
 
+    def _sync_analysis_type(self) -> None:
+        """Plane Frame toggle and status badge follow the model (2D models: toggle disabled)."""
+        from ui_qt.model_state import analysis_label
+        state = self._scene.model_state
+        act = self._act.get("plane_frame")
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(not state.is_2d and state.analysis_type == "plane_xz")
+            act.setEnabled(not state.is_2d)
+            act.blockSignals(False)
+        if hasattr(self, "_sb_analysis"):
+            short, long = analysis_label(state)
+            self._sb_analysis.setText(short)
+            self._sb_analysis.setToolTip(long)
+
+    def _on_plane_frame_toggled(self, checked: bool) -> None:
+        state = self._scene.model_state
+        if state.is_2d:
+            self._sync_analysis_type()
+            self._sb.showMessage("A 2D model is a plane frame already.")
+            return
+        wanted = "plane_xz" if checked else "space"
+        if state.analysis_type == wanted:
+            return
+        self._scene.save_snapshot()                     # undoable like any model edit
+        state.analysis_type = wanted
+        self._scene.model_changed.emit()                # dirty, stale results cleared
+        self._sb.showMessage("Analysis type: " + ("Plane frame (XZ) — uy, θx, θz restrained "
+                             "at every node" if checked else "Space frame — all six DOFs"))
+
+    @staticmethod
+    def _vertical_dof(dpn: int) -> int:
+        """Index of the vertical displacement in a node's DOFs: uy in 2D, uz in 3D."""
+        return 2 if dpn == 6 else 1
+
     def _update_status_stats(self) -> None:
         """Update the status bar permanent widget with live model + results stats."""
+        self._sync_analysis_type()
         state = self._scene.model_state
         n_nodes = len(state.nodes)
         n_members = len(state.members)
@@ -2208,8 +2252,9 @@ class MainWindow(QMainWindow):
             member_results = cache["member_results"]
             _dpn = cache["model"].dofs_per_node
             if n_nodes > 0:
+                v = self._vertical_dof(_dpn)
                 max_dy = max(
-                    (abs(disp[n.id * _dpn + 1]) * 1000 for n in state.nodes),
+                    (abs(disp[n.id * _dpn + v]) * 1000 for n in state.nodes),
                     default=0,
                 )
                 parts.append(f"δ max: {max_dy:.1f} mm")
