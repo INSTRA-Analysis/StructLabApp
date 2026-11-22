@@ -302,7 +302,7 @@ class SupportType(Enum):
 # ── Support restraints: six flags per node, one table for 2D and 3D ──────────
 # A support is stored as the DOFs it restrains, (ux, uy, uz, θx, θy, θz), in the model's
 # own axes.  2D analyses ux, uy and θz (PLANAR_DOFS); the other three hold the
-# out-of-plane restraints, so swap_yz carries a support through a 2D <-> 3D switch with its
+# out-of-plane restraints, so rotate_axes carries a support through a 2D <-> 3D switch with its
 # physical meaning intact (a wall roller stays free vertically).  The presets below are the
 # same six flags in both modes and reproduce the solver's former per-mode tables exactly.
 DOF_NAMES: tuple[str, ...] = ("ux", "uy", "uz", "θx", "θy", "θz")
@@ -589,29 +589,43 @@ class ModelState:
     def is_2d(self) -> bool:
         return self.analysis_mode == "2D"
 
-    def swap_yz(self) -> None:
-        """Swap the Y and Z axes of all geometry and loads.
+    def rotate_axes(self, to_mode: str) -> None:
+        """Carry the model between the 2D axes (XY plane, Y up) and the 3D axes (Z up).
 
-        Used at the 2D⇄3D mode boundary: 2D is the native XY plane (Y vertical,
-        z=0); 3D is Z-up (height in Z). Swapping Y↔Z lets a planar model keep
-        "standing" through a mode change. It is its own inverse (involution).
+        A proper rotation of +90° about X, never a mirror, so every load keeps its physical
+        sense: to 3D (x, y, z) -> (x, -z, y), to 2D the inverse (x, y, z) -> (x, z, -y).
+        Forces, moments and displacements are vectors and rotate the same way, so a 2D
+        anticlockwise moment M becomes My = -M.  A global 'qy' load is a +Y force and 'qz'
+        is positive downward, so they map with the signs that keep the force direction.
+        Restraint flags and spring stiffnesses follow their axes (no sign).
         """
+        if to_mode not in ("2D", "3D"):
+            raise ValueError(f"unknown mode {to_mode!r}")
+        to_3d = to_mode == "3D"
+
+        def rot(x: float, y: float, z: float) -> tuple[float, float, float]:
+            x, y, z = (x, -z, y) if to_3d else (x, z, -y)
+            return x + 0.0, y + 0.0, z + 0.0           # no negative zeros
+
         for n in self.nodes:
-            n.y, n.z = n.z, n.y
-            ux, uy, uz, rx, ry, rz = n.restraints          # restraints follow the axes
+            n.x, n.y, n.z = rot(n.x, n.y, n.z)
+            ux, uy, uz, rx, ry, rz = n.restraints
             n.restraints = (ux, uz, uy, rx, rz, ry)
             n.spring_ky, n.spring_kz = n.spring_kz, n.spring_ky
             n.spring_ktheta, n.spring_kry = n.spring_kry, n.spring_ktheta
+        # qy (+Y force) and qz (downward = -Z force): to 3D qy' = qz, qz' = -qy;
+        # to 2D qy' = -qz, qz' = qy.
+        dist_map = ({"qy": ("qz", -1.0), "qz": ("qy", 1.0)} if to_3d
+                    else {"qy": ("qz", 1.0), "qz": ("qy", -1.0)})
         for lc in self.load_cases:
             for nl in lc.node_loads.values():
-                nl.fy, nl.fz = nl.fz, nl.fy
-                nl.moment, nl.moment_y = nl.moment_y, nl.moment
+                nl.fx, nl.fy, nl.fz = rot(nl.fx, nl.fy, nl.fz)
+                nl.moment_x, nl.moment_y, nl.moment = rot(nl.moment_x, nl.moment_y, nl.moment)
             for ml in lc.member_loads.values():
                 for dl in ml.dist_loads:
-                    if dl.direction == "qy":
-                        dl.direction = "qz"
-                    elif dl.direction == "qz":
-                        dl.direction = "qy"
+                    if dl.direction in dist_map:
+                        dl.direction, sign = dist_map[dl.direction]
+                        dl.w_start, dl.w_end = sign * dl.w_start + 0.0, sign * dl.w_end + 0.0
 
     # ── load case accessors ───────────────────────────────────────────────────
 

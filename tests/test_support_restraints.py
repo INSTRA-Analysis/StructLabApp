@@ -64,21 +64,21 @@ def test_rigid_presets_clear_springs_spring_preset_keeps_them():
     (SupportType.PIN, SupportType.PIN),
     (SupportType.FIXED, SupportType.FIXED),
 ])
-def test_supports_keep_their_meaning_through_swap_yz(before, after):
+def test_supports_keep_their_meaning_through_a_mode_switch(before, after):
     s = ModelState()
     n = s.add_node(1.0, 2.0, 0.0)
     n.support_type = before
-    s.swap_yz()
+    s.rotate_axes("3D")
     assert n.support_type is after
-    s.swap_yz()
-    assert n.support_type is before                    # the swap is its own inverse
+    s.rotate_axes("2D")
+    assert n.support_type is before                    # and back
 
 
 def test_custom_rotation_follows_the_axes():
     s = ModelState()
     n = s.add_node(0, 0, 0)
     n.set_restraints((False, False, False, False, False, True))   # 2D: theta_z only
-    s.swap_yz()
+    s.rotate_axes("3D")
     assert n.restraints == (False, False, False, False, True, False)   # 3D: theta_y
 
 
@@ -99,7 +99,7 @@ def test_wall_roller_frame_deflects_the_same_in_2d_and_after_switching_to_3d():
     v2d = cache["displacements"][tip.id * 3 + 1]
     assert v2d < -1e-4                                   # free vertically: it deflects
 
-    s.swap_yz()
+    s.rotate_axes("3D")
     s.analysis_mode = "3D"
     model, mm = build_model(s, s.active_case)
     assert model.dofs_per_node == 6

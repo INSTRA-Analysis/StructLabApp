@@ -1,8 +1,9 @@
 """Tests for the 2D analysis mode.
 
 2D is the engine's native XY plane: nodes have z == 0 and Y is vertical, so the
-builder needs no remap. The only mode-specific transform is ModelState.swap_yz(),
-applied when toggling 2D⇄3D so a planar model keeps standing (height moves Y↔Z).
+builder needs no remap. The only mode-specific transform is ModelState.rotate_axes(),
+applied when toggling 2D⇄3D so a planar model keeps standing (height moves Y→Z) with
+every load keeping its physical direction (a rotation, never a mirror).
 """
 
 from __future__ import annotations
@@ -72,20 +73,22 @@ def test_overhang_beam_2d():
     assert abs(react_y - (20_000 * 8.0 + 30_000)) < 1.0
 
 
-def test_swap_yz_is_involution_and_moves_height():
-    """swap_yz moves the vertical Y→Z (and fy→fz); applying it twice is identity."""
+def test_rotate_axes_moves_height_and_keeps_the_moment_sense():
+    """To 3D: height Y → Z, Fy → Fz; an anticlockwise 2D moment (about +Z, viewed with Y
+    up) is a moment about -Y once the plane is XZ (front view: X right, Z up, -Y towards
+    the viewer).  Back to 2D restores everything."""
     s = ModelState(); s.analysis_mode = "2D"
     n = s.add_node(2.0, 3.0, 0.0)
     s.active_case.set_node_load(n.id, NodeLoad(fx=5.0, fy=-7.0, moment=9.0))
-    s.swap_yz()
+    s.rotate_axes("3D")
     assert (n.x, n.y, n.z) == (2.0, 0.0, 3.0)              # height Y → Z
     nl = s.active_case.get_node_load(n.id)
-    assert (nl.fy, nl.fz) == (0.0, -7.0)                   # vertical Fy → Fz
-    assert (nl.moment, nl.moment_y) == (0.0, 9.0)
-    s.swap_yz()                                            # back again
+    assert (nl.fx, nl.fy, nl.fz) == (5.0, 0.0, -7.0)       # vertical Fy → Fz
+    assert (nl.moment_x, nl.moment_y, nl.moment) == (0.0, -9.0, 0.0)
+    s.rotate_axes("2D")                                    # back again
     assert (n.x, n.y, n.z) == (2.0, 3.0, 0.0)
     nl = s.active_case.get_node_load(n.id)
-    assert (nl.fy, nl.fz) == (-7.0, 0.0)
+    assert (nl.fx, nl.fy, nl.fz, nl.moment) == (5.0, -7.0, 0.0, 9.0)
 
 
 def test_analysis_mode_roundtrip_and_backcompat():

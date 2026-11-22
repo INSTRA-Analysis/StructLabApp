@@ -1641,12 +1641,13 @@ class StructCanvas(QGraphicsScene):
         self.set_view()
 
     def set_analysis_mode(self, mode: str) -> bool:
-        """Switch between 2D (flat XY) and 3D (Z-up) live. Swaps Y↔Z so a planar
-        model keeps standing, flips the flag, and reprojects. The 3D→2D planarity
-        guard is handled by the caller. Returns True if it changed."""
+        """Switch between 2D (flat XY) and 3D (Z-up) live. Rotates the model so a planar
+        model keeps standing and every load keeps its direction, flips the flag, and
+        reprojects. The 3D→2D planarity guard is handled by the caller. Returns True if
+        it changed."""
         if mode not in ("2D", "3D") or mode == self.model_state.analysis_mode:
             return False
-        self.model_state.swap_yz()       # height moves Y↔Z so it stays upright
+        self.model_state.rotate_axes(mode)   # height moves Y→Z (or back), loads keep their sense
         self.model_state.analysis_mode = mode
         self.clear_overlays()
         if mode == "3D":
