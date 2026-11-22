@@ -98,7 +98,8 @@ class TestUniformLateralUDL:
         assert abs(reactions[1]) < 1.0, f"Ry={reactions[1]:.2e} N (expected 0)"
 
     def test_tip_deflection_convergence(self):
-        """Tip deflection converges to wH⁴/(8EI) as n_sub increases."""
+        """Tip deflection is wH⁴/(8EI) exactly, whatever n_sub (qx is an exact element load;
+        it used to be lumped at the sub-nodes and only converged)."""
         exact = w * H**4 / (8 * E * I)
         errors = {}
         for n_sub in (1, 5, 20, 50):
@@ -108,16 +109,7 @@ class TestUniformLateralUDL:
             dx_tip = disps[1 * 3]   # node id=1, dx component
             errors[n_sub] = abs(dx_tip - exact) / exact
 
-        # Error must decrease with refinement
-        assert errors[5]  < errors[1],  f"No improvement 1→5: {errors}"
-        assert errors[20] < errors[5],  f"No improvement 5→20: {errors}"
-        assert errors[50] < errors[20], f"No improvement 20→50: {errors}"
-
-        # n_sub=50 must be within 0.5% of exact
-        assert errors[50] < 0.005, (
-            f"n_sub=50 error={errors[50]*100:.3f}% > 0.5%  "
-            f"(got {disps[3]:.6f} m, exact {exact:.6f} m)"
-        )
+        assert max(errors.values()) < 1e-9, errors
 
     def test_base_moment_converges(self):
         """Fixed-end moment at base converges to wH²/2 (CCW positive)."""
@@ -142,19 +134,15 @@ class TestTriangularLoadBaseToTip:
         )
 
     def test_tip_deflection_converges(self):
-        """Tip deflection converges to wH⁴/(30EI)."""
+        """Tip deflection is wH⁴/(30EI) exactly, whatever n_sub."""
         exact = w * H**4 / (30 * E * I)
         errors = {}
-        for n_sub in (5, 20, 50):
+        for n_sub in (1, 5, 20, 50):
             disps, _ = _build_cantilever(w, 0.0, n_sub=n_sub)
             dx_tip = disps[1 * 3]
             errors[n_sub] = abs(dx_tip - exact) / exact
 
-        assert errors[20] < errors[5],  f"No improvement 5→20: {errors}"
-        assert errors[50] < errors[20], f"No improvement 20→50: {errors}"
-        assert errors[50] < 0.01, (
-            f"n_sub=50 error={errors[50]*100:.3f}% > 1%"
-        )
+        assert max(errors.values()) < 1e-9, errors
 
 
 # ── Case C: triangular load, zero at base, max at tip ─────────────────────────
@@ -168,19 +156,15 @@ class TestTriangularLoadTipLoaded:
         assert abs(reactions[0] + total_applied) < 1e-6 * total_applied
 
     def test_tip_deflection_converges(self):
-        """Tip deflection converges to 11wH⁴/(120EI)."""
+        """Tip deflection is 11wH⁴/(120EI) exactly, whatever n_sub."""
         exact = 11 * w * H**4 / (120 * E * I)
         errors = {}
-        for n_sub in (5, 20, 50):
+        for n_sub in (1, 5, 20, 50):
             disps, _ = _build_cantilever(0.0, w, n_sub=n_sub)
             dx_tip = disps[1 * 3]
             errors[n_sub] = abs(dx_tip - exact) / exact
 
-        assert errors[20] < errors[5],  f"No improvement 5→20: {errors}"
-        assert errors[50] < errors[20], f"No improvement 20→50: {errors}"
-        assert errors[50] < 0.01, (
-            f"n_sub=50 error={errors[50]*100:.3f}% > 1%"
-        )
+        assert max(errors.values()) < 1e-9, errors
 
 
 # ── Serialisation round-trip ───────────────────────────────────────────────────

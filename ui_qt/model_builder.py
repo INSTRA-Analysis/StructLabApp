@@ -58,21 +58,61 @@ def _add_self_weight_3d(model: Model, el, weight_per_length: float) -> None:
             model.nodal_loads.append(NodalLoad(node_id=node.id, fz=-weight / 2.0))
         return
 
-    x_hat, y_hat, z_hat = el._R3[:, 0], el._R3[:, 1], el._R3[:, 2]
-    # ElementLoad magnitude is positive along -local axis; gravity is global -Z.
-    for axis, hat in ((LoadDirection.LOCAL_Y, y_hat), (LoadDirection.LOCAL_Z, z_hat)):
-        w_transverse = weight_per_length * hat[2]
-        if abs(w_transverse) > 1e-12:
+    gravity = np.array([0.0, 0.0, -weight_per_length])
+    _add_line_load_3d(model, el, gravity, gravity)
+
+
+_LOCAL_AXES = (LoadDirection.LOCAL_X, LoadDirection.LOCAL_Y, LoadDirection.LOCAL_Z)
+
+
+def _add_line_load_3d(model: Model, el, q_i: np.ndarray, q_j: np.ndarray) -> None:
+    """A distributed load given as global vectors (N per m of member) at the element's ends,
+    varying linearly, applied EXACTLY: resolved on the element's own axes (``el._R3``) into
+    axial (LOCAL_X) and transverse (LOCAL_Y / LOCAL_Z) element loads, each a UDL or UVL.
+    ElementLoad magnitudes are positive along the negative local axis."""
+    scale = max(float(np.abs(q_i).max()), float(np.abs(q_j).max()))
+    if scale == 0.0:
+        return
+    for k, axis in enumerate(_LOCAL_AXES):
+        hat = el._R3[:, k]
+        w1, w2 = -float(q_i @ hat), -float(q_j @ hat)
+        if abs(w1) <= 1e-12 * scale and abs(w2) <= 1e-12 * scale:
+            continue
+        if abs(w1 - w2) <= 1e-12 * scale:
             model.element_loads.append(ElementLoad(
-                element_id=el.id, load_type=LoadType.UDL,
-                magnitude=w_transverse, direction=axis,
-            ))
-    axial_force = -weight / 2.0 * x_hat[2] * x_hat       # global vector per end node
-    if np.linalg.norm(axial_force) > 1e-9:
-        for node in (el.node_i, el.node_j):
-            model.nodal_loads.append(NodalLoad(
-                node_id=node.id, fx=axial_force[0], fy=axial_force[1], fz=axial_force[2],
-            ))
+                element_id=el.id, load_type=LoadType.UDL, magnitude=w1, direction=axis))
+        else:
+            model.element_loads.append(ElementLoad(
+                element_id=el.id, load_type=LoadType.UVL, magnitude=w1, position=w2,
+                direction=axis))
+
+
+def _add_line_load_2d(model: Model, el, q_i: np.ndarray, q_j: np.ndarray) -> None:
+    """2D counterpart of _add_line_load_3d: global (X, Y) load vectors at the element ends,
+    resolved on its axes (x̂ = (c, s), ŷ = (−s, c)) into exact LOCAL_X / LOCAL_Y loads."""
+    c, s = math.cos(el.angle), math.sin(el.angle)
+    scale = max(float(np.abs(q_i).max()), float(np.abs(q_j).max()))
+    if scale == 0.0:
+        return
+    for axis, hat in ((LoadDirection.LOCAL_X, np.array([c, s])),
+                      (LoadDirection.LOCAL_Y, np.array([-s, c]))):
+        w1, w2 = -float(q_i @ hat), -float(q_j @ hat)
+        if abs(w1) <= 1e-12 * scale and abs(w2) <= 1e-12 * scale:
+            continue
+        if abs(w1 - w2) <= 1e-12 * scale:
+            model.element_loads.append(ElementLoad(
+                element_id=el.id, load_type=LoadType.UDL, magnitude=w1, direction=axis))
+        else:
+            model.element_loads.append(ElementLoad(
+                element_id=el.id, load_type=LoadType.UVL, magnitude=w1, position=w2,
+                direction=axis))
+
+
+def _global_line_load(ml: MemberLoad, t: float) -> np.ndarray:
+    """The member's qx / qy / qz at fraction ``t`` of its length as a global vector (N/m):
+    qx along +X, qy along +Y, qz positive DOWNWARD (−Z), like 'w'."""
+    (xs, xe), (ys, ye), (zs, ze) = ml.net("qx"), ml.net("qy"), ml.net("qz")
+    return np.array([xs + t * (xe - xs), ys + t * (ye - ys), -(zs + t * (ze - zs))])
 
 
 def build_model(state: ModelState,
@@ -167,6 +207,7 @@ def build_model(state: ModelState,
                            I_y=md.I_y, J=md.J)
 
         el_ids: list[int] = []
+        sub_els: list = []
         ml = lc.get_member_load(md.id)   # MemberLoad for this member
 
         for k in range(n_sub):
@@ -190,6 +231,7 @@ def build_model(state: ModelState,
 
             model.elements.append(el)
             el_ids.append(next_el_id)
+            sub_els.append(el)
 
             if lc.include_self_weight and has_3d and md.density > 0.0:
                 _add_self_weight_3d(
@@ -300,9 +342,18 @@ def build_model(state: ModelState,
                         position=local_pos,
                     ))
 
-        # Lateral (global X) distributed load: lump as nodal X-forces per sub-element.
-        # Accuracy increases with n_sub (trapezoidal integration → exact in the limit).
-        qxs, qxe = ml.net("qx")
+        # Global distributed loads qx / qy / qz: exact element loads on every sub-element of
+        # a beam (resolved onto its local axes; 2D takes qx, qy — qz is out of its plane).
+        # Bars: lumped to their ends, which is exact statics between their pins.
+        exact_global = md.element_type != ElementType.BAR
+        if exact_global and any(v != 0.0 for a in ("qx", "qy", "qz") for v in ml.net(a)):
+            for k, sub_el in enumerate(sub_els):
+                q_i, q_j = _global_line_load(ml, k / n_sub), _global_line_load(ml, (k + 1) / n_sub)
+                if has_3d:
+                    _add_line_load_3d(model, sub_el, q_i, q_j)
+                else:
+                    _add_line_load_2d(model, sub_el, q_i[:2], q_j[:2])
+        qxs, qxe = ml.net("qx") if not exact_global else (0.0, 0.0)
         if qxs != 0.0 or qxe != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
@@ -315,7 +366,7 @@ def build_model(state: ModelState,
                     ))
 
         # Global Y distributed load: lump as nodal Y-forces per sub-element.
-        qys, qye = ml.net("qy")
+        qys, qye = ml.net("qy") if not exact_global else (0.0, 0.0)
         if qys != 0.0 or qye != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
@@ -330,7 +381,7 @@ def build_model(state: ModelState,
         # Global Z distributed load: lump as nodal Z-forces per sub-element.
         # Sign convention: positive qz = downward (gravity direction), same as w.
         # Applied as negative fz so that +qz produces -Z (downward) nodal forces.
-        qzs, qze = ml.net("qz")
+        qzs, qze = ml.net("qz") if not exact_global else (0.0, 0.0)
         if qzs != 0.0 or qze != 0.0:
             sub_L = member_length / n_sub
             for k in range(n_sub):
@@ -371,6 +422,7 @@ def build_model(state: ModelState,
     # 3D models are handled per sub-element in the loop above, along -Z.
     if lc.include_self_weight and not has_3d:
         _G = _GRAVITY
+        el_by_id = {el.id: el for el in model.elements}
         for mi, md in enumerate(state.members):
             if md.density <= 0.0:
                 continue
@@ -401,27 +453,11 @@ def build_model(state: ModelState,
                         moment=0.0,
                     ))
             else:
-                # Transverse component → UDL on each sub-element
-                w_perp = w_self * cos_a
-                if abs(w_perp) > 1e-12:
-                    for el_id in member_element_map[mi]:
-                        model.element_loads.append(ElementLoad(
-                            element_id=el_id,
-                            load_type=LoadType.UDL,
-                            magnitude=w_perp,
-                        ))
-
-                # Axial component → equivalent half-weight nodal forces at each end
-                w_axial = w_self * sin_a
-                if abs(w_axial) > 1e-12:
-                    F_half = -w_axial * L / 2.0
-                    for nid in (md.node_i, md.node_j):
-                        model.nodal_loads.append(NodalLoad(
-                            node_id=nid,
-                            fx=F_half * cos_a,
-                            fy=F_half * sin_a,
-                            moment=0.0,
-                        ))
+                # Exact on every sub-element: transverse and axial parts of the weight
+                # (as in 3D), so N varies along the member as it really does.
+                gravity = np.array([0.0, -w_self])
+                for el_id in member_element_map[mi]:
+                    _add_line_load_2d(model, el_by_id[el_id], gravity, gravity)
 
     return model, member_element_map
 

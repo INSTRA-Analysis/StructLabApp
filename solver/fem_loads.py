@@ -87,8 +87,11 @@ def _check_direction(load: ElementLoad, is_3d: bool) -> None:
     resolve such a load into local components (or lump it to nodes) before it
     reaches the solver, as model_builder does for qx / qy / qz.
     """
-    allowed = ((LoadDirection.LOCAL_Y, LoadDirection.LOCAL_Z) if is_3d
-               else (LoadDirection.LOCAL_Y,))
+    allowed = ((LoadDirection.LOCAL_X, LoadDirection.LOCAL_Y, LoadDirection.LOCAL_Z) if is_3d
+               else (LoadDirection.LOCAL_X, LoadDirection.LOCAL_Y))
+    if load.direction == LoadDirection.LOCAL_X and load.load_type not in (LoadType.UDL, LoadType.UVL):
+        raise ValueError(f"Element load on element {load.element_id}: an axial (LOCAL_X) load "
+                         "must be distributed (UDL or UVL).")
     if load.direction not in allowed:
         mode = "3D" if is_3d else "2D"
         raise ValueError(
@@ -129,6 +132,13 @@ def fixed_end_forces(load: ElementLoad, length: float,
 def _fef_2d(load: ElementLoad, L: float, pin_i: bool, pin_j: bool) -> np.ndarray:
     """2D 6-entry FEF vector."""
     f = np.zeros(6)
+
+    if load.direction == LoadDirection.LOCAL_X:          # distributed axial (see _fef_3d)
+        w1 = load.magnitude
+        w2 = load.position if load.load_type == LoadType.UVL else w1
+        f[0] = L * (2 * w1 + w2) / 6
+        f[3] = L * (w1 + 2 * w2) / 6
+        return f
 
     if load.load_type == LoadType.UDL:
         w = load.magnitude  # N/m, positive downward
@@ -177,6 +187,15 @@ def _fef_3d(load: ElementLoad, L: float, pin_i: bool, pin_j: bool) -> np.ndarray
     LOCAL_Z loads produce bending in the x-z plane (about y-axis).
     """
     f = np.zeros(12)
+
+    if load.direction == LoadDirection.LOCAL_X:
+        # Distributed axial load (positive along −x): fixed-end reactions push back along +x,
+        # shared as for a bar fixed at both ends; no bending, pin releases do not affect it.
+        w1 = load.magnitude
+        w2 = load.position if load.load_type == LoadType.UVL else w1
+        f[0] = L * (2 * w1 + w2) / 6
+        f[6] = L * (w1 + 2 * w2) / 6
+        return f
 
     if load.load_type == LoadType.UDL:
         w = load.magnitude  # N/m, positive downward in the load direction

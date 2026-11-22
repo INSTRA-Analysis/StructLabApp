@@ -61,9 +61,9 @@ def test_a_2d_file_opens_as_a_plane_frame_with_the_same_results(name, tmp_path):
 
 
 def test_self_weight_still_acts_downward(tmp_path):
-    """Displacements, reactions and moments are identical.  Axial forces agree on average
-    but not end by end: 2D lumps a member's axial self-weight at its two end nodes (N constant
-    along a column), 3D at every sub-element node (N grows towards the base, as it should)."""
+    """Everything is identical, axial forces end by end included: 2D and 3D both apply the
+    axial part of the self-weight as an exact element load (they used to lump it, at the
+    member ends in 2D and per sub-element in 3D, so N only agreed on average)."""
     s = ModelState()
     s.analysis_mode = "2D"
     a, b, c = s.add_node(0, 0, 0), s.add_node(0, 3, 0), s.add_node(5, 3, 0)
@@ -75,11 +75,10 @@ def test_self_weight_still_acts_downward(tmp_path):
     path = tmp_path / "sw.slab"
     save_model(s, path)
     opened = load_model(path)
-    _same_results(load_model(path, keep_2d=True), opened, axial_ends=False)
+    _same_results(load_model(path, keep_2d=True), opened, axial_ends=True)
     col = solve_engine(*build_model(opened, opened.active_case), opened)["member_results"][0]
     weight = 7850 * 8e-3 * 9.81 * 3.0
-    n_sub = opened.members[0].n_sub
-    assert col.N_i - (-col.N_j) == pytest.approx(weight * (n_sub - 1) / n_sub, rel=1e-6)
+    assert col.N_i - (-col.N_j) == pytest.approx(weight, rel=1e-9)   # the column's own weight
 
 
 def test_older_v2_file_without_a_stored_mode_is_converted(tmp_path):

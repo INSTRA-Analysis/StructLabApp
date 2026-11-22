@@ -14,12 +14,18 @@ class LoadType(Enum):
 class LoadDirection(Enum):
     """Direction in which an element load acts.
 
+    LOCAL_X  — along the member axis (distributed axial load, UDL / UVL only, 3D)
     LOCAL_Y  — transverse in the local x-y plane (standard 2D bending, default)
     LOCAL_Z  — transverse in the local x-z plane (weak-axis bending, 3D)
     GLOBAL_X — axial / lateral in global X direction
     GLOBAL_Y — vertical / lateral in global Y direction
     GLOBAL_Z — vertical / lateral in global Z direction (3D)
+
+    For every LOCAL_* direction a positive magnitude acts along the NEGATIVE local axis
+    (LOCAL_Y: "positive = downward" for a horizontal member).  The GLOBAL_* members are not
+    implemented by the solver: model_builder resolves global loads onto the local axes.
     """
+    LOCAL_X = auto()
     LOCAL_Y = auto()
     LOCAL_Z = auto()
     GLOBAL_X = auto()

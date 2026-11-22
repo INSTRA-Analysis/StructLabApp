@@ -251,6 +251,27 @@ def lock_force_note(cache) -> str | None:
 # ── Peak moment along a member ────────────────────────────────────────────────
 
 _STATIONS_PER_SUB = 9          # fixed stations per sub-element (ends + midpoint included)
+_PEAK_SAMPLES = 33             # samples per element when searching for the peak moment
+
+
+def _shear_zeros(end_forces, loads, length: float, xs: np.ndarray, plane: str) -> np.ndarray:
+    """Positions in (0, L) where the shear changes sign: the stationary points of M (a UVL's
+    peak lies between any fixed samples).  Bracketed on ``xs``, refined by bisection on the
+    exact profile."""
+    from solver.postprocessor import bending_profile
+    V, _ = bending_profile(end_forces, loads, length, xs, plane)
+    roots = []
+    for k in np.nonzero(np.sign(V[:-1]) * np.sign(V[1:]) < 0)[0]:
+        lo, hi, v_lo = xs[k], xs[k + 1], V[k]
+        for _ in range(50):
+            mid = 0.5 * (lo + hi)
+            v_mid = bending_profile(end_forces, loads, length, np.array([mid]), plane)[0][0]
+            if np.sign(v_mid) == np.sign(v_lo):
+                lo, v_lo = mid, v_mid
+            else:
+                hi = mid
+        roots.append(0.5 * (lo + hi))
+    return np.array(roots)
 
 
 def member_moment_peaks(el_ids, res_by_id, el_by_id, load_map
@@ -270,7 +291,9 @@ def member_moment_peaks(el_ids, res_by_id, el_by_id, load_map
         loads = load_map.get(el_id, [])
         planes = ("y", "z") if res.is_3d else ("z",)
         fixed = np.linspace(0.0, el.length, _STATIONS_PER_SUB)
-        every = sample_points(el.length, loads, _STATIONS_PER_SUB)
+        every = sample_points(el.length, loads, _PEAK_SAMPLES)
+        every = np.union1d(every, np.concatenate(
+            [_shear_zeros(res.end_forces, loads, el.length, every, p) for p in planes]))
         m_fixed = np.column_stack([bending_profile(res.end_forces, loads, el.length, fixed, p)[1]
                                    for p in planes])
         m_every = np.column_stack([bending_profile(res.end_forces, loads, el.length, every, p)[1]
