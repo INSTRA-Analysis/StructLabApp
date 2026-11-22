@@ -30,6 +30,9 @@ class UnstableStructureError(np.linalg.LinAlgError):
 # tests are NOT used: pin-jointed trusses have near-zero rotational stiffness at
 # bar-only nodes and legitimately sit near 1e-18.
 _MECHANISM_DISPLACEMENT_FACTOR = 100.0
+# A linear analysis never turns a node through more than a few degrees; 100 rad is only
+# reached by an unrestrained rotation (a loaded twist held by nothing but _rotation_guard).
+_MECHANISM_ROTATION_RAD = 100.0
 
 
 @dataclass
@@ -55,10 +58,15 @@ class LinearSolver:
         """Raise UnstableStructureError if the solution is non-finite or absurdly large."""
         coords = np.array([[n.x, n.y, n.z] for n in self.model.nodes])
         extent = max(float(np.linalg.norm(coords.max(axis=0) - coords.min(axis=0))), 1.0)
-        per_node = displacements.reshape(-1, self._dpn)[:, :3 if self._dpn == 6 else 2]
-        size = np.linalg.norm(per_node, axis=1)
-        if np.all(np.isfinite(size)) and size.max() <= _MECHANISM_DISPLACEMENT_FACTOR * extent:
+        per_dof = displacements.reshape(-1, self._dpn)
+        n_trans = 3 if self._dpn == 6 else 2
+        size = np.linalg.norm(per_dof[:, :n_trans], axis=1)
+        turn = np.abs(per_dof[:, n_trans:]).max(axis=1)
+        if (np.all(np.isfinite(size)) and np.all(np.isfinite(turn))
+                and size.max() <= _MECHANISM_DISPLACEMENT_FACTOR * extent
+                and turn.max() <= _MECHANISM_ROTATION_RAD):
             return
+        size = np.where(turn > _MECHANISM_ROTATION_RAD, np.inf, size)
         size = np.where(np.isfinite(size), size, np.inf)
         worst = [int(i) for i in np.argsort(-size)[:3]]
         raise UnstableStructureError(
@@ -69,6 +77,35 @@ class LinearSolver:
                     "missing brace, or a part not connected to a support."),
             node_ids=tuple(worst),
         )
+
+    # Stiffness added to rotational DOFs, relative to the largest diagonal term, ONLY when K_ff
+    # is exactly singular (see _rotation_guard).
+    _ROTATION_GUARD = 1e-10
+
+    def _rotation_guard(self, active: np.ndarray, diagonal: np.ndarray) -> sparse.spmatrix:
+        """A tiny spring on every free rotational DOF, for a K_ff that is exactly singular.
+
+        The common cause is an UNLOADED free rotation: a straight run of members on pins in a
+        space frame can twist about its own axis.  The spring (1e-10 of that DOF's own
+        diagonal stiffness, so no real stiffness changes by more than 1e-10) fixes that rigid
+        twist; a LOADED rotational mechanism then turns through an absurd angle, which
+        _check_for_mechanism reports.  A translational mechanism stays singular and is
+        reported as before.
+        """
+        rot_offset = 2 if self._dpn == 3 else 3
+        is_rotation = (active % self._dpn) >= rot_offset
+        floor = 1e-12 * float(np.abs(diagonal).max())             # a zero diagonal still gets one
+        k = self._ROTATION_GUARD * np.maximum(np.abs(diagonal), floor)
+        return sparse.diags(np.where(is_rotation, k, 0.0))
+
+    @staticmethod
+    def _refine(solve_guarded, K_ff, F_f: np.ndarray, steps: int = 4) -> np.ndarray:
+        """Solve with the guarded factor, then correct against the TRUE K_ff (iterative
+        refinement): the guard only steers the free twist, never the real displacements."""
+        d = solve_guarded(F_f)
+        for _ in range(steps):
+            d = d + solve_guarded(F_f - K_ff @ d)
+        return d
 
     def _support_dofs(self) -> set[int]:
         restrained: set[int] = set()
@@ -133,12 +170,21 @@ class LinearSolver:
             try:
                 d_f = splu(K_ff).solve(F_f)
             except RuntimeError as exc:                   # "Factor is exactly singular"
-                raise UnstableStructureError(unstable) from exc
+                try:
+                    guarded = splu((K_ff + self._rotation_guard(active, K_ff.diagonal())).tocsc())
+                except RuntimeError:
+                    raise UnstableStructureError(unstable) from exc
+                d_f = self._refine(guarded.solve, K_ff, F_f)
         else:
+            K_ff = K[np.ix_(active, active)]
             try:
-                d_f = np.linalg.solve(K[np.ix_(active, active)], F_f)
+                d_f = np.linalg.solve(K_ff, F_f)
             except np.linalg.LinAlgError as exc:
-                raise UnstableStructureError(unstable) from exc
+                guarded = K_ff + self._rotation_guard(active, np.diag(K_ff)).toarray()
+                try:
+                    d_f = self._refine(lambda r: np.linalg.solve(guarded, r), K_ff, F_f)
+                except np.linalg.LinAlgError:
+                    raise UnstableStructureError(unstable) from exc
 
         displacements = np.zeros(self.num_dofs)
         displacements[active] = d_f

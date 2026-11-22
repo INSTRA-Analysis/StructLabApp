@@ -50,6 +50,39 @@ def test_sparse_equals_dense(analysis_type):
     assert sp.free_dofs == dense.free_dofs
 
 
+def _pinned_line(torque: float):
+    """Straight two-member beam on pins in a SPACE frame: free to twist about its own axis
+    (an unloaded rigid-body twist), vertical point load at mid-span, optional torque Mx."""
+    s = ModelState()
+    a, b, c = s.add_node(0, 0, 0), s.add_node(3, 0, 0), s.add_node(6, 0, 0)
+    a.support_type = c.support_type = SupportType.PIN
+    for p, q in ((a, b), (b, c)):
+        m = s.add_member(p.id, q.id)
+        m.I_y, m.J, m.n_sub = m.I, 1e-5, 1
+    s.active_case.set_node_load(b.id, NodeLoad(fz=-1e4, moment_x=torque))
+    return s, b
+
+
+@pytest.mark.parametrize("dense", [False, True])
+def test_an_unloaded_free_twist_does_not_stop_the_solve(dense):
+    s, mid = _pinned_line(0.0)
+    model, _ = build_model(s, s.active_case)
+    asm = Assembler(model)
+    K = asm.global_stiffness_matrix(model.elements) if dense else asm.global_stiffness_sparse(model.elements)
+    r = LinearSolver(model).solve(K, asm.global_force_vector(model.elements))
+    m = s.members[0]
+    assert r.displacements[mid.id * 6 + 2] == pytest.approx(-1e4 * 6 ** 3 / (48 * m.E * m.I), rel=1e-9)
+
+
+def test_a_loaded_free_twist_is_a_mechanism():
+    s, _ = _pinned_line(500.0)
+    model, _ = build_model(s, s.active_case)
+    asm = Assembler(model)
+    with pytest.raises(UnstableStructureError):
+        LinearSolver(model).solve(asm.global_stiffness_sparse(model.elements),
+                                  asm.global_force_vector(model.elements))
+
+
 def test_sparse_path_reports_a_mechanism():
     s = ModelState()
     s.analysis_type = "plane_xz"
