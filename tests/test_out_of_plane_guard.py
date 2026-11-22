@@ -1,9 +1,9 @@
-"""Transparency guard (finding F1): out-of-plane loads on a planar (2D) model.
+"""Out-of-plane loads and the declared dimension.
 
-A model whose nodes all lie at z == 0 is solved in 2D (3 DOF/node) regardless of
-the ``mode_3d`` flag (see core.model.Model.dofs_per_node). Nodal Fz/Mx/My and
-'qz' member loads are then dropped by the assembler. validate_model must WARN
-(not silently drop, and not block) so the user knows these loads are ignored.
+A 3D model is solved in 3D (6 DOF/node) even when every node lies at z = 0 (a grillage, a
+floor, a beam drawn on the ground plane): its vertical loads act and match hand results.
+Only a 2D model has no out-of-plane freedoms; there nodal Fz/Mx/My and 'qz' member loads
+cannot act, and validate_model WARNS (does not block) so they are never dropped silently.
 """
 import warnings
 
@@ -13,12 +13,13 @@ import sdk as sl
 from ui_qt.solve_actions import validate_model
 
 E, A, I = 210e9, 6.64e-3, 8.36e-5
+L = 4.0
 
 
-def _planar_cantilever(mode_3d):
+def _flat_cantilever(mode_3d):
     m = sl.Model(mode_3d=mode_3d)
     n0 = m.add_node(0, 0, 0)
-    n1 = m.add_node(4, 0, 0)          # horizontal member, all z == 0 → planar
+    n1 = m.add_node(L, 0, 0)          # horizontal member, all z == 0
     m.fixed(n0)
     m.add_member(n0, n1, E=E, A=A, I=I, I_y=I, J=1e-5)
     return m, n0, n1
@@ -28,53 +29,64 @@ def _has_oop(msgs):
     return any("out-of-plane" in s.lower() for s in msgs)
 
 
-def test_planar_fz_load_is_warned_not_blocked():
-    m, _, n1 = _planar_cantilever(mode_3d=True)
+def test_flat_3d_model_carries_a_vertical_nodal_load():
+    m, n0, n1 = _flat_cantilever(mode_3d=True)
     m.add_point_load(n1, Fz=-8e3)
     errors, warns = validate_model(m._state)
-    assert not _has_oop(errors)          # not a blocking error
-    assert _has_oop(warns)               # surfaced as a warning
-    # solve proceeds and emits the warning (transparency), does not raise.
-    with pytest.warns(UserWarning, match="out-of-plane"):
-        m.solve()
+    assert not _has_oop(errors) and not _has_oop(warns)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        r = m.solve()
+    assert r.displacement(n1)[2] == pytest.approx(-8e3 * L ** 3 / (3 * E * I), rel=1e-6)
+    assert r.reactions(n0)[2] == pytest.approx(8e3, rel=1e-9)
 
 
-def test_planar_moment_x_load_is_warned():
-    m, _, n1 = _planar_cantilever(mode_3d=False)
-    m.add_point_load(n1, Mx=5e3)
+def test_flat_3d_model_carries_a_qz_member_load():
+    m, _, n1 = _flat_cantilever(mode_3d=True)
+    m.add_udl(0, w=10e3, direction="qz")
     _, warns = validate_model(m._state)
-    assert _has_oop(warns)
+    assert not _has_oop(warns)
+    r = m.solve()
+    # qz is lumped onto the sub-element nodes (converges with n_sub; ~0.3 % at the default)
+    assert r.displacement(n1)[2] == pytest.approx(-10e3 * L ** 4 / (8 * E * I), rel=1e-2)
 
 
-def test_planar_qz_member_load_is_warned():
-    m, _, _ = _planar_cantilever(mode_3d=True)
+@pytest.mark.parametrize("load", [{"Fz": -8e3}, {"Mx": 5e3}])
+def test_out_of_plane_nodal_load_on_a_2d_model_is_warned(load):
+    m, _, n1 = _flat_cantilever(mode_3d=False)
+    m.add_point_load(n1, **load)
+    errors, warns = validate_model(m._state)
+    assert not _has_oop(errors) and _has_oop(warns)
+
+
+def test_qz_member_load_on_a_2d_model_is_warned():
+    m, _, _ = _flat_cantilever(mode_3d=False)
     m.add_udl(0, w=10e3, direction="qz")
     _, warns = validate_model(m._state)
     assert _has_oop(warns)
 
 
-def test_inplane_planar_load_is_clean():
+def test_inplane_load_on_a_2d_model_is_clean():
     """No false positive: an ordinary 2D load must not warn."""
-    m, n0, n1 = _planar_cantilever(mode_3d=False)
+    m, n0, n1 = _flat_cantilever(mode_3d=False)
     m.add_point_load(n1, Fy=-8e3)
     errors, warns = validate_model(m._state)
     assert not _has_oop(errors) and not _has_oop(warns)
     with warnings.catch_warnings():
-        warnings.simplefilter("error")   # any out-of-plane warning would fail here
+        warnings.simplefilter("error")
         r = m.solve()
     assert abs(r.reactions(n0)[1] - 8e3) / 8e3 < 1e-6
 
 
-def test_genuine_3d_fz_load_is_clean():
-    """The same out-of-plane action on real 3D geometry (z != 0) must not warn."""
+def test_genuine_3d_column_is_clean():
     m = sl.Model(mode_3d=True)
     n0 = m.add_node(0, 0, 0)
-    n1 = m.add_node(0, 0, 4)          # vertical column → genuine 3D
+    n1 = m.add_node(0, 0, L)          # vertical column
     m.fixed(n0)
     m.add_member(n0, n1, E=E, A=A, I=I, I_y=I, J=1e-5)
     m.add_point_load(n1, Fx=8e3)
     errors, warns = validate_model(m._state)
     assert not _has_oop(errors) and not _has_oop(warns)
     r = m.solve()
-    exp = 8e3 * 4**3 / (3 * E * I)    # PL^3/3EI tip deflection
+    exp = 8e3 * L ** 3 / (3 * E * I)
     assert abs(abs(r.displacement(n1)[0]) - exp) / exp < 1e-3

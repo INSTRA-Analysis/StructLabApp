@@ -52,6 +52,7 @@ w   = 10_000.0  # N/m — lateral load magnitude
 def _build_cantilever(qx_start: float, qx_end: float, n_sub: int) -> tuple:
     """Return (displacements, reactions) for the cantilever column."""
     state = ModelState()
+    state.analysis_mode = "2D"          # column in the XY plane, Y up
 
     n0 = state.add_node(0.0, 0.0)
     n1 = state.add_node(0.0, H)
@@ -247,6 +248,7 @@ class TestLateralLoadInCombination:
         from ui_qt.model_builder import build_model_combined
 
         state = ModelState()
+        state.analysis_mode = "2D"
         n0 = state.add_node(0.0, 0.0);  n0.support_type = SupportType.FIXED
         n1 = state.add_node(0.0, H)
         m  = state.add_member(n0.id, n1.id)
@@ -276,6 +278,7 @@ class TestLateralLoadInCombination:
 
         def _solve_combo(factor):
             state = ModelState()
+            state.analysis_mode = "2D"
             n0 = state.add_node(0.0, 0.0);  n0.support_type = SupportType.FIXED
             n1 = state.add_node(0.0, H)
             m  = state.add_member(n0.id, n1.id)

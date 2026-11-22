@@ -25,8 +25,10 @@ class BarElement(FrameElement):
         node_j: Node,
         material: Material,
         area: float,
+        dimension: int | None = None,
     ) -> None:
         section = Section(f"bar_{id}", area, 0.0)
         super().__init__(
-            id, node_i, node_j, material, section, pin_i=True, pin_j=True
+            id, node_i, node_j, material, section, pin_i=True, pin_j=True,
+            dimension=dimension,
         )

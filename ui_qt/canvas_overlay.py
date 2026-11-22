@@ -65,7 +65,7 @@ def _model_to_scene(x: float, y: float) -> tuple[float, float]:
 
 def _node_to_scene(node, model: "Model") -> tuple[float, float]:
     """Return (scene_x, scene_y) using isometric projection for 3D models."""
-    if model.is_3d or model.ui_is_3d:
+    if model.is_3d:
         from ui_qt.projection import isometric
         return isometric(node.x, node.y, node.z)
     return _model_to_scene(node.x, node.y)
@@ -247,7 +247,7 @@ def _member_scene_geometry(
     cos_s = dx_s / L_px
     sin_s = dy_s / L_px
 
-    if (model.is_3d or model.ui_is_3d) and hasattr(first_el, '_R3'):
+    if model.is_3d and hasattr(first_el, '_R3'):
         # Project the element's structural local y-axis (3D world space) through
         # the current isometric transform.  The result gives the on-screen
         # direction that corresponds to +local_y in 3D.
@@ -714,8 +714,8 @@ def draw_deformed(
 
         if el.is_3d:
             # ── 3D: use element's full rotation matrix R3 ─────────────────────
-            # build_model sets all z=0 nodes to z=1e-12, so every element in a
-            # 3D model has is_3d=True and a valid _R3 basis.
+            # Every element of a 3D model works in 3D (declared dimension), so it has
+            # a valid _R3 basis even when it lies at z = 0.
             from ui_qt.projection import isometric as _iso
             R3 = el._R3  # 3×3 columns = [x_hat, y_hat, z_hat] in global coords
 

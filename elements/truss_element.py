@@ -23,6 +23,7 @@ class TrussElement(FrameElement):
         node_j: Node,
         material: Material,
         area: float,
+        dimension: int | None = None,
     ) -> None:
         section = Section("truss", area, 1e-20)
-        super().__init__(id, node_i, node_j, material, section)
+        super().__init__(id, node_i, node_j, material, section, dimension=dimension)

@@ -12,9 +12,10 @@ from core.load import NodalLoad, ElementLoad
 class Model:
     """Complete structural model ready for analysis.
 
-    ``dofs_per_node`` is auto-detected: 3 if all nodes have z == 0 (2D model),
-    6 otherwise (3D model).  This controls the size of the global stiffness
-    matrix and the DOF index mapping used throughout the solver.
+    ``dimension`` (2 or 3) declares the analysis: 3 DOF/node in 2D, 6 in 3D, whatever the
+    node coordinates (a 3D model may lie entirely at z = 0: a grillage, a floor).  Left as
+    None, it is detected as before: 3 if all nodes have z == 0, 6 otherwise.  This controls
+    the size of the global stiffness matrix and the DOF index mapping used by the solver.
     """
 
     nodes: list[Node] = field(default_factory=list)
@@ -22,13 +23,13 @@ class Model:
     supports: list[Support] = field(default_factory=list)
     nodal_loads: list[NodalLoad] = field(default_factory=list)
     element_loads: list[ElementLoad] = field(default_factory=list)
-    # Set by model_builder when the UI is in 3D mode (even if all z==0).
-    # Tells canvas_overlay to use isometric projection regardless of node z-values.
-    ui_is_3d: bool = False
+    dimension: int | None = None
 
     @property
     def dofs_per_node(self) -> int:
-        """Return 3 for pure 2D models, 6 if any node has a non-zero z coordinate."""
+        """3 in 2D, 6 in 3D: the declared dimension, else detected from the z values."""
+        if self.dimension is not None:
+            return 6 if self.dimension == 3 else 3
         if not self.nodes:
             return 3
         if any(n.z != 0.0 for n in self.nodes):
@@ -37,5 +38,5 @@ class Model:
 
     @property
     def is_3d(self) -> bool:
-        """True if this is a 3D model (any node has z != 0)."""
+        """True for a 3D (6 DOF/node) model."""
         return self.dofs_per_node == 6

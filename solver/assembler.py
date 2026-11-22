@@ -14,6 +14,8 @@ class Assembler:
         self.model = model
         self._dpn: int = model.dofs_per_node  # 3 (2D) or 6 (3D)
         self.num_dofs: int = (max(n.id for n in model.nodes) + 1) * self._dpn
+        for element in model.elements:          # every element works in the model's dimension
+            element.bind_dimension(self._dpn)
 
     def global_stiffness_matrix(self, elements: list[FrameElement]) -> np.ndarray:
         """Assemble and return the (num_dofs × num_dofs) global stiffness matrix.

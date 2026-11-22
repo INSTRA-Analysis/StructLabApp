@@ -44,6 +44,7 @@ class FrameElement:
         pin_i: bool = False,
         pin_j: bool = False,
         beta_angle: float = 0.0,
+        dimension: int | None = None,
     ) -> None:
         self.id = id
         self.node_i = node_i
@@ -58,19 +59,47 @@ class FrameElement:
         dy = node_j.y - node_i.y
         dz = node_j.z - node_i.z
         self.length: float = math.sqrt(dx * dx + dy * dy + dz * dz)
-        self._is_3d: bool = (node_i.z != 0.0 or node_j.z != 0.0 or dz != 0.0)
 
         if self.length == 0.0:
             raise ValueError(
                 f"Element {id}: zero-length between nodes {node_i.id} and {node_j.id}"
             )
 
-        if self._is_3d:
-            self._dx, self._dy, self._dz = dx, dy, dz
-            self.angle: float = math.atan2(dy, dx)  # XY-plane projection angle
-            self._compute_3d_basis()
+        self._dx, self._dy, self._dz = dx, dy, dz
+        self.angle: float = math.atan2(dy, dx)  # radians from +x (XY-plane projection in 3D)
+        self._declared_dimension = dimension
+        self._set_dimension(dimension)
+
+    # ── dimension: declared (2 or 3) or detected from the node z values ────────
+
+    def _set_dimension(self, dimension: int | None) -> None:
+        lies_off_plane = self.node_i.z != 0.0 or self.node_j.z != 0.0
+        if dimension is None:
+            is_3d = lies_off_plane                    # legacy auto-detection
+        elif dimension == 3:
+            is_3d = True                              # 3D even when lying at z = 0
+        elif dimension == 2:
+            if lies_off_plane:
+                raise ValueError(f"Element {self.id}: a node has z ≠ 0 in a 2D model")
+            is_3d = False
         else:
-            self.angle: float = math.atan2(dy, dx)  # radians from +x axis
+            raise ValueError(f"dimension must be 2, 3 or None, got {dimension!r}")
+        self._is_3d: bool = is_3d
+        if is_3d and not hasattr(self, "_R3"):
+            self._compute_3d_basis()
+
+    def bind_dimension(self, dofs_per_node: int) -> None:
+        """Adopt the model's dimension (called by the Assembler before assembly).
+
+        An element built without a declared dimension takes the model's, so an element
+        lying at z = 0 in a 3D model uses the true 3D formulation; a declared dimension
+        that disagrees with the model is an error, never a silent mix.
+        """
+        dimension = 3 if dofs_per_node == 6 else 2
+        if self._declared_dimension not in (None, dimension):
+            raise ValueError(f"Element {self.id} is declared {self._declared_dimension}D "
+                             f"but the model is {dimension}D")
+        self._set_dimension(dimension)
 
     # ── dimensionality query ────────────────────────────────────────────────
 

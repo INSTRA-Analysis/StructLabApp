@@ -49,6 +49,7 @@ def test_3d_report_has_z_columns_and_true_equilibrium(tmp_path):
 def test_2d_report_is_unchanged_in_shape(tmp_path):
     """2D keeps its 3-DOF columns and still reports equilibrium."""
     s = ModelState()
+    s.analysis_mode = "2D"
     a, b = s.add_node(0, 0), s.add_node(6, 0)
     a.support_type, b.support_type = SupportType.PIN, SupportType.ROLLER
     m = s.add_member(a.id, b.id)

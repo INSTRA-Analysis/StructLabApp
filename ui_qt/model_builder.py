@@ -98,16 +98,13 @@ def build_model(state: ModelState,
     lc = load_case if load_case is not None else state.active_case
     # 2D models are native to the engine: all nodes have z == 0 → it builds a
     # 3-DOF (XY, Y-vertical) model automatically. No remap needed.
-    model = Model(ui_is_3d=state.mode_3d)
-
-    # ── 3D consistency: if any UI node has z≠0, force all z=0 → 1e-12 ─────
-    # Must modify state.nodes BEFORE creating core nodes, so that intermediate
-    # sub-division nodes also get the adjusted z values.
-    has_3d = any(nd.z != 0.0 for nd in state.nodes)
-    if has_3d:
-        for nd in state.nodes:
-            if nd.z == 0.0:
-                nd.z = 1e-12
+    # The analysis follows the declared mode, never the coordinates: a 3D model may lie
+    # entirely at z = 0 (a grillage, a floor) and is still solved with 6 DOF per node.
+    has_3d = state.mode_3d
+    dimension = 3 if has_3d else 2
+    if not has_3d and any(nd.z != 0.0 for nd in state.nodes):
+        raise ValueError("A 2D model must lie in the XY plane (z = 0 for every node).")
+    model = Model(dimension=dimension)
 
     # ── UI nodes ──────────────────────────────────────────────────────────────
     node_registry: dict[int, Node] = {}
@@ -177,7 +174,7 @@ def build_model(state: ModelState,
             if md.element_type == ElementType.BAR:
                 el = BarElement(
                     id=next_el_id, node_i=start, node_j=end,
-                    material=material, area=md.A,
+                    material=material, area=md.A, dimension=dimension,
                 )
             else:
                 pin_i = (md.element_type == ElementType.PIN_LEFT)  and (k == 0)
@@ -186,7 +183,7 @@ def build_model(state: ModelState,
                     id=next_el_id, node_i=start, node_j=end,
                     material=material, section=section,
                     pin_i=pin_i, pin_j=pin_j,
-                    beta_angle=md.beta_angle,
+                    beta_angle=md.beta_angle, dimension=dimension,
                 )
 
             model.elements.append(el)
@@ -369,7 +366,7 @@ def build_model(state: ModelState,
     # BEAM/FRAME elements: transverse component w·cos(α) applied as a UDL on
     # each sub-element (gives correct parabolic BMD); axial component w·sin(α)
     # lumped as nodal forces so inclined members / columns get correct compression.
-    # 3D models (any z != 0) are handled per sub-element in the loop above, along -Z.
+    # 3D models are handled per sub-element in the loop above, along -Z.
     if lc.include_self_weight and not has_3d:
         _G = _GRAVITY
         for mi, md in enumerate(state.members):

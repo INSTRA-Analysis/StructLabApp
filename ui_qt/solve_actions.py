@@ -126,14 +126,10 @@ def validate_model_issues(state) -> list[Issue]:
     if not has_node_loads and not has_member_loads and not has_self_weight:
         warnings.append("No loads applied in the active case — all results will be zero")
 
-    # Out-of-plane loads on an effectively-2D (planar) model.
-    # core.model.Model.dofs_per_node uses 6 DOF/node ONLY if some node has z != 0
-    # (the mode_3d flag does not force it). If every node lies at z == 0 the model
-    # is solved in 2D (3 DOF/node) and out-of-plane actions — nodal Fz/Mx/My and
-    # 'qz' member loads — are dropped by the assembler. Warn (don't block) so the
-    # user is told the loads are being ignored rather than getting silently-wrong
-    # numbers with no notice.
-    if state.nodes and not any(n.z != 0.0 for n in state.nodes):
+    # Out-of-plane loads on a 2D model (e.g. left over from a 3D model switched to 2D):
+    # a 2D analysis has no out-of-plane freedoms, so nodal Fz/Mx/My and 'qz' member loads
+    # cannot act.  A 3D model is always solved in 3D, even when it lies at z = 0.
+    if state.nodes and state.is_2d:
         oop_nodes: list[int] = []
         for n in state.nodes:
             nl = lc.get_node_load(n.id)
@@ -152,13 +148,9 @@ def validate_model_issues(state) -> list[Issue]:
                 detail.append("out-of-plane 'qz' load on member(s) "
                               + ", ".join(str(i) for i in oop_members))
             warnings.append(
-                "Out-of-plane load on a planar (2D) model: " + "; ".join(detail) + ".\n"
-                "All nodes lie at z = 0, so the model is solved in 2D (3 DOF/node) and "
-                "these out-of-plane actions are IGNORED — the results omit them and the "
-                "out-of-plane response is zero.\n"
-                "To include them, give the structure genuine 3D geometry (at least one "
-                "node with z ≠ 0). Note: a flat grillage in the X-Y plane is not "
-                "supported — model it with real 3D geometry.",
+                "Out-of-plane load on a 2D model: " + "; ".join(detail) + ".\n"
+                "A 2D analysis has no out-of-plane freedoms, so these actions are IGNORED.\n"
+                "To include them, switch the model to 3D.",
                 nodes=oop_nodes, members=oop_members,
             )
 

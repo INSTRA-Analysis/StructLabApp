@@ -276,6 +276,7 @@ def _solved_cantilever():
     from ui_qt.model_state import ModelState, NodeLoad, SupportType
     from ui_qt.solve_actions import solve_engine
     state = ModelState()
+    state.analysis_mode = "2D"                    # fy = down: a 2D cantilever
     a, b = state.add_node(0, 0, 0), state.add_node(4, 0, 0)
     a.support_type = SupportType.FIXED
     m = state.add_member(a.id, b.id)
