@@ -2329,12 +2329,6 @@ class StructView(QGraphicsView):
         self._rb_start: QPoint | None = None   # rubber-band drag start (viewport px)
         self._rb_end:   QPoint | None = None   # rubber-band drag current end
 
-        # Branding watermark — load logo once and cache it
-        from pathlib import Path
-        _logo = Path(__file__).parent / "assets" / "instra_logo.png"
-        self._branding_pix: QPixmap | None = (
-            QPixmap(str(_logo)) if _logo.exists() else None
-        )
 
         # Refresh the foreground (HUD) whenever selection changes
         scene.selectionChanged.connect(lambda: self.viewport().update())
@@ -2452,16 +2446,9 @@ class StructView(QGraphicsView):
         painter.setBrush(QBrush(QColor(18, 18, 22, 160)))
         painter.drawRoundedRect(_QRectF(x0, y0, box_w, box_h), 4.0, 4.0)
 
-        text_x = x0 + pad_x
-        if self._branding_pix and not self._branding_pix.isNull():
-            asp    = self._branding_pix.width() / max(self._branding_pix.height(), 1)
-            logo_w = asp * logo_h
-            painter.drawPixmap(
-                _QRectF(x0 + pad_x, y0 + pad_y, logo_w, logo_h),
-                self._branding_pix,
-                _QRectF(self._branding_pix.rect()),
-            )
-            text_x = x0 + pad_x + logo_w + pad_x
+        from ui_qt.brand import paint_mark       # the instrahub mark, drawn as vectors
+        paint_mark(painter, _QRectF(x0 + pad_x, y0 + pad_y, logo_h, logo_h))
+        text_x = x0 + pad_x + logo_h + pad_x
 
         font = painter.font()
         font.setPointSize(8);  font.setBold(True)

@@ -2209,7 +2209,7 @@ class ResultsPanel(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BrandingFooter(QWidget):
-    """Static INSTRA logo bar pinned to the bottom of the right panel."""
+    """Static instrahub logo bar pinned to the bottom of the right panel."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -2219,32 +2219,31 @@ class BrandingFooter(QWidget):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        # Logo
+        # Logo: the instrahub mark, sharp on high-DPI screens
+        from ui_qt.brand import mark_pixmap
         logo_label = QLabel()
-        logo_path = _ASSETS / "instra_logo.png"
-        if logo_path.exists():
-            pix = QPixmap(str(logo_path))
-            pix = pix.scaledToHeight(56, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(pix)
+        logo_label.setObjectName("brand_mark")
+        logo_label.setPixmap(mark_pixmap(48, self.devicePixelRatioF()))
         logo_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
         # Text block: product name + version + copyright
         name_lbl = QLabel("StructLab")
-        name_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #d0d0d0;")
+        name_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #e1e6ee;")
 
-        ver_lbl = QLabel(VERSION_LABEL)
-        ver_lbl.setStyleSheet("font-size: 10px; color: #787878;")
+        hub_lbl = QLabel('instra<span style="color:#4fd1c5; font-weight:300;">hub</span>')
+        hub_lbl.setTextFormat(Qt.TextFormat.RichText)
+        hub_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #e1e6ee;")
 
-        copy_lbl = QLabel("© 2025 INSTRA")
-        copy_lbl.setStyleSheet("font-size: 10px; color: #787878;")
+        ver_lbl = QLabel(f"{VERSION_LABEL}   ·   © 2024–2026 INSTRA Analysis")
+        ver_lbl.setStyleSheet("font-size: 10px; color: #97a1b0;")
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(6, 0, 0, 0)
         text_layout.setSpacing(1)
         text_layout.addStretch()
+        text_layout.addWidget(hub_lbl)
         text_layout.addWidget(name_lbl)
         text_layout.addWidget(ver_lbl)
-        text_layout.addWidget(copy_lbl)
         text_layout.addStretch()
 
         inner = QHBoxLayout()

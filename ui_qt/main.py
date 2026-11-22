@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from ui_qt.brand import app_icon
 from ui_qt.main_window import MainWindow
 from ui_qt.theme import apply_theme
 
@@ -55,6 +56,7 @@ def main() -> None:
     sys.excepthook = _exception_handler
     app = QApplication(sys.argv)
     app.setApplicationName("StructLab")
+    app.setWindowIcon(app_icon())          # every window and the taskbar
     apply_theme(app)
     window = MainWindow()
     window.show()
