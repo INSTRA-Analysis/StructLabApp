@@ -5,7 +5,7 @@ Layout (Blender-splash style, framed like the main window)::
     ┌ banner: wordmark, version, tagline over a faint lattice drawing ────────────┐
     ├ Start ───────────────┐ ┌ Recent models ─────────────────────────────────────┤
     │ New 3D model         │ │ [thumb] tower.slab   [thumb] bridge.slab   …       │
-    │ New 2D model         │ │  folder · date        folder · date                │
+    │ New plane frame      │ │  folder · date        folder · date                │
     │ Open…                │ │                                                    │
     │ Templates (wizards)  │ │                                                    │
     └──────────────────────┘ └────────────────────────────────────────────────────┘
@@ -14,7 +14,8 @@ Layout (Blender-splash style, framed like the main window)::
 Recent-model thumbnails are wireframes drawn from each .slab when the page opens (default
 isometric view for 3D models, elevation for 2D); nothing is written next to the files.
 
-After ``exec()`` read ``choice``: "blank" (with ``start_mode`` "3D" or "2D"), "open",
+After ``exec()`` read ``choice``: "blank" (with ``start_mode`` "3D", or "plane" for a plane
+frame in the XZ plane: StructLab no longer creates 2D models), "open",
 "file:<path>", "wizard:beam|portal|truss|frame" or "help:shortcuts" / "help:about".
 """
 
@@ -376,7 +377,7 @@ class WelcomeDialog(QDialog):
         lay.addWidget(self._heading("Start"))
         for title, sub, ico, choice in (
             ("New 3D model", "Space frames, towers, 3D trusses (Z up)", "box", "blank:3D"),
-            ("New 2D model", "Plane beams, frames and trusses (XY)", "file-plus", "blank:2D"),
+            ("New plane frame", "Beams, portals and trusses in the XZ plane", "layers", "blank:plane"),
             ("Open…", "Open a .slab model from disk", "folder-open", "open"),
         ):
             card = _Card(title, sub, icon_name=ico, horizontal=True)

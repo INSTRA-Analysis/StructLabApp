@@ -876,9 +876,11 @@ class MainWindow(QMainWindow):
         choice = dlg.choice
         if choice == "blank":
             from ui_qt.model_state import ModelState
-            blank = ModelState()
-            blank.analysis_mode = dlg.start_mode      # "2D" (XY plane, Y up) or "3D" (Z up)
-            self._apply_model_state(blank, f"Blank ({dlg.start_mode})")
+            blank = ModelState()                      # always 3D (Z up)
+            if dlg.start_mode == "plane":
+                blank.analysis_type = "plane_xz"      # a plane frame, opened on the Front view
+            self._apply_model_state(blank, "New plane frame" if dlg.start_mode == "plane"
+                                    else "New 3D model")
         elif choice.startswith("wizard:"):
             handler = getattr(self, f"_on_{choice[7:]}_wizard", None)
             if handler is not None:
@@ -912,7 +914,8 @@ class MainWindow(QMainWindow):
         from ui_qt import recent_files as RF
         try:
             state = load_model(path)
-            self._scene.load_state(state)
+            self._load_into_window(state)
+            self._face_plane_frame()
             self._scene._hide_welcome = True
             self._sync_crossing_action()
             self._props_panel.set_model_state(self._scene.model_state)
@@ -938,9 +941,27 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Open error", str(exc))
 
+    def _load_into_window(self, state) -> None:
+        """Put ``state`` on the canvas.  The window shows 3D models only: a 2D one (from the
+        console, an autosave, a script) becomes the same structure as a plane frame first."""
+        if state.convert_to_plane_frame():
+            state.converted_from_2d = True
+        self._scene.load_state(state)
+
+    def _face_plane_frame(self) -> None:
+        """A plane frame is shown from the front, working in its XZ plane (once, on opening;
+        the user may orbit freely afterwards)."""
+        st = self._scene.model_state
+        if not (st.mode_3d and st.analysis_type == "plane_xz"):
+            return
+        self._act["view_front"].trigger()
+        ys = sorted(n.y for n in st.nodes)
+        self._scene.set_plane_offset(ys[len(ys) // 2] if ys else 0.0)
+
     def _apply_model_state(self, state, label: str = "") -> None:
         """Load a ModelState onto the canvas, clearing any prior results."""
-        self._scene.load_state(state)
+        self._load_into_window(state)
+        self._face_plane_frame()
         self._scene._hide_welcome = True
         self._props_panel.set_model_state(self._scene.model_state)
         self._refresh_lc_combo()
