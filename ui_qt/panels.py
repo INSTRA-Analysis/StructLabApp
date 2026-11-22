@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from ui_qt.version import VERSION_LABEL
 
 import math
 from dataclasses import dataclass
@@ -13,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QPushButton, QLineEdit,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QGroupBox, QScrollArea, QSizePolicy, QFrame, QSplitter, QMenu,
+    QGroupBox, QScrollArea, QSizePolicy, QFrame, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel
 
@@ -2110,130 +2109,3 @@ class ResultsPanel(QWidget):
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
         return scroll
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# BrandingFooter
-# ─────────────────────────────────────────────────────────────────────────────
-
-class BrandingFooter(QWidget):
-    """Static instrahub logo bar pinned to the bottom of the right panel."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setFixedHeight(72)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-
-        # Logo: the instrahub mark, sharp on high-DPI screens
-        from ui_qt.brand import mark_pixmap
-        logo_label = QLabel()
-        logo_label.setObjectName("brand_mark")
-        logo_label.setPixmap(mark_pixmap(48, self.devicePixelRatioF()))
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-
-        # Text block: product name + version + copyright
-        name_lbl = QLabel("StructLab")
-        name_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #e1e6ee;")
-
-        hub_lbl = QLabel('instra<span style="color:#4fd1c5; font-weight:300;">hub</span>')
-        hub_lbl.setTextFormat(Qt.TextFormat.RichText)
-        hub_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #e1e6ee;")
-
-        ver_lbl = QLabel(f"{VERSION_LABEL}   ·   © 2024–2026 INSTRA Analysis")
-        ver_lbl.setStyleSheet("font-size: 10px; color: #97a1b0;")
-
-        text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(6, 0, 0, 0)
-        text_layout.setSpacing(1)
-        text_layout.addStretch()
-        text_layout.addWidget(hub_lbl)
-        text_layout.addWidget(name_lbl)
-        text_layout.addWidget(ver_lbl)
-        text_layout.addStretch()
-
-        inner = QHBoxLayout()
-        inner.setContentsMargins(10, 4, 10, 4)
-        inner.addWidget(logo_label)
-        inner.addLayout(text_layout)
-        inner.addStretch()
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(sep)
-        layout.addLayout(inner)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RightPanel — Properties (top) + Results (bottom) with draggable splitter
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SECTION_HEADER_STYLE = (
-    "background:#343b46; color:#97a1b0;"          # theme SURFACE2 / TEXT_DIM
-    " font-size:10px; font-weight:bold; padding-left:6px;"
-    " border-bottom:1px solid #444d5a;"           # theme BORDER
-)
-
-
-class RightPanel(QWidget):
-    """Properties panel always on top, Results panel always below.
-    A draggable QSplitter lets the user resize the two panes.
-    Branding footer is pinned at the very bottom."""
-
-    def __init__(self, props_panel: PropertiesPanel,
-                 results_panel: ResultsPanel, parent=None) -> None:
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(5)
-
-        # ── Properties pane ───────────────────────────────────────────────────
-        props_frame = QWidget()
-        pf = QVBoxLayout(props_frame)
-        pf.setContentsMargins(0, 0, 0, 0)
-        pf.setSpacing(0)
-
-        props_hdr = QLabel("  Properties")
-        props_hdr.setFixedHeight(22)
-        props_hdr.setStyleSheet(_SECTION_HEADER_STYLE)
-        pf.addWidget(props_hdr)
-
-        props_scroll = QScrollArea()
-        props_scroll.setWidget(props_panel)
-        props_scroll.setWidgetResizable(True)
-        props_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        pf.addWidget(props_scroll)
-
-        # ── Results pane ──────────────────────────────────────────────────────
-        results_frame = QWidget()
-        rf = QVBoxLayout(results_frame)
-        rf.setContentsMargins(0, 0, 0, 0)
-        rf.setSpacing(0)
-
-        results_hdr = QLabel("  Results")
-        results_hdr.setFixedHeight(22)
-        results_hdr.setStyleSheet(_SECTION_HEADER_STYLE)
-        rf.addWidget(results_hdr)
-        rf.addWidget(results_panel)
-
-        splitter.addWidget(props_frame)
-        splitter.addWidget(results_frame)
-        splitter.setSizes([350, 380])
-
-        layout.addWidget(splitter)
-        layout.addWidget(BrandingFooter())
-
-    def raise_properties(self) -> None:
-        pass   # both panes always visible — nothing to switch
-
-    def raise_results(self) -> None:
-        pass   # both panes always visible — nothing to switch

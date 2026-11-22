@@ -59,9 +59,8 @@ def test_packaged_ico_holds_the_standard_sizes():
     assert sizes == set(ICON_SIZES)
 
 
-def test_footer_and_canvas_badge_show_the_mark(qapp):
-    from PyQt6.QtWidgets import QLabel
-    from ui_qt.panels import BrandingFooter
-    footer = BrandingFooter()
-    mark = footer.findChild(QLabel, "brand_mark")
-    assert mark is not None and not mark.pixmap().isNull()
+def test_the_brand_appears_once_on_the_canvas_not_in_the_results_dock():
+    """The canvas watermark is the one brand mark; the Results dock card was removed to give
+    the tables room."""
+    import ui_qt.panels as panels
+    assert not hasattr(panels, "BrandingFooter")

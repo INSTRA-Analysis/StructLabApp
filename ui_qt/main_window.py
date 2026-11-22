@@ -29,7 +29,7 @@ from PyQt6.QtGui import QAction, QActionGroup, QColor
 
 from ui_qt.canvas import StructCanvas, StructView, CanvasMode, WorkingPlane
 from ui_qt.model_state import ElementType
-from ui_qt.panels import PropertiesPanel, ResultsPanel, BrandingFooter
+from ui_qt.panels import PropertiesPanel, ResultsPanel
 from ui_qt.icons import icon
 from ui_qt import theme as _theme
 
@@ -1318,7 +1318,6 @@ class MainWindow(QMainWindow):
         rf.setContentsMargins(0, 0, 0, 0)
         rf.setSpacing(0)
         rf.addWidget(self._results_panel)
-        rf.addWidget(BrandingFooter())
 
         self._right_dock = QDockWidget(self)
         self._right_dock.setWidget(_framed_body(results_frame))
