@@ -177,11 +177,20 @@ class PropertiesPanel(QWidget):
         else:
             self._placeholder.hide()
             self._content = widget
+            _wrap_narrow_forms(widget)
             self._layout.addWidget(widget)
 
     def _on_apply(self) -> None:
         if self.refresh_callback:
             self.refresh_callback()
+
+
+def _wrap_narrow_forms(widget: QWidget) -> None:
+    """Every form in the Properties panel puts a label above its field when the two do not
+    fit side by side (the panel is narrow), instead of clipping the field; fields stretch."""
+    for form in widget.findChildren(QFormLayout):
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
 
 # Distributed load direction definitions — shared by single and multi member forms
@@ -592,22 +601,23 @@ class _MemberForm(QWidget):
         sf.addRow("I_z (×10⁻⁶ m⁴):", self._I)
         sf.addRow("I_y (×10⁻⁶ m⁴):", self._Iy)
         sf.addRow("J (×10⁻⁶ m⁴):",   self._J)
-        _beta_w = QWidget()
+        sf.addRow("β angle (°):",     self._beta)
+        _beta_w = QWidget()                      # quarter turns on their own row: the panel is narrow
         _beta_l = QHBoxLayout(_beta_w)
         _beta_l.setContentsMargins(0, 0, 0, 0)
         _beta_l.setSpacing(4)
-        _beta_l.addWidget(self._beta)
         for _lbl, _delta in [("−90°", -90.0), ("+90°", +90.0)]:
             _b = QPushButton(_lbl)
-            _b.setFixedSize(42, 24)
+            _b.setFixedHeight(24)
+            _b.setToolTip("Rotate the section a quarter turn about the member axis")
             _b.clicked.connect(lambda _c=False, d=_delta: self._beta.setValue(
                 max(-180.0, min(180.0, self._beta.value() + d))
             ))
             _beta_l.addWidget(_b)
-        sf.addRow("β angle (°):",     _beta_w)
-        _pick_btn = QPushButton("Pick from library...")
+        sf.addRow("", _beta_w)
+        _pick_btn = QPushButton("Pick from library…")
         _pick_btn.clicked.connect(self._pick_section)
-        sf.addRow("", _pick_btn)
+        sf.addRow(_pick_btn)                     # spans the form's full width
 
         self._density = _spin(member.density, 0, 20000, 50, 0)
         self._density.setToolTip("0 = no self-weight contribution from this member")
@@ -620,7 +630,8 @@ class _MemberForm(QWidget):
         self._nsub = QSpinBox()
         self._nsub.setRange(1, 100)
         self._nsub.setValue(member.n_sub)
-        self._nsub.setToolTip("Number of sub-elements for analysis (more = better deformed shape)")
+        self._nsub.setToolTip("Sub-elements for the analysis mesh. Results are exact per element "
+                              "for every load type,\nso more only adds intermediate nodes.")
         mf.addRow("Sub-elements:", self._nsub)
         _sl.addWidget(mesh_box)
 

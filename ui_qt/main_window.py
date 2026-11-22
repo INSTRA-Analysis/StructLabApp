@@ -798,9 +798,12 @@ class MainWindow(QMainWindow):
     # Default panel widths (px): wide enough for a plane frame's results (node, dx, dz, θy)
     # without sideways scrolling.  Users can still drag them; the minimums stay lower.
     _RESULTS_DOCK_WIDTH = 340
+    _PROPERTIES_DOCK_WIDTH = 290
 
     def _apply_default_dock_widths(self) -> None:
-        self.resizeDocks([self._right_dock], [self._RESULTS_DOCK_WIDTH], Qt.Orientation.Horizontal)
+        self.resizeDocks([self._left_dock, self._right_dock],
+                         [self._PROPERTIES_DOCK_WIDTH, self._RESULTS_DOCK_WIDTH],
+                         Qt.Orientation.Horizontal)
 
     def _build_shortcuts_menu(self) -> None:
         """A live reference menu listing every keyboard shortcut, right after
