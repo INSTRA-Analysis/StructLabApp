@@ -54,6 +54,10 @@ AXIS_X    = "#e8505b"
 AXIS_Y    = "#7ccc4a"
 AXIS_Z    = "#4a90e8"
 
+# ── Spin-box step buttons: + / − images (a styled spin box loses its native arrows) ─
+from pathlib import Path as _Path
+_SPIN = (_Path(__file__).parent / "assets" / "spin").as_posix()
+
 
 def apply_theme(app) -> None:
     """Install the Fusion style, a palette built from the tokens, and the stylesheet.
@@ -416,6 +420,47 @@ QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
 }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
     border-color : {BLUE};
+}}
+QSpinBox, QDoubleSpinBox {{
+    padding-right : 18px;
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin : border;
+    width             : 16px;
+    background        : {SURFACE2};
+    border-left       : 1px solid {BORDER};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-position     : top right;
+    border-bottom           : 1px solid {BORDER};
+    border-top-right-radius : 3px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-position        : bottom right;
+    border-bottom-right-radius : 3px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background : {DEEP_BLUE};
+}}
+QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {{
+    background : {BLUE};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image : url("{_SPIN}/plus.svg");  width : 8px;  height : 8px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image : url("{_SPIN}/minus.svg");  width : 8px;  height : 8px;
+}}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+QSpinBox::up-arrow:off, QDoubleSpinBox::up-arrow:off {{
+    image : url("{_SPIN}/plus_dim.svg");
+}}
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled,
+QSpinBox::down-arrow:off, QDoubleSpinBox::down-arrow:off {{
+    image : url("{_SPIN}/minus_dim.svg");
 }}
 
 /* Radio buttons and check boxes: outlined, filled with the accent when on
