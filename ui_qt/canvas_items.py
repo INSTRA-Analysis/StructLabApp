@@ -204,6 +204,24 @@ def _node_pos(node: NodeData, scene=None) -> tuple[float, float]:
     return isometric(node.x, node.y, node.z)
 
 
+def member_load_direction(member: MemberData, ni: NodeData, nj: NodeData) -> tuple[float, float]:
+    """Screen unit vector of the way a positive member load ('w', a partial load, a point
+    force) acts: the member's local −y (downward for a beam, sideways for a column), projected
+    through the current view.  Falls back to screen-down when local y points at the viewer."""
+    from elements.frame_element import FrameElement
+    d = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
+    if np.linalg.norm(d) < 1e-12:
+        return 0.0, 1.0
+    down = -FrameElement.local_axes_3d(*d, member.beta_angle)[:, 1]
+    x0, y0 = isometric(ni.x, ni.y, ni.z)
+    x1, y1 = isometric(ni.x + down[0], ni.y + down[1], ni.z + down[2])
+    vx, vy = x1 - x0, y1 - y0
+    mag = math.hypot(vx, vy)
+    if mag < 1e-6 * max(1.0, math.hypot(*isometric(*d)) or 1.0):
+        return 0.0, 1.0
+    return vx / mag, vy / mag
+
+
 def _proj_x_screen_dir() -> tuple[float, float]:
     """Normalized screen direction of the 3D X axis under the current projection."""
     az = math.radians(_proj_mod.ISO_AZIMUTH)
@@ -856,9 +874,9 @@ class MemberItem(QGraphicsLineItem):
         ux, uy = dx / L_px, dy / L_px
         # Member normal in screen coords (used for LC group stacking offset)
         px_n_m, py_n_m = -uy, ux
-        # Arrow direction: gravity (screen-down) in 3D, member-perpendicular in 2D
+        # Arrow direction: the member's local −y as drawn (a beam: down; a column: sideways)
         ms = self._scene.model_state
-        px_n, py_n = 0.0, 1.0
+        px_n, py_n = member_load_direction(self.member, ni, nj)
 
         w_ref = w_start if abs(w_start) >= abs(w_end) else w_end
         sign = 1.0 if w_ref > 0 else -1.0
@@ -1088,7 +1106,9 @@ class MemberItem(QGraphicsLineItem):
             return
 
         ux, uy = dx / L_px, dy / L_px
-        px_n, py_n = -uy, ux
+        # A point force acts along local −y like 'w' (it used to take the on-screen normal,
+        # which flipped with the direction the member was drawn in).
+        px_n, py_n = member_load_direction(self.member, ni, nj)
 
         draw_color = color if color else QColor(180, 80, 200)
         prefix = f"{lc_name}: " if lc_name else ""
@@ -1180,7 +1200,7 @@ class MemberItem(QGraphicsLineItem):
 
         ux, uy = dx / L_px, dy / L_px
         ms    = self._scene.model_state
-        px_n, py_n = 0.0, 1.0
+        px_n, py_n = member_load_direction(self.member, ni, nj)   # local −y as drawn
 
         # Model-wide max across full-span and partial loads so sizes are comparable
         _lc2   = ms.active_case
