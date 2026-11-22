@@ -20,3 +20,12 @@ def _private_autosave(tmp_path, monkeypatch):
     window, opening a file or clearing a model deletes it, autosave writes it."""
     import ui_qt.main_window as mw
     monkeypatch.setattr(mw, "_AUTOSAVE_PATH", tmp_path / "autosave.slab")
+
+
+@pytest.fixture(autouse=True)
+def _private_preferences(tmp_path, monkeypatch):
+    """Keep tests away from the user's real interface preferences (registry on Windows)."""
+    from PyQt6.QtCore import QSettings
+    import ui_qt.main_window as mw
+    path = str(tmp_path / "preferences.ini")
+    monkeypatch.setattr(mw, "_preferences", lambda: QSettings(path, QSettings.Format.IniFormat))

@@ -128,6 +128,10 @@ COMMANDS: tuple[Command, ...] = (
             "Tint members by their group label, with a legend (Ctrl+G)", True),
     Command("thickness", "Thickness by Section", "_on_thickness_toggled", "pen-line", "Ctrl+T",
             "Draw members thicker the larger their cross-section area (Ctrl+T)", True),
+    Command("selection_hud", "Selection Shortcuts", "_on_selection_hud_toggled", "keyboard", "",
+            "Show the shortcut reminder (G, E, I, Ctrl+D, Del ...) over the view while something\n"
+            "is selected. Remembered between sessions; Help > Keyboard Shortcuts lists them all.",
+            True, True),
     Command("local_axes", "Local Axes", "_on_toggle_local_axes", "axis-3d", "",
             "Show the local axis triad on all members\n"
             "Red = x (along member)  Green = y (strong axis)  Blue = z (weak axis)", True),

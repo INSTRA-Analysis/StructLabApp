@@ -2454,7 +2454,7 @@ class StructView(QGraphicsView):
         # ── 5. Selection shortcut HUD (bottom-left, when items are selected) ────
         from ui_qt.canvas_items import NodeItem, MemberItem
         selected = scene.selectedItems()
-        if selected and scene._mode == CanvasMode.SELECT:
+        if selected and scene._mode == CanvasMode.SELECT and getattr(self, "show_selection_hud", True):
             _ROWS = [
                 ("G",       "Move (grab)"),
                 ("G then A", "Slide along a member"),

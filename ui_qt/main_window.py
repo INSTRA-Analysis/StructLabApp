@@ -36,6 +36,12 @@ from ui_qt import theme as _theme
 _AUTOSAVE_PATH = Path.home() / ".structlab" / "autosave.slab"
 
 
+def _preferences() -> QSettings:
+    """The user's interface preferences (registry on Windows).  One place, so tests can
+    point it elsewhere (tests/conftest.py)."""
+    return QSettings("INSTRA Analysis", "StructLab")
+
+
 def _plane_for_view(az: float, el: float) -> WorkingPlane:
     """Return the natural working plane for a named view direction."""
     if el > 60.0 or el < -60.0:
@@ -529,7 +535,8 @@ class MainWindow(QMainWindow):
     def _build_tools_menu(self, mb) -> None:
         a = self._act
         tools_menu = mb.addMenu("Tools")
-        for key in ("show_loads", "show_restraints", "colour_group", "thickness", "animate", "section_cut"):
+        for key in ("show_loads", "show_restraints", "colour_group", "thickness", "animate", "section_cut",
+                    "selection_hud"):
             tools_menu.addAction(a[key])
         tools_menu.addSeparator()
         tools_menu.addAction(a["check_duplicates"])
@@ -547,14 +554,19 @@ class MainWindow(QMainWindow):
         env = os.environ.get("STRUCTLAB_UI", "").strip().lower()
         if env in ("ribbon", "classic"):
             return env
-        value = QSettings("INSTRA Analysis", "StructLab").value("ui/interface", "ribbon")
+        value = _preferences().value("ui/interface", "ribbon")
         return value if value in ("ribbon", "classic") else "ribbon"
 
     def _on_interface_toggled(self, use_ribbon: bool) -> None:
-        QSettings("INSTRA Analysis", "StructLab").setValue(
-            "ui/interface", "ribbon" if use_ribbon else "classic")
+        _preferences().setValue("ui/interface", "ribbon" if use_ribbon else "classic")
         self._sb.showMessage(
             f"{'Ribbon' if use_ribbon else 'Classic menus'} will be used the next time StructLab starts.")
+
+    def _on_selection_hud_toggled(self, checked: bool) -> None:
+        """Show / hide the selection-shortcut reminder over the view, and remember it."""
+        self._view.show_selection_hud = checked
+        _preferences().setValue("ui/selection_hud", bool(checked))
+        self._view.viewport().update()
 
     def _on_show_loads_toggled(self, checked: bool) -> None:
         self._scene.set_loads_visible(checked)
@@ -1075,6 +1087,12 @@ class MainWindow(QMainWindow):
         a["ribbon_interface"].blockSignals(True)
         a["ribbon_interface"].setChecked(self._interface_preference() == "ribbon")
         a["ribbon_interface"].blockSignals(False)
+        hud = _preferences().value("ui/selection_hud", True)
+        hud = hud if isinstance(hud, bool) else str(hud).lower() != "false"
+        a["selection_hud"].blockSignals(True)
+        a["selection_hud"].setChecked(hud)
+        a["selection_hud"].blockSignals(False)
+        self._view.show_selection_hud = hud
 
         self._scene.set_mode(CanvasMode.SELECT)
         self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
