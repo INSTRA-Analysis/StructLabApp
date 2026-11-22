@@ -1403,7 +1403,8 @@ class StructCanvas(QGraphicsScene):
             'AFD':      draw_afd(model, sub_results,
                                  el_id_to_member_id=el_id_to_member_id),
             'Deformed': draw_deformed(model, displacements, def_scale,
-                                      el_id_to_member_id=el_id_to_member_id),
+                                      el_id_to_member_id=el_id_to_member_id,
+                                      sub_results=sub_results),
             'Labels':   draw_labels(model, sub_results, load_map, diag_scale, member_el_map,
                                     displacements=displacements, def_scale=def_scale,
                                     member_ids=member_ids),
@@ -1423,9 +1424,11 @@ class StructCanvas(QGraphicsScene):
             self._overlay_items[layer] = items
         self._apply_labels_visibility()
 
-    def update_deformed_layer(self, model, displacements, member_el_map, def_scale: float) -> None:
+    def update_deformed_layer(self, model, displacements, member_el_map, def_scale: float,
+                              sub_results=None) -> None:
         """Redraw ONLY the deformed-shape layer at an absolute ``def_scale`` (used by the
-        animation; the diagrams and labels stay as they are)."""
+        animation; the diagrams and labels stay as they are).  ``sub_results`` gives the
+        exact shape between sub-nodes (see draw_deformed)."""
         from ui_qt.canvas_overlay import draw_deformed
         for item in self._overlay_items.get('Deformed', []):
             self.removeItem(item)
@@ -1435,7 +1438,8 @@ class StructCanvas(QGraphicsScene):
         member_ids = [m.id for m in self.model_state.members]
         el_to_member = {eid: member_ids[mi] for mi, ids in enumerate(member_el_map)
                         if mi < len(member_ids) for eid in ids}
-        items = draw_deformed(model, displacements, def_scale, el_id_to_member_id=el_to_member)
+        items = draw_deformed(model, displacements, def_scale, el_id_to_member_id=el_to_member,
+                              sub_results=sub_results)
         visible = self._overlay_visible.get('Deformed', True)
         for item in items:
             self.addItem(item)
@@ -1495,7 +1499,7 @@ class StructCanvas(QGraphicsScene):
                 model, [run], diag_scale, member_el_map, start_index=combo_index
             ),
             'AFD':      draw_afd(model, sub_results),
-            'Deformed': draw_deformed(model, displacements, def_scale),
+            'Deformed': draw_deformed(model, displacements, def_scale, sub_results=sub_results),
             'Labels':   draw_labels(model, sub_results, load_map, diag_scale, member_el_map,
                                     displacements=displacements, def_scale=def_scale),
         }

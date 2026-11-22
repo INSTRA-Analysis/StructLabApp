@@ -601,7 +601,8 @@ class MainWindow(QMainWindow):
         factor = animation_factor(self._anim_frame, self._ANIM_FRAMES)
         self._scene.update_deformed_layer(
             cache['model'], cache['displacements'], cache['member_el_map'],
-            self._anim_base_scale * self._def_scale_spin.value() * factor)
+            self._anim_base_scale * self._def_scale_spin.value() * factor,
+            sub_results=cache.get('sub_results'))
 
     def _open_section_cut(self) -> None:
         from ui_qt.section_cut import SectionCutDialog

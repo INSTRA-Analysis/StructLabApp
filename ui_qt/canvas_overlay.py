@@ -318,13 +318,17 @@ def _stitch_deform(
     el_by_id: dict,
     displacements: np.ndarray,
     dpn: int,
+    res_by_id: "dict | None" = None,
+    load_map: "dict | None" = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (t_norm, local_y_deflection_m) along a member, t in [0, 1].
 
-    Hermite interpolation of each sub-element's displacement along its local y axis (the
-    plane the diagrams are drawn in; a plane frame's in-plane deflection), as the deformed
-    shape draws it.  Used for the peak-δ label.
+    Each sub-element's displacement along its local y axis (the plane the diagrams are drawn
+    in; a plane frame's in-plane deflection), as the deformed shape draws it — exact when
+    the sub-element results are given (``element_shape``), else Hermite.  Used for the
+    peak-δ label.
     """
+    from solver.postprocessor import element_shape
     n_dofs = len(displacements)
     all_t: list[float] = []
     all_v: list[float] = []
@@ -342,8 +346,19 @@ def _stitch_deform(
         if el is None or not hasattr(el, "_R3"):
             continue
         L = el.length
-        ts = np.linspace(0.0, 1.0, 12)
+        ts = np.linspace(0.0, 1.0, 33 if len(el_ids) < 4 else 12)
         R3 = el._R3
+        res = (res_by_id or {}).get(el_id)
+        if res is not None:
+            g = element_shape(el, res.end_forces, (load_map or {}).get(el_id, []),
+                              displacements, dpn, ts)
+            v = (g @ R3)[:, 1]                                       # local y component
+            t_vals = (x_acc + ts * L) / L_total
+            end = len(ts) if k == len(el_ids) - 1 else len(ts) - 1
+            all_t.extend(t_vals[:end].tolist())
+            all_v.extend(v[:end].tolist())
+            x_acc += L
+            continue
         d_i = np.array([_get(el.node_i.id, k6) for k6 in range(6)])
         d_j = np.array([_get(el.node_j.id, k6) for k6 in range(6)])
         v_i, th_i = (R3.T @ d_i[:3])[1], (R3.T @ d_i[3:])[2]      # local v, θz
@@ -616,8 +631,13 @@ def draw_deformed(
     displacements: np.ndarray,
     def_scale: float,
     el_id_to_member_id: "dict[int, int] | None" = None,
+    sub_results: "list | None" = None,
 ) -> list[QGraphicsItem]:
-    """Draw original grey lines and Hermite-cubic deformed curves for all elements.
+    """Draw original grey lines and the deformed curves for all elements.
+
+    With ``sub_results`` the curve is the exact displaced shape (end displacements plus the
+    curvature M/EI under the element's loads: ``solver.postprocessor.element_shape``), right
+    however coarse the subdivision; without them, Hermite cubics from the end rotations.
 
     Deformed scene coordinates
     --------------------------
@@ -637,6 +657,8 @@ def draw_deformed(
     n_dofs = len(displacements)
 
     items: list[QGraphicsItem] = []
+    res_by_id = {r.element_id: r for r in sub_results} if sub_results else {}
+    load_map = build_load_map(model) if sub_results else {}
 
     for el in model.elements:
         ni = _nodes_by_id(model)[el.node_i.id]
@@ -698,19 +720,29 @@ def draw_deformed(
         u_j, v_yj, v_zj = d_lj
         _,   thy_j, thz_j = r_lj
 
-        u_t = (1.0 - ts) * u_i + ts * u_j
-        if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
-            vy_t = (1.0 - ts) * v_yi + ts * v_yj
-            vz_t = (1.0 - ts) * v_zi + ts * v_zj
+        res = res_by_id.get(el.id)
+        if res is not None:
+            from solver.postprocessor import element_shape
+            g = element_shape(el, res.end_forces, load_map.get(el.id, []), displacements,
+                              _dpn, ts)                       # (N_pts, 3) global translations
+            gx, gy, gz = g[:, 0], g[:, 1], g[:, 2]
         else:
-            vy_t = N1 * v_yi + N2 * thz_i + N3 * v_yj + N4 * thz_j
-            # 3D local stiffness uses dw/dx = −θ_y convention
-            vz_t = N1 * v_zi - N2 * thy_i + N3 * v_zj - N4 * thy_j
+            u_t = (1.0 - ts) * u_i + ts * u_j
+            if getattr(el, "pin_i", False) and getattr(el, "pin_j", False):
+                vy_t = (1.0 - ts) * v_yi + ts * v_yj
+                vz_t = (1.0 - ts) * v_zi + ts * v_zj
+            else:
+                vy_t = N1 * v_yi + N2 * thz_i + N3 * v_yj + N4 * thz_j
+                # 3D local stiffness uses dw/dx = −θ_y convention
+                vz_t = N1 * v_zi - N2 * thy_i + N3 * v_zj - N4 * thy_j
+            x_hat, y_hat, z_hat = R3[:, 0], R3[:, 1], R3[:, 2]
+            gx = u_t * x_hat[0] + vy_t * y_hat[0] + vz_t * z_hat[0]
+            gy = u_t * x_hat[1] + vy_t * y_hat[1] + vz_t * z_hat[1]
+            gz = u_t * x_hat[2] + vy_t * y_hat[2] + vz_t * z_hat[2]
 
-        x_hat, y_hat, z_hat = R3[:, 0], R3[:, 1], R3[:, 2]
-        x3d = ni.x + ts*(nj.x - ni.x) + def_scale*(u_t*x_hat[0] + vy_t*y_hat[0] + vz_t*z_hat[0])
-        y3d = ni.y + ts*(nj.y - ni.y) + def_scale*(u_t*x_hat[1] + vy_t*y_hat[1] + vz_t*z_hat[1])
-        z3d = ni.z + ts*(nj.z - ni.z) + def_scale*(u_t*x_hat[2] + vy_t*y_hat[2] + vz_t*z_hat[2])
+        x3d = ni.x + ts * (nj.x - ni.x) + def_scale * gx
+        y3d = ni.y + ts * (nj.y - ni.y) + def_scale * gy
+        z3d = ni.z + ts * (nj.z - ni.z) + def_scale * gz
 
         def_path = QPainterPath()
         s0x, s0y = _iso(float(x3d[0]), float(y3d[0]), float(z3d[0]))
@@ -824,7 +856,7 @@ def draw_labels(
         # ── Deformed peak-δ label ─────────────────────────────────────────────
         if displacements is not None and def_scale > 0.0:
             t_arr_d, v_arr = _stitch_deform(
-                el_ids, el_by_id, displacements, model.dofs_per_node
+                el_ids, el_by_id, displacements, model.dofs_per_node, res_by_id, load_map
             )
             if len(v_arr) > 0:
                 peak_idx_d = int(np.argmax(np.abs(v_arr)))

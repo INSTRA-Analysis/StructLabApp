@@ -184,6 +184,81 @@ def bending_profile(
     return V, M
 
 
+def transverse_deflection(
+    end_forces: np.ndarray,
+    element_loads: list[ElementLoad],
+    length: float,
+    EI: float,
+    v_i: float,
+    v_j: float,
+    x: np.ndarray,
+    plane: str = "z",
+) -> np.ndarray:
+    """Exact transverse deflection along one element in one bending plane.
+
+    The end displacements v_i, v_j (local y for plane "z", local z for plane "y") plus twice
+    the integral of the curvature M/EI with zero at both ends:
+
+        v(x) = v_i + (v_j − v_i) x / L + c(x),   c'' = κ,   c(0) = c(L) = 0
+
+    with  c(x) = x F1(x) − F2(x) − (x / L)(L F1(L) − F2(L)),  F1 = ∫₀ˣ κ, F2 = ∫₀ˣ s κ.
+    M comes from ``bending_profile`` (exact for every load type), and the integrals use
+    3-point Gauss between the load breakpoints, which is exact for these polynomials — so
+    the shape needs neither the end rotations (exact at a moment release too) nor fine
+    subdivision.  EI <= 0 (a bar) gives the straight chord.
+    """
+    x = np.asarray(x, dtype=float)
+    chord = v_i + (v_j - v_i) * x / length
+    if EI <= 0.0:
+        return chord
+    sign = _CURVATURE_SIGN[plane]
+    grid = np.union1d(sample_points(length, element_loads, 9), np.clip(x, 0.0, length))
+    half = 0.5 * np.diff(grid)                                       # (n_intervals,)
+    xi = np.array([p for p, _ in GAUSS_3])
+    wt = np.array([w for _, w in GAUSS_3])
+    s = grid[:-1, None] + half[:, None] * (xi[None, :] + 1.0)         # Gauss points, one call
+    kappa = sign * bending_profile(end_forces, element_loads, length, s.ravel(), plane)[1] / EI
+    kappa = kappa.reshape(s.shape)
+    f1 = np.concatenate([[0.0], np.cumsum((half[:, None] * wt * kappa).sum(axis=1))])
+    f2 = np.concatenate([[0.0], np.cumsum((half[:, None] * wt * s * kappa).sum(axis=1))])
+    F1 = np.interp(x, grid, f1)
+    F2 = np.interp(x, grid, f2)
+    correction = (length * f1[-1] - f2[-1]) / length
+    return chord + x * F1 - F2 - x * correction
+
+
+def element_shape(el, end_forces: np.ndarray, element_loads: list[ElementLoad],
+                  displacements: np.ndarray, dpn: int, ts: np.ndarray) -> np.ndarray:
+    """Global translations (len(ts), 3) at fractions ``ts`` along one element: axial linear,
+    transverse exact in each bending plane (``transverse_deflection``)."""
+    L = el.length
+    ni, nj = el.node_i.id * dpn, el.node_j.id * dpn
+    d_i, d_j = displacements[ni:ni + dpn], displacements[nj:nj + dpn]
+    x = np.asarray(ts, dtype=float) * L
+    E = el.material.elastic_modulus
+    section = getattr(el, "section", None)
+    i_z = getattr(section, "I_z", 0.0) or 0.0
+    i_y = getattr(section, "I_y", 0.0) or 0.0
+    if dpn == 6:
+        R = el._R3                                            # columns: local x, y, z
+        ti, tj = R.T @ d_i[:3], R.T @ d_j[:3]
+        u = ti[0] + (tj[0] - ti[0]) * ts
+        v = transverse_deflection(end_forces, element_loads, L, E * i_z, ti[1], tj[1], x, "z")
+        w = transverse_deflection(end_forces, element_loads, L, E * i_y, ti[2], tj[2], x, "y")
+        return (R @ np.vstack([u, v, w])).T
+    c, s = np.cos(el.angle), np.sin(el.angle)
+    ui, vi = c * d_i[0] + s * d_i[1], -s * d_i[0] + c * d_i[1]
+    uj, vj = c * d_j[0] + s * d_j[1], -s * d_j[0] + c * d_j[1]
+    u = ui + (uj - ui) * ts
+    v = transverse_deflection(end_forces, element_loads, L, E * i_z, vi, vj, x, "z")
+    return np.column_stack([c * u - s * v, s * u + c * v, np.zeros_like(u)])
+
+
+# EI·v'' = M (sagging positive, local y up) in the x-y plane; the x-z plane carries the
+# opposite moment sign (θ_y = −dw/dx).  Pinned by tests/test_element_shape.py.
+_CURVATURE_SIGN = {"z": 1.0, "y": -1.0}
+
+
 # Sign of the step a point moment makes in M (fixed by the FEF convention in fem_loads;
 # pinned by tests/test_bending_profile.py, which checks M(L) against the solver).
 _POINT_MOMENT_STEP = -1.0
