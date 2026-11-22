@@ -2074,7 +2074,12 @@ class ResultsPanel(QWidget):
     def _make_table(headers: list[str]) -> QTableWidget:
         t = QTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
-        t.horizontalHeader().setStretchLastSection(True)
+        # Columns as wide as their contents (the panel is narrow: no fixed 100 px columns),
+        # and no row-number column — it repeated the node / member id, 1-based against 0-based.
+        hh = t.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        hh.setStretchLastSection(True)
+        t.verticalHeader().setVisible(False)
         t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         t.setAlternatingRowColors(True)
         return t

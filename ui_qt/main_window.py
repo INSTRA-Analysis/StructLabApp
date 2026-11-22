@@ -793,6 +793,14 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._right_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._groups_dock)
         self.tabifyDockWidget(self._right_dock, self._groups_dock)
+        self._apply_default_dock_widths()
+
+    # Default panel widths (px): wide enough for a plane frame's results (node, dx, dz, θy)
+    # without sideways scrolling.  Users can still drag them; the minimums stay lower.
+    _RESULTS_DOCK_WIDTH = 340
+
+    def _apply_default_dock_widths(self) -> None:
+        self.resizeDocks([self._right_dock], [self._RESULTS_DOCK_WIDTH], Qt.Orientation.Horizontal)
 
     def _build_shortcuts_menu(self) -> None:
         """A live reference menu listing every keyboard shortcut, right after
@@ -1359,6 +1367,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self._right_dock, self._groups_dock)
         self._right_dock.raise_()
         self._groups_dock.visibilityChanged.connect(self._on_groups_visibility)
+        self._apply_default_dock_widths()
 
     # ── status bar ────────────────────────────────────────────────────────────
 
