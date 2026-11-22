@@ -64,7 +64,7 @@ def test_tower_opens_solves_and_reports(window, tmp_path):
     with matplotlib.rc_context({"pdf.fonttype": 42}):
         generate_report(str(out), state, None, cache, "Self weight")
     text = "\n".join(p.extract_text() for p in pypdf.PdfReader(str(out)).pages)
-    assert "3D Structural Analysis" in text
+    assert "Space frame (Z up): 6 DOF per node" in text
     assert "Global equilibrium satisfied" in text
     assert "members shown (largest |M|)" in text      # 454 members: diagram pages capped
     assert "more rows not shown" in text              # long tables say so, never silent

@@ -71,7 +71,7 @@ def generate_report(
     date_str = now.strftime("%d %B %Y")
 
     with PdfPages(filepath) as pdf:
-        _page_title(pdf, meta, date_str, report_basis, "3D" if _is_3d(state) else "2D", state)
+        _page_title(pdf, meta, date_str, report_basis, state)
         _page_model(pdf, meta, state, date_str, report_basis)
         if canvas_image_path and Path(canvas_image_path).exists():
             _page_diagram(pdf, meta, canvas_image_path, date_str, report_basis)
@@ -155,14 +155,14 @@ def _footer(fig: plt.Figure, date_str: str, page_note: str = "") -> None:
 # ── Page 1: Title ─────────────────────────────────────────────────────────────
 
 def _page_title(pdf: PdfPages, meta: Any, date_str: str,
-                report_basis: str, dimension: str = "2D", state: ModelState | None = None) -> None:
+                report_basis: str, state: ModelState | None = None) -> None:
     fig, ax = _new_fig()
 
     # Brand
     fig.text(0.5, 0.82, "StructLab",
              fontsize=46, fontweight="bold", color=_CYAN,
              ha="center", va="center", transform=fig.transFigure)
-    fig.text(0.5, 0.768, f"{dimension} Structural Analysis  —  Direct Stiffness Method",
+    fig.text(0.5, 0.768, "Structural Analysis  —  Direct Stiffness Method",
              fontsize=10, color=_GREY, ha="center", va="center",
              transform=fig.transFigure)
     ax.axhline(0.745, xmin=0.10, xmax=0.90, color=_CYAN, linewidth=1.5)
@@ -264,19 +264,12 @@ def _page_model(pdf: PdfPages, meta: Any, state: ModelState,
     y = 0.860
 
     y = _section_label(fig, "Nodes", y)
-    if _is_3d(state):
-        y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Z (m)", "Support"],
-                        [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
-                          f"{0.0 if abs(n.z) < 1e-9 else n.z:.3f}",
-                          describe_support(n, is_2d=False)]
-                         for n in state.nodes],
-                        y)
-    else:
-        y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Support"],
-                        [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
-                          describe_support(n, is_2d=True)]
-                         for n in state.nodes],
-                        y)
+    y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Z (m)", "Support"],
+                    [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
+                      f"{0.0 if abs(n.z) < 1e-9 else n.z:.3f}",
+                      describe_support(n)]
+                     for n in state.nodes],
+                    y)
     y -= 0.018
 
     y = _section_label(fig, "Members", y)
@@ -339,7 +332,7 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
     _header(ax, meta, "Loading Summary", report_basis)
     _footer(fig, date_str)
     y = 0.860
-    three_d = _is_3d(state)
+    plane = _is_plane_frame(state)
 
     for lc in state.load_cases:
         y = _section_label(fig, f"LC{lc.id}: {lc.name}  [{lc.category}]", y)
@@ -348,25 +341,21 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
         def _kn(v: float) -> str:
             return f"{v/1e3:.3f}" if v else "—"
 
-        plane = _is_plane_frame(state, 6 if three_d else 3)
         nl_rows = []
         for nid, nl in lc.node_loads.items():
             if nl.is_zero():
                 continue
             if plane:                                # in-plane: Fx, Fz, My
                 nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fz), _kn(nl.moment_y)])
-            elif three_d:
+            else:
                 nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fy), _kn(nl.fz),
                                 _kn(nl.moment_x), _kn(nl.moment_y), _kn(nl.moment)])
-            else:
-                nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fy), _kn(nl.moment)])
         if nl_rows:
             y = _mini_label(fig, "Node Loads", y)
             y = _draw_table(fig,
                             ["Node", "Fx (kN)", "Fz (kN)", "My (kN·m)"] if plane
                             else ["Node", "Fx (kN)", "Fy (kN)", "Fz (kN)",
-                                  "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if three_d
-                            else ["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"],
+                                  "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"],
                             nl_rows, y)
 
         # Member loads — include qx columns
@@ -376,7 +365,7 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
                 continue
             w_s,  w_e  = ml.net("w")
             row = [str(mid), _kn(w_s), _kn(w_e)]
-            for axis in (("qx", "qy", "qz") if three_d else ("qx",)):
+            for axis in ("qx", "qy", "qz"):
                 q_s, q_e = ml.net(axis)
                 row += [_kn(q_s), _kn(q_e)]
             row.append(f"{len(ml.point_loads)} pt" if ml.point_loads else "—")
@@ -384,7 +373,7 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
         if ml_rows:
             y = _mini_label(fig, "Member Loads", y)
             heads = ["Mbr", "w_i (kN/m)", "w_j (kN/m)"]
-            for axis in (("qx", "qy", "qz") if three_d else ("qx",)):
+            for axis in ("qx", "qy", "qz"):
                 heads += [f"{axis}_i (kN/m)", f"{axis}_j (kN/m)"]
             heads.append("Pt loads")
             n_cols = len(heads) - 2
@@ -409,15 +398,10 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
 MAX_DIAGRAM_PAGES = 24     # per-member SFD/BMD pages before the report keeps only the top few
 
 
-def _is_plane_frame(state: ModelState, dpn: int) -> bool:
-    """A 3D plane frame: report its in-plane quantities only (the rest are locked at zero)."""
-    return dpn == 6 and state.mode_3d and state.analysis_type == "plane_xz"
-
-
-def _is_3d(state: ModelState) -> bool:
-    """True when the engine analyses this model in 3D: the declared mode (the engine no
-    longer guesses from z, so a flat 3D model is still a 3D analysis)."""
-    return state.mode_3d
+def _is_plane_frame(state: ModelState) -> bool:
+    """A plane frame: report its in-plane quantities only (the rest are locked at zero).
+    Reports are made from the window, which holds 3D models only (6 DOF per node)."""
+    return state.analysis_type == "plane_xz"
 
 
 # ── Page 5: Support reactions ─────────────────────────────────────────────────
@@ -438,13 +422,12 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
         plt.close(fig)
         return
 
-    # Reactions table — DOF stride follows the solved model (3 = 2D, 6 = 3D)
-    dpn      = cache["model"].dofs_per_node if cache.get("model") is not None else 3
-    is_3d    = dpn == 6
-    n_force  = 3 if is_3d else 2
+    # Reactions table — 6 DOF per node (the window holds 3D models only)
+    dpn      = 6
+    n_force  = 3
     rows     = []
     sums     = [0.0] * n_force
-    plane = _is_plane_frame(state, dpn)                 # in-plane columns only
+    plane = _is_plane_frame(state)                      # in-plane columns only
     shown = (0, 2, 4) if plane else range(dpn)
     for n in state.nodes:
         if n.support_type == SupportType.FREE:
@@ -452,15 +435,14 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
         comps = [float(reactions[n.id * dpn + k]) for k in range(dpn)]
         for k in range(n_force):
             sums[k] += comps[k]
-        rows.append([str(n.id), describe_support(n, is_2d=not is_3d)]
+        rows.append([str(n.id), describe_support(n)]
                     + [f"{comps[k]/1e3:.4f}" for k in shown])
 
     if plane:
         headers = ["Node", "Support", "Rx (kN)", "Rz (kN)", "My (kN·m)"]
     else:
-        headers = (["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",
-                    "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if is_3d
-                   else ["Node", "Support", "Rx (kN)", "Ry (kN)", "M (kN·m)"])
+        headers = ["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",
+                   "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"]
     y = _draw_table(fig, headers, rows, y)
 
     # ── Equilibrium check ─────────────────────────────────────────────────────
@@ -522,13 +504,11 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     _footer(fig, date_str)
     y = 0.860
 
-    dpn      = cache["model"].dofs_per_node if cache.get("model") is not None else 3
-    is_3d    = dpn == 6
-    v_idx    = 2 if is_3d else 1          # vertical DOF: Z in 3D, Y in 2D
+    dpn      = 6                          # 3D models only: [dx, dy, dz, θx, θy, θz]
+    v_idx    = 2                          # vertical DOF: Z
 
     def _sway(nid: int) -> float:
-        dx = float(disps[nid * dpn])
-        return math.hypot(dx, float(disps[nid * dpn + 1])) if is_3d else dx
+        return math.hypot(float(disps[nid * dpn]), float(disps[nid * dpn + 1]))
 
     # Build node-coordinate map and connectivity lookup
     node_map   = {n.id: n for n in state.nodes}
@@ -569,20 +549,16 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     y = _section_label(fig, "Nodal Displacements", y)
 
     disp_rows = []
-    plane = _is_plane_frame(state, dpn)
+    plane = _is_plane_frame(state)
     for n in free_nodes:
         d = [float(disps[n.id * dpn + k]) for k in range(dpn)]
         if plane:                                    # in-plane: dx, dz, θy
             disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[2]*1e3:.3f}",
                               f"{math.degrees(d[4]):.4f}"])
-        elif is_3d:
-            disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
         else:
-            disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[1]*1e3:.3f}",
-                              f"{math.degrees(d[2]):.4f}"])
+            disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
     headers = (["Node", "dx (mm)", "dz (mm)", "θy (°)"] if plane
-               else ["Node", "dx (mm)", "dy (mm)", "dz (mm)"] if is_3d
-               else ["Node", "dx (mm)", "dy (mm)", "θ (°)"])
+               else ["Node", "dx (mm)", "dy (mm)", "dz (mm)"])
     y = _draw_table(fig, headers, disp_rows, y,
                     col_widths=[0.10, 0.20, 0.20, 0.22])
     y -= 0.020
@@ -597,7 +573,7 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     col_v   = _GREEN   if pass_v else _RED
 
     y = _draw_table(fig,
-                    ["Max |dz|" if is_3d else "Max |dy|", "Node", "Ref. length L", "δ/L",
+                    ["Max |dz|", "Node", "Ref. length L", "δ/L",
                      "Limit", "Result"],
                     [[f"{max_dy*1e3:.2f} mm", str(ctrl_nid_v),
                       f"{ctrl_L_v:.3f} m",
@@ -619,7 +595,7 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     col_h   = _GREEN   if pass_h else _RED
 
     y = _draw_table(fig,
-                    ["Max |d_xy|" if is_3d else "Max |dx|", "Node", "Ref. height H", "δ/H",
+                    ["Max |dx|" if plane else "Max |d_xy|", "Node", "Ref. height H", "δ/H",
                      "Limit", "Result"],
                     [[f"{max_dx*1e3:.2f} mm", str(ctrl_nid_h),
                       f"{ctrl_L_h:.3f} m",
@@ -660,8 +636,8 @@ def _page_member_forces(pdf: PdfPages, meta: Any, state: ModelState,
         plt.close(fig)
         return
 
-    plane = _is_plane_frame(state, 6 if member_results[0].is_3d else 3)
-    if member_results[0].is_3d and not plane:
+    plane = _is_plane_frame(state)
+    if not plane:
         # 3D: every component at both ends (N, Vy, Vz, T, My, Mz), in kN / kN·m.
         names = ["N", "Vy", "Vz", "T", "My", "Mz"]
         headers = ["Mbr"] + [f"{n}_{e}" for e in "ij" for n in names]
@@ -802,8 +778,8 @@ def _page_signoff(pdf: PdfPages, meta: Any, date_str: str,
               va="top", transform=disc.transAxes)
 
     body = (
-        "This report has been produced using StructLab, a 2D linear-elastic structural "
-        "analysis tool based on the Direct Stiffness Method (DSM). Results are valid "
+        "This report has been produced using StructLab, a linear-elastic plane and space "
+        "frame analysis tool based on the Direct Stiffness Method (DSM). Results are valid "
         "for linear-elastic static conditions only. The engineer of record is responsible "
         "for verifying that all assumptions, boundary conditions, and load cases are "
         "appropriate for the actual structure. StructLab output does not constitute a "

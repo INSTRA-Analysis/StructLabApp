@@ -125,4 +125,4 @@ def test_pdf_title_page_states_the_analysis(tmp_path):
     s = _portal()
     s.analysis_type = "plane_xz"
     text = _report_text(tmp_path, s)
-    assert "Plane frame (XZ)" in text and "3D Structural Analysis" in text
+    assert "Plane frame (XZ)" in text and "Structural Analysis" in text

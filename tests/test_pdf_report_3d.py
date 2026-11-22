@@ -36,7 +36,7 @@ def _report_text(tmp_path, state: ModelState) -> str:
 
 def test_3d_report_has_z_columns_and_true_equilibrium(tmp_path):
     text = _report_text(tmp_path, _frame_3d())
-    assert "3D Structural Analysis" in text      # cover page
+    assert "Space frame (Z up)" in text          # cover page
     assert "Z (m)" in text                       # node table
     assert "Fz (kN)" in text and "Mx (kN" in text  # node-load table
     assert "Rz (kN)" in text and "ΣRz" in text     # reactions page
@@ -46,19 +46,19 @@ def test_3d_report_has_z_columns_and_true_equilibrium(tmp_path):
     assert "Vz_i" in text and "Mz_j" in text     # full 3D member end forces
 
 
-def test_2d_report_is_unchanged_in_shape(tmp_path):
-    """2D keeps its 3-DOF columns and still reports equilibrium."""
+def test_plane_frame_report_shows_in_plane_columns(tmp_path):
+    """A plane frame reports Rx / Rz / My and dx / dz / θy; the locked components are left out."""
     s = ModelState()
-    s.analysis_mode = "2D"
-    a, b = s.add_node(0, 0), s.add_node(6, 0)
+    s.analysis_type = "plane_xz"
+    a, b = s.add_node(0, 0, 0), s.add_node(6, 0, 0)
     a.support_type, b.support_type = SupportType.PIN, SupportType.ROLLER
     m = s.add_member(a.id, b.id)
-    m.A, m.I = 0.01, 4e-5
-    s.load_cases[0].set_node_load(a.id, NodeLoad(fy=-1000.0))
+    m.A, m.I, m.I_y, m.J = 0.01, 4e-5, 4e-5, 1e-6
+    s.load_cases[0].set_node_load(a.id, NodeLoad(fz=-1000.0))
     text = _report_text(tmp_path, s)
-    assert "2D Structural Analysis" in text
-    assert "Rz (kN)" not in text and "Z (m)" not in text
-    assert "Ry (kN)" in text and "M (kN·m)" in text
+    assert "Plane frame (XZ)" in text
+    assert "Rz (kN)" in text and "My (kN·m)" in text
+    assert "Ry (kN)" not in text and "Mx (kN·m)" not in text
     assert "Global equilibrium satisfied" in text
 
 
