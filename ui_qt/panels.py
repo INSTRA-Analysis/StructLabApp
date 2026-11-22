@@ -146,16 +146,18 @@ class PropertiesPanel(QWidget):
         self._replace(None)
 
     def show_node(self, node: NodeData) -> None:
-        is_2d = bool(self._model_state and self._model_state.is_2d)
-        self._replace(_NodeForm(node, self._active_case(), self._on_apply, is_2d=is_2d))
+        from ui_qt.support_editor import support_layout
+        self._replace(_NodeForm(node, self._active_case(), self._on_apply,
+                                layout=support_layout(self._model_state)))
 
     def show_member(self, member: MemberData) -> None:
         self._replace(_MemberForm(member, self._model_state, self._on_apply,
                                   self.divide_callback))
 
     def show_nodes(self, nodes: list) -> None:
-        is_2d = bool(self._model_state and self._model_state.is_2d)
-        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply, is_2d=is_2d))
+        from ui_qt.support_editor import support_layout
+        self._replace(_MultiNodeForm(nodes, self._active_case(), self._on_apply,
+                                     layout=support_layout(self._model_state)))
 
     def show_members(self, members: list) -> None:
         self._replace(_MultiMemberForm(members, self._model_state, self._on_apply))
@@ -195,17 +197,22 @@ _DL_DIRS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _NodeForm(QWidget):
+    """One node: coordinates, support and applied load, showing the freedoms that exist for
+    the model: a 2D model (x, y; Fx, Fy, M), a plane frame in XZ (x, z; Fx, Fz, My, with y
+    shown as the frame's plane) or a space frame (all of them)."""
+
     def __init__(self, node: NodeData, load_case: LoadCase | None,
-                 on_apply, is_2d: bool = False) -> None:
+                 on_apply, layout: str = "space") -> None:
         super().__init__()
         self._node      = node
         self._load_case = load_case
         self._on_apply  = on_apply
-        self._is_2d     = is_2d
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._layout    = layout
+        is_2d, plane = layout == "2d", layout == "plane"
+        box_layout = QVBoxLayout(self)
+        box_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        layout.addWidget(QLabel(f"<b>Node {node.id}</b>"))
+        box_layout.addWidget(QLabel(f"<b>Node {node.id}</b>"))
 
         # ── coordinates ──────────────────────────────────────────────────────
         coord_box = QGroupBox("Coordinates")
@@ -214,15 +221,22 @@ class _NodeForm(QWidget):
         self._y = _spin(node.y, -1000, 1000, 0.25)
         self._z = _spin(node.z, -1000, 1000, 0.25)
         form.addRow("x (m):", self._x)
-        form.addRow("y (m) ↑:" if is_2d else "y (m):", self._y)
-        if not is_2d:
-            form.addRow("z (m):", self._z)
-        layout.addWidget(coord_box)
+        if plane:
+            form.addRow("z (m) ↑:", self._z)
+            self._y.setEnabled(False)                   # the frame's plane, not a freedom
+            self._y.setToolTip("The plane frame lies in the XZ plane at this y.")
+            form.addRow("y (m), frame plane:", self._y)
+        else:
+            form.addRow("y (m) ↑:" if is_2d else "y (m):", self._y)
+            if not is_2d:
+                form.addRow("z (m):", self._z)
+        box_layout.addWidget(coord_box)
 
         # ── support: preset + per-axis restraints + springs ───────────────────
         from ui_qt.support_editor import SupportEditor
-        self.support_editor = SupportEditor([node], is_2d)
-        layout.addWidget(self.support_editor)
+        self.support_editor = SupportEditor([node], layout)
+        box_layout.addWidget(self.support_editor)
+        layout = box_layout
 
         # ── applied loads (read from active load case) ────────────────────────
         nl = load_case.get_node_load(node.id) if load_case else NodeLoad()
@@ -234,11 +248,18 @@ class _NodeForm(QWidget):
         self._m  = _spin(nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(nl.moment_y / 1e3, -1e6, 1e6, 1)
+        # Arrows show the positive direction (an upward force is positive; enter a negative
+        # value for a downward one).  Hidden components keep their values on Apply.
         if is_2d:
             # 2D-XY: in-plane only — horizontal Fx, vertical Fy (Y up), moment.
             lf.addRow("Fx (kN) →:", self._fx)
-            lf.addRow("Fy (kN) ↓:", self._fy)
+            lf.addRow("Fy (kN) ↑:", self._fy)
             lf.addRow("M (kN·m):",  self._m)
+        elif plane:
+            # Plane frame (XZ, Z up): in-plane only — Fx, vertical Fz, moment about Y.
+            lf.addRow("Fx (kN) →:", self._fx)
+            lf.addRow("Fz (kN) ↑:", self._fz)
+            lf.addRow("My (kN·m):", self._my)
         else:
             lf.addRow("Fx (kN):",   self._fx)
             lf.addRow("Fy (kN):",   self._fy)
@@ -455,6 +476,13 @@ def _dlt_add_row(dw: _DLTableWidgets, case_id: int,
     dw.table.setCellWidget(row, 3, _spin(we_kn, -1e6, 1e6, 1.0, 2))
 
 
+def _dist_load_buttons(state) -> list[tuple[str, str]]:
+    """'Add distributed load' buttons: a plane frame has no 'qy' (out of its plane)."""
+    from ui_qt.support_editor import support_layout
+    buttons = [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]
+    return buttons[:2] if support_layout(state) == "plane" else buttons
+
+
 def _dlt_add_entry(dw: _DLTableWidgets, direction: str) -> None:
     """Add a new empty row for the given direction, defaulting to the active case."""
     _dlt_add_row(dw, dw.active_case_id, direction, 0.0, 0.0)
@@ -631,7 +659,7 @@ class _MemberForm(QWidget):
         self._dl_populate()
         dl_layout.addWidget(self._dl_table)
         dl_btn_row = QHBoxLayout()
-        for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]:
+        for _key, _lbl in _dist_load_buttons(self._model_state):
             _b = QPushButton(_lbl)
             _b.setFixedHeight(28)
             _b.clicked.connect(lambda checked=False, k=_key: self._dl_add_entry(k))
@@ -1212,7 +1240,7 @@ class _MultiMemberForm(QWidget):
         self._dl_populate_m()
         dl_layout.addWidget(self._dl_table_m)
         dl_btn_row = QHBoxLayout()
-        for _key, _lbl in [("w", "+ Local w"), ("qx", "+ qx"), ("qy", "+ qy")]:
+        for _key, _lbl in _dist_load_buttons(self._model_state):
             _b = QPushButton(_lbl)
             _b.setFixedHeight(28)
             _b.clicked.connect(lambda checked=False, k=_key: self._dl_add_entry_m(k))
@@ -1397,12 +1425,13 @@ class _MultiNodeForm(QWidget):
     """Edit shared support and load properties across multiple selected nodes."""
 
     def __init__(self, nodes: list, load_case: LoadCase | None,
-                 on_apply, is_2d: bool = False) -> None:
+                 on_apply, layout: str = "space") -> None:
         super().__init__()
         self._nodes     = nodes
         self._load_case = load_case
         self._on_apply  = on_apply
         first = nodes[0]
+        kind = layout
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -1414,7 +1443,7 @@ class _MultiNodeForm(QWidget):
 
         # ── support: preset + per-axis restraints + springs ───────────────
         from ui_qt.support_editor import SupportEditor
-        self.support_editor = SupportEditor(nodes, is_2d)
+        self.support_editor = SupportEditor(nodes, kind)
         layout.addWidget(self.support_editor)
 
         # ── applied loads (read from active load case for first node) ─────
@@ -1427,12 +1456,13 @@ class _MultiNodeForm(QWidget):
         self._m  = _spin(first_nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(first_nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(first_nl.moment_y / 1e3, -1e6, 1e6, 1)
-        lf.addRow("Fx (kN):",   self._fx)
-        lf.addRow("Fy (kN):",   self._fy)
-        lf.addRow("Fz (kN):",   self._fz)
-        lf.addRow("Mz (kN·m):", self._m)
-        lf.addRow("Mx (kN·m):", self._mx)
-        lf.addRow("My (kN·m):", self._my)
+        rows = {"2d": [("Fx (kN) →:", self._fx), ("Fy (kN) ↑:", self._fy), ("M (kN·m):", self._m)],
+                "plane": [("Fx (kN) →:", self._fx), ("Fz (kN) ↑:", self._fz),
+                          ("My (kN·m):", self._my)]}.get(kind)
+        for text, spin in rows or [("Fx (kN):", self._fx), ("Fy (kN):", self._fy),
+                                   ("Fz (kN):", self._fz), ("Mz (kN·m):", self._m),
+                                   ("Mx (kN·m):", self._mx), ("My (kN·m):", self._my)]:
+            lf.addRow(text, spin)
         layout.addWidget(load_box)
 
         btn = QPushButton(f"Apply to all {len(nodes)} nodes")

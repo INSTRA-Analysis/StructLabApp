@@ -30,7 +30,7 @@ def _menu_action(win, text: str, icon_name: str, menu: QMenu, tip: str = "",
 def _supports_menu(win) -> QMenu:
     """Assign a support type to the selected nodes (same as the canvas right-click menu)."""
     from ui_qt.canvas_items import NodeItem
-    from ui_qt.support_editor import menu_presets
+    from ui_qt.support_editor import menu_presets, support_layout
     menu = QMenu(win)
 
     def apply(stype) -> None:
@@ -42,7 +42,7 @@ def _supports_menu(win) -> QMenu:
 
     def fill() -> None:                       # rebuilt on opening: the presets follow 2D / 3D
         menu.clear()
-        for label, stype in menu_presets(win._scene.model_state.is_2d):
+        for label, stype in menu_presets(support_layout(win._scene.model_state)):
             menu.addAction(label, lambda st=stype: apply(st))
         menu.addSeparator()
         hint = menu.addAction("Per-axis restraints and springs: Properties panel")

@@ -3251,8 +3251,8 @@ class StructView(QGraphicsView):
         # ── Set Support (nodes only) ──────────────────────────────────────────
         if nodes:
             sup_menu = menu.addMenu("Set Support")
-            from ui_qt.support_editor import menu_presets
-            for label, stype in menu_presets(scene.model_state.is_2d):
+            from ui_qt.support_editor import menu_presets, support_layout
+            for label, stype in menu_presets(support_layout(scene.model_state)):
                 a = sup_menu.addAction(label)
                 a.triggered.connect(
                     lambda _checked=False, st=stype: self._set_support(nodes, st)

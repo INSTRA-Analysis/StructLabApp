@@ -32,18 +32,51 @@ _PRESETS_3D = [
     (SupportType.ROLLER_Z, "Roller, free in Z (vertical)"),
     (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
 ]
+_PRESETS_PLANE = [
+    (SupportType.FREE, "Free"), (SupportType.FIXED, "Fixed"), (SupportType.PIN, "Pinned"),
+    (SupportType.ROLLER, "Roller, free in X (horizontal)"),
+    (SupportType.ROLLER_Z, "Roller, free in Z (vertical)"),
+    (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
+]
 _AXIS = ("X", "Y", "Z", "X", "Y", "Z")
 
+# Three layouts: a 2D model (XY, Y up), a plane frame in XZ (Z up; uy, θx, θz locked) and a
+# space frame.  Each shows only the DOFs that exist for it.
+LAYOUT_DOFS = {"2d": PLANAR_DOFS, "plane": (0, 2, 4), "space": tuple(range(6))}
+_LABELS = {"2d": {0: "ux →", 1: "uy ↑", 5: "θz"}, "plane": {0: "ux →", 2: "uz ↑", 4: "θy"}}
+_LAYOUT_PRESETS = {"2d": _PRESETS_2D, "plane": _PRESETS_PLANE, "space": _PRESETS_3D}
 
-def menu_presets(is_2d: bool) -> list[tuple[str, SupportType]]:
+
+def support_layout(state) -> str:
+    """'2d', 'plane' (a 3D plane frame) or 'space' for a ModelState."""
+    if state is None or not state.mode_3d:
+        return "2d" if state is not None and state.is_2d else "space"
+    return "plane" if state.analysis_type == "plane_xz" else "space"
+
+
+def _layout(value) -> str:
+    """Accept a layout name, or the older is_2d flag."""
+    if isinstance(value, bool):
+        return "2d" if value else "space"
+    return value
+
+
+def plane_frame_restraints(ux: bool, uz: bool, ry: bool) -> tuple[bool, ...]:
+    """Six flags for a support ticked in a plane frame (ux, uz, θy), with the out-of-plane
+    ones a later space frame would want: uy held when any translation is, θx/θz only when
+    fully fixed.  Reproduces the presets (a roller free in Z stays one)."""
+    fixed = ux and uz and ry
+    return (bool(ux), bool(ux or uz), bool(uz), fixed, bool(ry), fixed)
+
+
+def menu_presets(layout) -> list[tuple[str, SupportType]]:
     """Presets for the ribbon and right-click "Set Support" menus (same names as the panel).
 
     Spring and Custom need values or ticks, so they are set in the Properties panel.
     """
-    rigid = [(text, p) for p, text in (_PRESETS_2D if is_2d else _PRESETS_3D)
+    rigid = [(text, p) for p, text in _LAYOUT_PRESETS[_layout(layout)]
              if p not in (SupportType.FREE, SupportType.SPRING, SupportType.CUSTOM)]
     return rigid + [("None (free)", SupportType.FREE)]
-_LABEL_2D = {0: "ux →", 1: "uy ↑", 5: "θz"}
 
 
 def _spring_spin(value: float) -> QDoubleSpinBox:
@@ -60,17 +93,18 @@ class SupportEditor(QGroupBox):
 
     changed = pyqtSignal()
 
-    def __init__(self, nodes: list[NodeData], is_2d: bool, parent=None) -> None:
+    def __init__(self, nodes: list[NodeData], layout, parent=None) -> None:
         super().__init__("Support", parent)
-        self._is_2d = is_2d
-        self._dofs = PLANAR_DOFS if is_2d else tuple(range(6))
+        self._layout = _layout(layout)                 # "2d", "plane" or "space"
+        self._dofs = LAYOUT_DOFS[self._layout]
+        labels = _LABELS.get(self._layout)
         self._syncing = False
         self.touched = False
         first = nodes[0]
         lay = QVBoxLayout(self)
 
         self.combo = QComboBox()
-        for preset, text in (_PRESETS_2D if is_2d else _PRESETS_3D):
+        for preset, text in _LAYOUT_PRESETS[self._layout]:
             self.combo.addItem(text, preset)
         lay.addWidget(self.combo)
 
@@ -78,12 +112,12 @@ class SupportEditor(QGroupBox):
         grid = QGridLayout()
         self.boxes: dict[int, QCheckBox] = {}
         for k, dof in enumerate(self._dofs):
-            box = QCheckBox(_LABEL_2D[dof] if is_2d else DOF_NAMES[dof])
+            box = QCheckBox(labels[dof] if labels else DOF_NAMES[dof])
             kind = "translation along" if dof < 3 else "rotation about"
             box.setToolTip(f"Restrain the {kind} global {_AXIS[dof]}")
             box.setChecked(first.restraints[dof])
             box.toggled.connect(self._on_box)
-            row, col = (0, k) if is_2d else divmod(k, 3)
+            row, col = (0, k) if labels else divmod(k, 3)
             grid.addWidget(box, row, col)
             self.boxes[dof] = box
         lay.addLayout(grid)
@@ -95,7 +129,7 @@ class SupportEditor(QGroupBox):
             spin = _spring_spin(getattr(first, SPRING_FOR_DOF[dof]))
             spin.valueChanged.connect(self._on_spring)
             unit = "N/m" if dof < 3 else "N·m/rad"
-            name = _LABEL_2D[dof].split()[0] if is_2d else DOF_NAMES[dof]
+            name = labels[dof].split()[0] if labels else DOF_NAMES[dof]
             form.addRow(f"k {name} ({unit}):", spin)
             self.springs[dof] = spin
         lay.addWidget(self.spring_group)
@@ -117,9 +151,12 @@ class SupportEditor(QGroupBox):
         return self.combo.currentData()
 
     def flags(self) -> tuple[bool, ...]:
-        """The six restraint flags the ticks describe (2D adds the out-of-plane ones)."""
-        if self._is_2d:
+        """The six restraint flags the ticks describe (2D and plane frames add the
+        out-of-plane ones a later change of analysis would want)."""
+        if self._layout == "2d":
             return planar_restraints(*(self.boxes[d].isChecked() for d in PLANAR_DOFS))
+        if self._layout == "plane":
+            return plane_frame_restraints(*(self.boxes[d].isChecked() for d in (0, 2, 4)))
         return tuple(self.boxes[d].isChecked() for d in range(6))
 
     def spring_values(self) -> dict[int, float]:
