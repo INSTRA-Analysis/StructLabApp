@@ -36,6 +36,9 @@ class SolverResult:
     reactions: np.ndarray       # full (num_dofs,) reaction force vector (non-zero at restrained DOFs)
     free_dofs: list[int]
     restrained_dofs: list[int]
+    # Forces taken by Model.locked_dofs (e.g. a plane frame's out-of-plane locks), kept out
+    # of the support reactions; near zero when everything acts in the plane.
+    lock_forces: np.ndarray | None = None
 
 
 class LinearSolver:
@@ -65,11 +68,22 @@ class LinearSolver:
             node_ids=tuple(worst),
         )
 
-    def _classify_dofs(self) -> tuple[list[int], list[int]]:
-        """Return (free_dofs, restrained_dofs) based on support definitions."""
+    def _support_dofs(self) -> set[int]:
         restrained: set[int] = set()
         for support in self.model.supports:
             restrained.update(support.restrained_dofs(self._dpn))
+        return restrained
+
+    def _locked_dofs(self) -> set[int]:
+        """DOFs held at every node by Model.locked_dofs (e.g. uy, θx, θz of a plane frame)."""
+        local = tuple(self.model.locked_dofs)
+        if any(not 0 <= k < self._dpn for k in local):
+            raise ValueError(f"locked_dofs {local} outside 0..{self._dpn - 1}")
+        return {n.id * self._dpn + k for n in self.model.nodes for k in local}
+
+    def _classify_dofs(self) -> tuple[list[int], list[int]]:
+        """Return (free_dofs, restrained_dofs): support restraints plus the model's locks."""
+        restrained = self._support_dofs() | self._locked_dofs()
         all_dofs = list(range(self.num_dofs))
         free = [d for d in all_dofs if d not in restrained]
         restrained_sorted = sorted(restrained)
@@ -122,6 +136,13 @@ class LinearSolver:
         for i, dof in enumerate(restrained_dofs):
             reactions[dof] = r_values[i]
 
+        # A DOF held only by the model's locks is not a support: its force is reported
+        # separately (a support that also restrains it keeps it as a reaction).
+        lock_forces = np.zeros(self.num_dofs)
+        for dof in self._locked_dofs() - self._support_dofs():
+            lock_forces[dof] = reactions[dof]
+            reactions[dof] = 0.0
+
         # Elastic supports: the spring pushes back on the structure with -k*d. Their
         # DOFs are free (not restrained), so they are added here; without this the
         # reactions would not sum to the applied load on a spring-supported model.
@@ -136,4 +157,5 @@ class LinearSolver:
             reactions=reactions,
             free_dofs=active_free,
             restrained_dofs=restrained_dofs,
+            lock_forces=lock_forces,
         )

@@ -210,6 +210,7 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
         'sub_results':    sub_results,
         'displacements':  result.displacements,
         'reactions':      result.reactions,
+        'lock_forces':    result.lock_forces,
         'member_el_map':  member_el_map,
         'member_results': member_results,
     }

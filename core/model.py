@@ -24,6 +24,9 @@ class Model:
     nodal_loads: list[NodalLoad] = field(default_factory=list)
     element_loads: list[ElementLoad] = field(default_factory=list)
     dimension: int | None = None
+    # Per-node DOF indices the solver restrains at EVERY node (0..dofs_per_node-1). A plane
+    # frame in the XZ plane locks (1, 3, 5) = uy, θx, θz: a 2D analysis inside the 3D engine.
+    locked_dofs: tuple[int, ...] = ()
 
     @property
     def dofs_per_node(self) -> int:
