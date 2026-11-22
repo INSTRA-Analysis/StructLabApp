@@ -1381,7 +1381,7 @@ class StructCanvas(QGraphicsScene):
         )
 
         load_map = build_load_map(model)
-        diag_auto, def_auto = compute_auto_scales(model, sub_results, displacements)
+        diag_auto, def_auto = compute_auto_scales(model, sub_results, displacements, member_el_map)
 
         diag_scale = diag_auto * diag_scale_mult
         def_scale  = def_auto  * def_scale_mult

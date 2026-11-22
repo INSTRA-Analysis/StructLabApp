@@ -100,10 +100,43 @@ def build_load_map(model: "Model") -> dict[int, list]:
 # Public: compute_auto_scales
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Diagram size: the largest |M| spans this fraction of the median MEMBER length on screen
+# (before the user's "Diagram ×" multiplier).  0.0075 = the former 15 % of a sub-element at 20
+# sub-elements per member, so diagrams look as they did — now whatever the subdivision.
+_DIAGRAM_FRACTION = 0.0075
+
+
+def _median_member_span_px(model: "Model", member_el_map: "list[list[int]] | None") -> float:
+    """Median on-screen length of the members (UI members from ``member_el_map``; without it,
+    of the elements — subdivision-dependent, kept only as a fallback)."""
+    nodes = _nodes_by_id(model)
+    spans: list[float] = []
+    if member_el_map:
+        for el_ids in member_el_map:
+            if not el_ids:
+                continue
+            first, last = _find_element(model, el_ids[0]), _find_element(model, el_ids[-1])
+            if first is None or last is None:
+                continue
+            ix, iy = _node_to_scene(nodes[first.node_i.id], model)
+            jx, jy = _node_to_scene(nodes[last.node_j.id], model)
+            if math.hypot(jx - ix, jy - iy) > 0:
+                spans.append(math.hypot(jx - ix, jy - iy))
+        if spans:
+            return float(np.median(spans))
+    for el in model.elements:
+        ix, iy = _node_to_scene(nodes[el.node_i.id], model)
+        jx, jy = _node_to_scene(nodes[el.node_j.id], model)
+        if math.hypot(jx - ix, jy - iy) > 0:
+            spans.append(20.0 * math.hypot(jx - ix, jy - iy))   # ≈ a member at the old n_sub
+    return float(np.median(spans)) if spans else PX_PER_M
+
+
 def compute_auto_scales(
     model: "Model",
     sub_results: "list[ElementResult]",
     displacements: np.ndarray,
+    member_el_map: "list[list[int]] | None" = None,
 ) -> tuple[float, float]:
     """Compute diagram and deformed-shape auto-scale factors.
 
@@ -111,27 +144,13 @@ def compute_auto_scales(
     -------
     diag_auto_scale_px_per_Nm : float
         Multiply by M value (N·m) to get pixel offset from baseline.
-        Chosen so the maximum |M| across all elements occupies 15 % of the
-        median element span in pixels.
+        Chosen so the maximum |M| occupies _DIAGRAM_FRACTION of the median MEMBER
+        span in pixels (``member_el_map``), independent of the subdivision.
     def_auto_scale_dimensionless : float
-        Multiply by displacement (m) × PX_PER_M to get pixel offset.
-        Chosen so the maximum nodal displacement (in metres) × PX_PER_M ×
-        def_auto occupies 15 % of the median element span in pixels.
+        Multiply by displacement (m) × PX_PER_M to get pixel offset; from the
+        structure's bounding box (also independent of the subdivision).
     """
-    TARGET = 0.15  # 15 % of median span
-
-    # Collect element spans in pixels
-    spans_px: list[float] = []
-    for el in model.elements:
-        ni = _nodes_by_id(model)[el.node_i.id]
-        nj = _nodes_by_id(model)[el.node_j.id]
-        ix_s, iy_s = _node_to_scene(ni, model)
-        jx_s, jy_s = _node_to_scene(nj, model)
-        L_px = math.hypot(jx_s - ix_s, jy_s - iy_s)
-        if L_px > 0:
-            spans_px.append(L_px)
-
-    median_span_px = float(np.median(spans_px)) if spans_px else PX_PER_M
+    median_span_px = _median_member_span_px(model, member_el_map)
 
     # Diagram scale: based on maximum |M| across all sub-results (exact along each element;
     # one pass over the loads and a dict lookup, not a search per element).
@@ -148,7 +167,7 @@ def compute_auto_scales(
         max_M = max(max_M, float(np.max(np.abs(M_vals))))
 
     if max_M > 0.0:
-        diag_auto = (TARGET * median_span_px) / max_M
+        diag_auto = (_DIAGRAM_FRACTION * median_span_px) / max_M
     else:
         diag_auto = 1e-6   # fallback — effectively zero diagram
 
@@ -895,23 +914,11 @@ def compute_auto_scales_envelope(
 ) -> float:
     """Return diag auto-scale (px per N·m) that fits all combinations on screen.
 
-    Uses the maximum |M| across every combination and every member so all
-    curves fit within 15% of the median element span regardless of which
-    combo governs.
+    Uses the maximum |M| across every combination and every member, sized like
+    compute_auto_scales (a fraction of the median member span), whichever combo governs.
     """
-    TARGET = 0.15
-
-    spans_px: list[float] = []
-    for el in model.elements:
-        ni = _nodes_by_id(model)[el.node_i.id]
-        nj = _nodes_by_id(model)[el.node_j.id]
-        ix_s, iy_s = _node_to_scene(ni, model)
-        jx_s, jy_s = _node_to_scene(nj, model)
-        L_px = math.hypot(jx_s - ix_s, jy_s - iy_s)
-        if L_px > 0:
-            spans_px.append(L_px)
-
-    median_span_px = float(np.median(spans_px)) if spans_px else PX_PER_M
+    member_el_map = solve_runs_rich[0]['member_el_map'] if solve_runs_rich else None
+    median_span_px = _median_member_span_px(model, member_el_map)
 
     max_M = 0.0
     for run in solve_runs_rich:
@@ -929,7 +936,7 @@ def compute_auto_scales_envelope(
                 max_M = max(max_M, float(np.max(np.abs(M_arr))))
 
     if max_M > 0.0:
-        return (TARGET * median_span_px) / max_M
+        return (_DIAGRAM_FRACTION * median_span_px) / max_M
     return 1e-6
 
 
