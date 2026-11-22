@@ -348,11 +348,14 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
         def _kn(v: float) -> str:
             return f"{v/1e3:.3f}" if v else "—"
 
+        plane = _is_plane_frame(state, 6 if three_d else 3)
         nl_rows = []
         for nid, nl in lc.node_loads.items():
             if nl.is_zero():
                 continue
-            if three_d:
+            if plane:                                # in-plane: Fx, Fz, My
+                nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fz), _kn(nl.moment_y)])
+            elif three_d:
                 nl_rows.append([str(nid), _kn(nl.fx), _kn(nl.fy), _kn(nl.fz),
                                 _kn(nl.moment_x), _kn(nl.moment_y), _kn(nl.moment)])
             else:
@@ -360,8 +363,9 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
         if nl_rows:
             y = _mini_label(fig, "Node Loads", y)
             y = _draw_table(fig,
-                            ["Node", "Fx (kN)", "Fy (kN)", "Fz (kN)",
-                             "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if three_d
+                            ["Node", "Fx (kN)", "Fz (kN)", "My (kN·m)"] if plane
+                            else ["Node", "Fx (kN)", "Fy (kN)", "Fz (kN)",
+                                  "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if three_d
                             else ["Node", "Fx (kN)", "Fy (kN)", "M (kN·m)"],
                             nl_rows, y)
 
@@ -405,6 +409,11 @@ def _page_loads(pdf: PdfPages, meta: Any, state: ModelState,
 MAX_DIAGRAM_PAGES = 24     # per-member SFD/BMD pages before the report keeps only the top few
 
 
+def _is_plane_frame(state: ModelState, dpn: int) -> bool:
+    """A 3D plane frame: report its in-plane quantities only (the rest are locked at zero)."""
+    return dpn == 6 and state.mode_3d and state.analysis_type == "plane_xz"
+
+
 def _is_3d(state: ModelState) -> bool:
     """True when the engine analyses this model in 3D: the declared mode (the engine no
     longer guesses from z, so a flat 3D model is still a 3D analysis)."""
@@ -435,6 +444,8 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
     n_force  = 3 if is_3d else 2
     rows     = []
     sums     = [0.0] * n_force
+    plane = _is_plane_frame(state, dpn)                 # in-plane columns only
+    shown = (0, 2, 4) if plane else range(dpn)
     for n in state.nodes:
         if n.support_type == SupportType.FREE:
             continue
@@ -442,11 +453,14 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
         for k in range(n_force):
             sums[k] += comps[k]
         rows.append([str(n.id), describe_support(n, is_2d=not is_3d)]
-                    + [f"{c/1e3:.4f}" for c in comps])
+                    + [f"{comps[k]/1e3:.4f}" for k in shown])
 
-    headers = (["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",
-                "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if is_3d
-               else ["Node", "Support", "Rx (kN)", "Ry (kN)", "M (kN·m)"])
+    if plane:
+        headers = ["Node", "Support", "Rx (kN)", "Rz (kN)", "My (kN·m)"]
+    else:
+        headers = (["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",
+                    "Mx (kN·m)", "My (kN·m)", "Mz (kN·m)"] if is_3d
+                   else ["Node", "Support", "Rx (kN)", "Ry (kN)", "M (kN·m)"])
     y = _draw_table(fig, headers, rows, y)
 
     # ── Equilibrium check ─────────────────────────────────────────────────────
@@ -555,17 +569,21 @@ def _page_checks(pdf: PdfPages, meta: Any, state: ModelState,
     y = _section_label(fig, "Nodal Displacements", y)
 
     disp_rows = []
+    plane = _is_plane_frame(state, dpn)
     for n in free_nodes:
         d = [float(disps[n.id * dpn + k]) for k in range(dpn)]
-        if is_3d:
+        if plane:                                    # in-plane: dx, dz, θy
+            disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[2]*1e3:.3f}",
+                              f"{math.degrees(d[4]):.4f}"])
+        elif is_3d:
             disp_rows.append([str(n.id)] + [f"{v*1e3:.3f}" for v in d[:3]])
         else:
             disp_rows.append([str(n.id), f"{d[0]*1e3:.3f}", f"{d[1]*1e3:.3f}",
                               f"{math.degrees(d[2]):.4f}"])
-    y = _draw_table(fig,
-                    ["Node", "dx (mm)", "dy (mm)", "dz (mm)"] if is_3d
-                    else ["Node", "dx (mm)", "dy (mm)", "θ (°)"],
-                    disp_rows, y,
+    headers = (["Node", "dx (mm)", "dz (mm)", "θy (°)"] if plane
+               else ["Node", "dx (mm)", "dy (mm)", "dz (mm)"] if is_3d
+               else ["Node", "dx (mm)", "dy (mm)", "θ (°)"])
+    y = _draw_table(fig, headers, disp_rows, y,
                     col_widths=[0.10, 0.20, 0.20, 0.22])
     y -= 0.020
 
@@ -642,7 +660,8 @@ def _page_member_forces(pdf: PdfPages, meta: Any, state: ModelState,
         plt.close(fig)
         return
 
-    if member_results[0].is_3d:
+    plane = _is_plane_frame(state, 6 if member_results[0].is_3d else 3)
+    if member_results[0].is_3d and not plane:
         # 3D: every component at both ends (N, Vy, Vz, T, My, Mz), in kN / kN·m.
         names = ["N", "Vy", "Vz", "T", "My", "Mz"]
         headers = ["Mbr"] + [f"{n}_{e}" for e in "ij" for n in names]
