@@ -6,7 +6,7 @@ Import a structure from a single **sectioned CSV** file via **File ▸ Import �
 - `truss_template.csv` — a minimal, commented skeleton to copy and edit.
 - `transmission_tower_3d.csv` — 85-node / 318-member pin-jointed steel transmission tower
   (converted from the "3D Truss Toolbox" example data).
-- `pratt_truss_2d.csv` — a 2D Pratt truss bridge (bars), grouped by role.
+- `pratt_truss_plane.csv` — a Pratt truss bridge (bars) in the XZ plane, grouped by role.
 - `space_frame_roof_3d.csv` — a 3D double-layer space-frame roof (bars).
 - `space_frame_lecture37_3d.csv` — 561-node / 2,092-member 3D space-frame roof truss (bars,
   E = 200 GPa, A = 0.005 m²), four fully restrained base nodes and 260 kN of vertical nodal
@@ -19,7 +19,8 @@ Import a structure from a single **sectioned CSV** file via **File ▸ Import �
   Checked for duplicate/overlapping members and near-coincident nodes (none); max displacement
   30 mm, member forces −374 … +137 kN. Light enough to orbit smoothly.
 - `portal_frame_3d.csv` — a 3D portal frame using **beam** elements (`I`, `Iy`, `J`).
-- `multibay_frame_2d.csv` — a 2D 2-bay × 2-storey moment frame using **beam** elements.
+- `multibay_frame_plane.csv` — a 2-bay × 2-storey moment frame in the XZ plane using **beam**
+  elements.
 
 ## Format
 
@@ -42,11 +43,13 @@ node,Fx,Fy,Fz
 ## Conventions
 
 - **Units are SI**: metres, newtons, pascals, kg/m³.
-- **3D models — Z is the vertical (up) axis.** Author coordinates in StructLab's native
-  frame — the importer does **no** axis rotation. A downward load is `Fz < 0`.
-- **2D models — keep every node at `z = 0`.** The engine then analyses the structure in
-  2D mode, where **Y is vertical**; a downward load is `Fy < 0` (see `pratt_truss_2d.csv`
-  and `multibay_frame_2d.csv`). Mixing non-zero `z` makes it a 3D model.
+- **Z is the vertical (up) axis.** Author coordinates in StructLab's native frame — the
+  importer does **no** axis rotation. A downward load is `Fz < 0`.
+- **Plane structures — draw them in the XZ plane (`y = 0`)**, as in `pratt_truss_plane.csv`
+  and `multibay_frame_plane.csv`. An imported model is a space frame; switch on
+  **Plane Frame (XZ)** after import to analyse it in its plane only. Do not lay a frame flat
+  in XY with `z = 0`: it is then a horizontal grid, and its members bend in that plane about
+  their weak axis (`Iy`), not `I`.
 - **Ids are arbitrary labels.** Node/member ids are remapped internally, so number them
   however you like; members and supports just have to reference existing node ids.
 

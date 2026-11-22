@@ -175,10 +175,10 @@ id,node_i,node_j,etype,group,E,A,fy,density
 
 @pytest.mark.parametrize("filename", [
     "transmission_tower_3d.csv",
-    "pratt_truss_2d.csv",
+    "pratt_truss_plane.csv",
     "space_frame_roof_3d.csv",
     "portal_frame_3d.csv",
-    "multibay_frame_2d.csv",
+    "multibay_frame_plane.csv",
 ])
 def test_example_parses_and_solves(filename):
     import numpy as np
@@ -192,6 +192,20 @@ def test_example_parses_and_solves(filename):
     model, member_el_map = build_model(state, state.active_case)
     cache = solve_engine(model, member_el_map, state)
     assert np.all(np.isfinite(cache["displacements"])), f"{filename}: singular"
+
+
+def test_plane_frame_example_bends_about_the_strong_axis_in_its_plane():
+    """The 2-bay frame stands in XZ (Z up): its columns sway on I, not Iy.  The same frame
+    as a 2D model gives 3.8369 mm; lying flat in XY it would bend about Iy (24.8 mm)."""
+    import numpy as np
+    from ui_qt.model_builder import build_model
+    from ui_qt.solve_actions import solve_engine
+
+    state, _ = parse_structlab_csv(EXAMPLES / "multibay_frame_plane.csv")
+    d = np.asarray(solve_engine(*build_model(state, state.active_case), state)["displacements"])
+    d = d.reshape(-1, 6)
+    assert np.abs(d[:, 0]).max() * 1e3 == pytest.approx(3.8369, rel=1e-4)
+    assert np.abs(d[:, 1]).max() == 0.0                   # nothing out of the plane
 
 
 # ── Lecture 37 space frame (converted from the notebook's Vertices/Edges/... files) ──

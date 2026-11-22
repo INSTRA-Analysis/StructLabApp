@@ -1,17 +1,17 @@
-# StructLab CSV - 2D 2-bay x 2-storey moment frame
-# Units: SI. 2D model: all z=0 -> Y is vertical, downward load = Fy<0.
+# StructLab CSV - 2-bay x 2-storey moment frame
+# Units: SI. Plane frame in the XZ plane (y = 0), Z up: downward load = Fz<0.
 # Beam members carry I (bending). HEB220 columns, IPE360 beams.
 #NODES
 id,x,y,z
 1,0,0,0
 2,6,0,0
 3,12,0,0
-4,0,3.5,0
-5,6,3.5,0
-6,12,3.5,0
-7,0,7,0
-8,6,7,0
-9,12,7,0
+4,0,0,3.5
+5,6,0,3.5
+6,12,0,3.5
+7,0,0,7
+8,6,0,7
+9,12,0,7
 #MEMBERS
 id,node_i,node_j,etype,group,E,A,I,Iy,J,fy,density
 1,1,4,beam,Column,2.1e+11,0.009104,8.091e-05,2.843e-05,9.1e-07,3.55e+08,7850
@@ -31,10 +31,10 @@ node,rx,ry,rz
 3,1,1,1
 #FORCES
 node,Fx,Fy,Fz
-4,0,-20000,0
-5,0,-20000,0
-6,0,-20000,0
-7,0,-20000,0
-8,0,-20000,0
-9,0,-20000,0
+4,0,0,-20000
+5,0,0,-20000
+6,0,0,-20000
+7,0,0,-20000
+8,0,0,-20000
+9,0,0,-20000
 7,15000,0,0
