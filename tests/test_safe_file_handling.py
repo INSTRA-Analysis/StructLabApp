@@ -79,6 +79,17 @@ def test_open_asks_before_replacing_unsaved_work(win, tmp_path, monkeypatch, ans
     assert len(win._scene.model_state.nodes) == (4 if replaced else 2)
 
 
+def test_opening_a_model_shows_the_model_workspace(win, tmp_path):
+    """A freshly opened model has no results: leave an empty Results workspace for Model."""
+    other = tmp_path / "other.slab"
+    save_model(_state(3), other)
+    win._show_results_workspace()
+    assert win._workspace == "ws_results"
+    win._is_dirty = False
+    win._open_file(str(other))
+    assert win._workspace == "ws_model"
+
+
 def test_open_does_not_ask_when_nothing_changed(win, tmp_path, monkeypatch):
     from PyQt6.QtWidgets import QMessageBox
     other = tmp_path / "other.slab"

@@ -961,6 +961,7 @@ class MainWindow(QMainWindow):
             self._reset_combo_view()
             self._set_overlay_controls_enabled(False)
             self._view.zoom_to_fit()
+            self._show_model_workspace()
             self._is_dirty = False
             self._filepath = path
             _AUTOSAVE_PATH.unlink(missing_ok=True)
@@ -1006,6 +1007,7 @@ class MainWindow(QMainWindow):
         self._reset_combo_view()
         self._set_overlay_controls_enabled(False)
         self._view.zoom_to_fit()
+        self._show_model_workspace()
         self._is_dirty = False
         self._filepath = None
         self._update_title()
@@ -2026,6 +2028,12 @@ class MainWindow(QMainWindow):
         """After a successful solve, bring up the Results workspace (panels, strip, tab)."""
         from ui_qt.workspaces import WORKSPACES, apply_workspace
         apply_workspace(self, next(w for w in WORKSPACES if w.key == "ws_results"))
+
+    def _show_model_workspace(self) -> None:
+        """A freshly opened / created model has no results: show the Model workspace (it
+        used to stay on an empty Results workspace if that was open)."""
+        from ui_qt.workspaces import WORKSPACES, apply_workspace
+        apply_workspace(self, next(w for w in WORKSPACES if w.key == "ws_model"))
 
     def _on_solve(self) -> None:
         state = self._scene.model_state
