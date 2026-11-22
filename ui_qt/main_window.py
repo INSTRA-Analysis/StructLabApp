@@ -2025,9 +2025,15 @@ class MainWindow(QMainWindow):
         return solve_engine(model, member_el_map, state)
 
     def _show_results_workspace(self) -> None:
-        """After a successful solve, bring up the Results workspace (panels, strip, tab)."""
+        """After a successful solve, bring up the Results workspace (panels, strip, tab).
+
+        Its Results panel narrows the canvas: if the whole model was in view, fit it again
+        (a view the user zoomed into is left alone)."""
         from ui_qt.workspaces import WORKSPACES, apply_workspace
+        was_whole = getattr(self, "_workspace", None) != "ws_results" and self._view.model_in_view()
         apply_workspace(self, next(w for w in WORKSPACES if w.key == "ws_results"))
+        if was_whole:
+            self._view.zoom_to_fit()
 
     def _show_model_workspace(self) -> None:
         """A freshly opened / created model has no results: show the Model workspace (it

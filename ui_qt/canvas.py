@@ -2881,6 +2881,18 @@ class StructView(QGraphicsView):
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._notify_zoom()
 
+    def model_in_view(self) -> bool:
+        """True when every node and member is inside the viewport (diagrams not counted)."""
+        sc = self.scene()
+        items = list(getattr(sc, "_node_items", {}).values()) + \
+            list(getattr(sc, "_member_items", {}).values())
+        if not items:
+            return False
+        rect = items[0].sceneBoundingRect()
+        for item in items[1:]:
+            rect = rect.united(item.sceneBoundingRect())
+        return self.mapToScene(self.viewport().rect()).boundingRect().contains(rect)
+
     def _fit_now(self) -> None:
         rect = self.scene().itemsBoundingRect()
         if rect.isEmpty():
