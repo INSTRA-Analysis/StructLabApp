@@ -921,6 +921,8 @@ class MainWindow(QMainWindow):
         """Open a .slab file by path without showing a file dialog."""
         from ui_qt.io import load_model
         from ui_qt import recent_files as RF
+        if not self._ok_to_replace_model():
+            return
         try:
             state = load_model(path)
             self._load_into_window(state)
@@ -990,28 +992,32 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QDialog
         from ui_qt.wizards import FrameWizardDialog
         dlg = FrameWizardDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result():
+        if (dlg.exec() == QDialog.DialogCode.Accepted and dlg.result()
+                and self._ok_to_replace_model()):
             self._apply_model_state(dlg.result(), "Frame Wizard")
 
     def _on_beam_wizard(self) -> None:
         from PyQt6.QtWidgets import QDialog
         from ui_qt.wizards import BeamWizardDialog
         dlg = BeamWizardDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result():
+        if (dlg.exec() == QDialog.DialogCode.Accepted and dlg.result()
+                and self._ok_to_replace_model()):
             self._apply_model_state(dlg.result(), "Beam Wizard")
 
     def _on_portal_wizard(self) -> None:
         from PyQt6.QtWidgets import QDialog
         from ui_qt.wizards import PortalWizardDialog
         dlg = PortalWizardDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result():
+        if (dlg.exec() == QDialog.DialogCode.Accepted and dlg.result()
+                and self._ok_to_replace_model()):
             self._apply_model_state(dlg.result(), "Portal Frame Wizard")
 
     def _on_truss_wizard(self) -> None:
         from PyQt6.QtWidgets import QDialog
         from ui_qt.wizards import TrussWizardDialog
         dlg = TrussWizardDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result():
+        if (dlg.exec() == QDialog.DialogCode.Accepted and dlg.result()
+                and self._ok_to_replace_model()):
             self._apply_model_state(dlg.result(), "Truss Wizard")
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -2194,9 +2200,15 @@ class MainWindow(QMainWindow):
             return not self._is_dirty  # False if save was cancelled
         return reply == QMessageBox.StandardButton.Discard
 
+    def _ok_to_replace_model(self) -> bool:
+        """True when the current model may be replaced: nothing on the canvas, no unsaved
+        changes, or the user saved / discarded them.  Every path that swaps the model
+        (New, Open, Open Recent, Import CSV, the wizards) asks through here."""
+        return not self._scene.model_state.nodes or self._maybe_save_before_close()
+
     def _on_close_model(self) -> None:
         """Close the current model, returning to the welcome screen."""
-        if self._scene.model_state.nodes and not self._maybe_save_before_close():
+        if not self._ok_to_replace_model():
             return
         self._do_clear_model()
         self._sb.showMessage("Model closed — ready for new project")
@@ -2619,11 +2631,14 @@ class MainWindow(QMainWindow):
 
     def _on_new(self) -> None:
         # Only prompt to save if there's actually a model to lose
-        if self._scene.model_state.nodes and not self._maybe_save_before_close():
+        if not self._ok_to_replace_model():
             return
-        # Route through the same start dialog as first launch, so the 2D/3D
-        # project type is always a deliberate, explicit choice — never
-        # silently inherited from whatever the previous model happened to be.
+        # The user has saved or discarded: clear now, so the start page's own choice (open a
+        # file, a wizard) does not ask again; closing the start page leaves a blank canvas.
+        if self._scene.model_state.nodes:
+            self._do_clear_model()
+        # Route through the same start dialog as first launch, so the project type is always
+        # a deliberate, explicit choice — never inherited from the previous model.
         self._show_welcome()
 
     def _do_clear_model(self) -> None:
@@ -2670,6 +2685,8 @@ class MainWindow(QMainWindow):
                 "No nodes were read — check the file uses the #NODES / #MEMBERS / "
                 "#SUPPORTS / #FORCES section format.",
             )
+            return
+        if not self._ok_to_replace_model():
             return
         self._apply_model_state(state, f"CSV Import: {Path(path).name}")
         if warnings:
