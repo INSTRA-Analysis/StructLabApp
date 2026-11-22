@@ -219,6 +219,61 @@ def lock_force_note(cache) -> str | None:
             "those actions are not in the results. Use Space frame to include them.")
 
 
+# ── Peak moment along a member ────────────────────────────────────────────────
+
+_STATIONS_PER_SUB = 9          # fixed stations per sub-element (ends + midpoint included)
+
+
+def member_moment_peaks(el_ids, res_by_id, el_by_id, load_map
+                        ) -> tuple[float, float, np.ndarray]:
+    """(peak resultant moment, governing signed moment, moments at fixed stations) of one member.
+
+    The moment is evaluated exactly (``bending_profile``) in both bending planes on every
+    sub-element, at fixed stations plus both sides of each point load: the peak is found
+    wherever it is, not only at the member ends (a simply supported beam's ends carry none).
+    The fixed-station array is the same for every load case, so cases can be superposed.
+    """
+    from solver.postprocessor import bending_profile, sample_points
+    stations: list[np.ndarray] = []
+    peak, signed = 0.0, 0.0
+    for el_id in el_ids:
+        res, el = res_by_id[el_id], el_by_id[el_id]
+        loads = load_map.get(el_id, [])
+        planes = ("y", "z") if res.is_3d else ("z",)
+        fixed = np.linspace(0.0, el.length, _STATIONS_PER_SUB)
+        every = sample_points(el.length, loads, _STATIONS_PER_SUB)
+        m_fixed = np.column_stack([bending_profile(res.end_forces, loads, el.length, fixed, p)[1]
+                                   for p in planes])
+        m_every = np.column_stack([bending_profile(res.end_forces, loads, el.length, every, p)[1]
+                                   for p in planes])
+        stations.append(m_fixed)
+        size = np.hypot.reduce(m_every, axis=1) if m_every.shape[1] > 1 else np.abs(m_every[:, 0])
+        k = int(np.argmax(size))
+        if size[k] > peak:
+            row = m_every[k]
+            peak, signed = float(size[k]), float(row[np.argmax(np.abs(row))])
+    return peak, signed, np.vstack(stations)
+
+
+def member_peak_moment(result) -> float:
+    """Largest moment resultant along one member result (N·m), see design_checks.member_forces."""
+    from ui_qt.design_checks import member_forces
+    return member_forces(result)[1]
+
+
+def largest_member_moment(member_results) -> tuple[float, int | None]:
+    """(largest moment along any member in N·m, that member's id) — for the summaries."""
+    best = max(member_results, key=member_peak_moment, default=None)
+    return (member_peak_moment(best), best.element_id) if best is not None else (0.0, None)
+
+
+def peak_from_stations(stations: np.ndarray) -> float:
+    """Largest moment resultant over a (k, planes) station array (e.g. a factored sum)."""
+    if stations.shape[1] > 1:
+        return float(np.hypot(stations[:, 0], stations[:, 1]).max())
+    return float(np.abs(stations[:, 0]).max())
+
+
 # ── Solve engine pipeline ─────────────────────────────────────────────────────
 
 def solve_engine(model, member_el_map, state) -> dict[str, Any]:
@@ -241,6 +296,10 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
     ).compute()
 
     res_by_id = {r.element_id: r for r in sub_results}
+    el_by_id = {el.id: el for el in model.elements}
+    load_map: dict[int, list] = {}
+    for eload in model.element_loads:
+        load_map.setdefault(eload.element_id, []).append(eload)
     member_results = []
     for i, md in enumerate(state.members):
         el_ids = member_el_map[i]
@@ -266,6 +325,9 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
                     last.N_j,  last.V_j,  last.M_j,
                 ])
             ))
+        peaks = member_moment_peaks(el_ids, res_by_id, el_by_id, load_map)
+        member_results[-1].peak_moment, member_results[-1].peak_moment_signed, \
+            member_results[-1].moment_stations = peaks
 
     return {
         'model':          model,

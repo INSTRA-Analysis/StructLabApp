@@ -26,6 +26,14 @@ class ElementResult:
     """
     element_id: int
     end_forces: np.ndarray  # shape (6,) in 2D, (12,) in 3D
+    # Whole-member results (set by solve_engine on the member results; None on sub-elements):
+    #   peak_moment          largest bending-moment resultant anywhere along the member (≥ 0, N·m)
+    #   peak_moment_signed   the governing plane's moment at that point, with its sign
+    #   moment_stations      (k, planes) moments at fixed stations along the member — the same
+    #                        stations for every load case, so case results can be superposed
+    peak_moment: float | None = None
+    peak_moment_signed: float | None = None
+    moment_stations: np.ndarray | None = None
 
     @property
     def is_3d(self) -> bool:

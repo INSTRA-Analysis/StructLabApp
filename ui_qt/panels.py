@@ -1684,8 +1684,9 @@ class ResultsPanel(QWidget):
             col_vals[5].append(Mp_kNm)
             col_vals[7].append(Mm_kNm)
             xL_plus.append(xL_p);    xL_minus.append(xL_m)
-            design_data.append((mid, max(abs(M_plus), abs(M_minus)),
-                               _member_forces(res)[0]))   # sign kept: + = compression
+            n_ed, m_ed = _member_forces(res)          # exact peak along the member, both planes
+            design_data.append((mid, max(m_ed, abs(M_plus), abs(M_minus)),
+                               n_ed))                     # sign kept: + = compression
 
         # Footer Max / Min rows
         if n_members > 0:
@@ -1798,7 +1799,9 @@ class ResultsPanel(QWidget):
             if all_res:
                 N = max((_member_forces(r)[0] for r in all_res), key=abs)
                 V = max((max(r.V_i, r.V_j, key=abs) for r in all_res), key=abs)
-                M = max((max(r.M_i, r.M_j, key=abs) for r in all_res), key=abs)
+                # the moment along the member (a span peak counts, not just the end moments)
+                M = max(((r.peak_moment_signed if r.peak_moment is not None
+                          else max(r.M_i, r.M_j, key=abs)) for r in all_res), key=abs)
             else:
                 N = V = M = 0.0
             self._set_row(self._env_force_table, row, [

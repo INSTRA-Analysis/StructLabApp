@@ -1671,17 +1671,13 @@ class MainWindow(QMainWindow):
             v = self._vertical_dof(dpn)
             max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
             max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
-            max_m = max(
-                (max(abs(r.M_i), abs(r.M_j)) for r in member_results), default=0
-            )
-            max_m_member = max(
-                member_results, key=lambda r: max(abs(r.M_i), abs(r.M_j)), default=None
-            )
+            from ui_qt.solve_actions import largest_member_moment
+            max_m, max_m_member = largest_member_moment(member_results)
             self._sb.showMessage(
                 f"[{combo.limit_state}] {combo.name}  |  "
                 f"Max deflection: {max_dy_mm:.2f} mm (node {max_dy_node.id})  |  "
                 f"Max moment: {max_m/1000:.2f} kN·m "
-                f"(member {max_m_member.element_id if max_m_member else '-'})"
+                f"(member {max_m_member if max_m_member is not None else '-'})"
             )
         except Exception as exc:
             msg = str(exc)
@@ -1805,17 +1801,18 @@ class MainWindow(QMainWindow):
             n_en1990 = len(solve_runs) - len(pattern_solve_runs)
             pattern_governs: list[tuple[int, float, float]] = []
             if pattern_solve_runs:
+                from ui_qt.solve_actions import member_peak_moment
                 en1990_runs = solve_runs[:n_en1990]
                 for md in state.members:
                     full_M = max(
-                        (max(abs(r.M_i), abs(r.M_j))
+                        (member_peak_moment(r)
                          for run in en1990_runs
                          for r in run['member_results']
                          if r.element_id == md.id),
                         default=0.0,
                     )
                     pat_M = max(
-                        (max(abs(r.M_i), abs(r.M_j))
+                        (member_peak_moment(r)
                          for run in pattern_solve_runs
                          for r in run['member_results']
                          if r.element_id == md.id),
@@ -2081,18 +2078,13 @@ class MainWindow(QMainWindow):
             v = self._vertical_dof(dpn)
             max_dy_mm = max((abs(disp[n.id * dpn + v]) * 1000 for n in state.nodes), default=0)
             max_dy_node = max(state.nodes, key=lambda n: abs(disp[n.id * dpn + v]))
-            max_m = max(
-                (max(abs(r.M_i), abs(r.M_j)) for r in member_results),
-                default=0
-            )
-            max_m_member = max(
-                member_results, key=lambda r: max(abs(r.M_i), abs(r.M_j)),
-                default=None
-            )
+            from ui_qt.solve_actions import largest_member_moment
+            max_m, max_m_member = largest_member_moment(member_results)
             summary = (
                 f"Solved  |  "
                 f"Max deflection: {max_dy_mm:.2f} mm (node {max_dy_node.id})  |  "
-                f"Max moment: {max_m/1000:.2f} kN·m (member {max_m_member.element_id if max_m_member else '-'})"
+                f"Max moment: {max_m/1000:.2f} kN·m "
+                f"(member {max_m_member if max_m_member is not None else '-'})"
             )
             from ui_qt.solve_actions import lock_force_note
             note = lock_force_note(cache)          # plane frame: anything the locks absorbed
@@ -2291,10 +2283,8 @@ class MainWindow(QMainWindow):
                 )
                 parts.append(f"δ max: {max_dy:.1f} mm")
             if member_results:
-                max_m = max(
-                    (max(abs(r.M_i), abs(r.M_j)) for r in member_results),
-                    default=0,
-                )
+                from ui_qt.solve_actions import largest_member_moment
+                max_m = largest_member_moment(member_results)[0]
                 parts.append(f"M max: {max_m / 1e3:.1f} kN·m")
 
         self._sb_stats.setText("  |  ".join(parts))

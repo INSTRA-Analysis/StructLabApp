@@ -79,34 +79,48 @@ def apply_section(m: MemberData, sec) -> None:
     m.I_y = sec.I_u if principal else sec.I_v
 
 
-def solve_case_forces(state: ModelState) -> dict[int, np.ndarray]:
-    """End forces of every member (rows in ``state.members`` order) for every load case."""
+ForceSet = tuple[np.ndarray, list[np.ndarray]]
+"""(end forces, one row per member in ``state.members`` order; per member, its moments at the
+fixed stations along it) — both superpose linearly across load cases."""
+
+
+def solve_case_forces(state: ModelState) -> dict[int, ForceSet]:
+    """End forces and station moments of every member for every load case."""
     from ui_qt.model_builder import build_model
     from ui_qt.solve_actions import solve_engine
-    out: dict[int, np.ndarray] = {}
+    out: dict[int, ForceSet] = {}
     for case in state.load_cases:
         model, emap = build_model(state, case)
         cache = solve_engine(model, emap, state)
-        out[case.id] = np.array([r.end_forces for r in cache["member_results"]])
+        out[case.id] = (np.array([r.end_forces for r in cache["member_results"]]),
+                        [r.moment_stations for r in cache["member_results"]])
     return out
 
 
-def combination_forces(state: ModelState, case_forces: dict[int, np.ndarray], combo) -> np.ndarray:
-    """Member end forces of a combination: the factored sum of the case results (the analysis is linear)."""
-    total = None
+def combination_forces(state: ModelState, case_forces: dict[int, ForceSet], combo) -> ForceSet:
+    """End forces and station moments of a combination: the factored sum of the case results
+    (the analysis is linear; the peak along a member is taken after summing)."""
+    ends, stations = None, None
     for cid, factor in combo.factors.items():
         if cid in case_forces and factor:
-            part = factor * case_forces[cid]
-            total = part if total is None else total + part
-    return total if total is not None else np.zeros_like(next(iter(case_forces.values())))
+            e, st = case_forces[cid]
+            if ends is None:
+                ends, stations = factor * e, [factor * s for s in st]
+            else:
+                ends = ends + factor * e
+                stations = [a + factor * s for a, s in zip(stations, st)]
+    if ends is None:
+        e, st = next(iter(case_forces.values()))
+        return np.zeros_like(e), [np.zeros_like(s) for s in st]
+    return ends, stations
 
 
-def group_utilisation(state: ModelState, members: list[MemberData], sec, forces: list[np.ndarray],
+def group_utilisation(state: ModelState, members: list[MemberData], sec, forces: list[ForceSet],
                       lengths: dict[int, float], index: dict[int, int],
                       restraints: dict | None = None) -> tuple[float | None, str, float]:
     """(worst η, governing check, worst slenderness) of ``members`` if they all had ``sec``.
 
-    ``forces`` is one (members × end-forces) array per ULS combination. ``restraints`` (from
+    ``forces`` is one ForceSet (end forces + station moments) per ULS combination. ``restraints`` (from
     ``model_checks.crossing_restraints``) shortens the buckling length of a member that a tension
     member crosses, combination by combination. Returns η None when the section cannot be
     checked for some member (class 4 outstand with ρ < 1)."""
@@ -114,8 +128,9 @@ def group_utilisation(state: ModelState, members: list[MemberData], sec, forces:
     worst, gov, slender = 0.0, "", 0.0
     for m in members:
         has_bending = m.element_type != ElementType.BAR
-        for arr in forces:
-            n, mom = member_forces(SimpleNamespace(end_forces=arr[index[m.id]]))
+        for arr, stations in forces:
+            n, mom = member_forces(SimpleNamespace(end_forces=arr[index[m.id]],
+                                                   moment_stations=stations[index[m.id]]))
             L = lengths[m.id]
             if restraints and m.id in restraints:
                 L = buckling_length(L, restraints[m.id],

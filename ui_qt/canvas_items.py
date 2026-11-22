@@ -156,17 +156,6 @@ _GROUP_PALETTE: list[str] = [
 _group_colour_cache: dict[str, QColor] = {}
 
 
-def simple_utilisation(m: "MemberData", r) -> float:
-    """Section utilisation N/(A·fy) + M/(W_pl·fy) with γM0 = 1.0: no buckling, no interaction
-    factors. This is what the member colouring and the hover tooltip show."""
-    fy = m.fy if m.fy > 1e3 else 275e6
-    n_rd = m.A * fy if m.A > 0 else 1e20
-    m_rd = m.W_pl * fy if m.W_pl > 0 else 0.0
-    eta_n = max(abs(r.N_i), abs(r.N_j)) / n_rd if n_rd > 1e-12 else 0.0
-    eta_m = max(abs(r.M_i), abs(r.M_j)) / m_rd if m_rd > 1e-12 else 0.0
-    return eta_n + eta_m
-
-
 def group_colour(group: str) -> QColor:
     """Return a stable QColor for a member group label (case-insensitive).
 

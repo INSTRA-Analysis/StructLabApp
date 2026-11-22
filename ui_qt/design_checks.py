@@ -300,7 +300,9 @@ def member_forces(result) -> tuple[float, float]:
     The solver reports the axial force on each end with opposite signs (compression positive at
     node i, so the j-end value is −N for a member in compression), so the compression and the
     tension demand are max(N_i, −N_j) and max(−N_i, N_j); the larger governs and keeps its sign.
-    M_Ed is the largest resultant end moment (both bending planes in 3D), in N·m.
+    M_Ed is the largest moment resultant (both bending planes in 3D) ALONG the member, in N·m:
+    ``result.peak_moment`` from the solve, else the peak of ``result.moment_stations`` (a
+    factored sum of cases), else — results built by hand — the larger end moment.
     """
     f = result.end_forces
     if len(f) == 12:
@@ -309,6 +311,13 @@ def member_forces(result) -> tuple[float, float]:
     else:
         n_i, n_j = f[0], f[3]
         m = max(abs(f[2]), abs(f[5]))
+    peak = getattr(result, "peak_moment", None)
+    stations = getattr(result, "moment_stations", None)
+    if peak is not None:
+        m = max(m, peak)
+    elif stations is not None:
+        from ui_qt.solve_actions import peak_from_stations
+        m = max(m, peak_from_stations(stations))
     compression = max(n_i, -n_j)
     tension = max(-n_i, n_j)
     return (compression if compression >= tension else -tension), m
