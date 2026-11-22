@@ -1,0 +1,6 @@
+<!-- StructLab original icon (GPL-3.0, same as the application): a beam and its bending moment diagram -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 9Q12 24 20 9Z" fill="currentColor" fill-opacity="0.3" stroke-width="1.4" />
+  <line x1="2" y1="9" x2="22" y2="9" />
+  <path d="M12 2V6M10.5 4.5L12 6L13.5 4.5" stroke-width="1.6" />
+</svg>

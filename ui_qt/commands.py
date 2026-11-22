@@ -188,9 +188,26 @@ def _make(win, c: Command) -> QAction:
     return act
 
 
+def _module_actions(win) -> dict[str, QAction]:
+    """One action per analysis module (ui_qt/modules.py): it runs the module, or opens its
+    'coming soon' card. Text, icon (in the module's colour) and tooltip come from the registry."""
+    from ui_qt.modules import MODULES, run_module
+    actions: dict[str, QAction] = {}
+    for spec in MODULES:
+        # "&" marks a mnemonic in action text: "Plates & Shells" must be written "&&"
+        act = QAction(icon(spec.icon, spec.hue), spec.title.replace("&", "&&"), win)
+        act.setToolTip(spec.tooltip)
+        act.setStatusTip(spec.tooltip.splitlines()[0])
+        act.triggered.connect(lambda _c=False, k=spec.key: run_module(win, k))
+        win.addAction(act)
+        actions[spec.command_key] = act
+    return actions
+
+
 def build_actions(win) -> dict[str, QAction]:
     """Create every command's QAction on ``win`` and return them by key."""
     actions = {c.key: _make(win, c) for c in COMMANDS}
+    actions.update(_module_actions(win))
 
     group = QActionGroup(win)
     group.setExclusive(True)

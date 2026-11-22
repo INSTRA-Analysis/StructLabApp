@@ -171,6 +171,15 @@ def build_ribbon(win) -> RibbonBar:
     g.add_small(a["ribbon_interface"])
     g.add_small(a["banner_choice"])
 
+    # ── Modules (from ui_qt/modules.py: one group per ribbon_group, in registry order) ──
+    from ui_qt.modules import MODULES
+    modules_tab = bar.add_tab("Modules")
+    groups: dict[str, object] = {}
+    for spec in MODULES:
+        if spec.ribbon_group not in groups:
+            groups[spec.ribbon_group] = modules_tab.add_group(spec.ribbon_group)
+        groups[spec.ribbon_group].add_large(a[spec.command_key])
+
     # ── Tools ─────────────────────────────────────────────────────────────────
     tools = bar.add_tab("Tools")
     g = tools.add_group("Scripting")

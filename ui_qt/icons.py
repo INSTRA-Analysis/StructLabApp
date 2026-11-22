@@ -61,5 +61,16 @@ def icon(name: str, tint: str | None = None) -> QIcon:
     return result
 
 
+def icon_pixmap(name: str, colour: str, size: int, ratio: float = 1.0) -> QPixmap:
+    """``name`` drawn at exactly ``size`` px in ``colour`` (sharp at any size, unlike a QIcon
+    scaled from its 32 px pixmap); empty if the name is unknown."""
+    path = icon_path(name)
+    if path is None:
+        return QPixmap()
+    pm = _pixmap(path.read_text(encoding="utf-8"), colour, round(size * ratio))
+    pm.setDevicePixelRatio(ratio)
+    return pm
+
+
 def icon_size(large: bool) -> QSize:
     return QSize(28, 28) if large else QSize(16, 16)

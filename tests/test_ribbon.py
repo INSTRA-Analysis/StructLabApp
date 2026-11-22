@@ -138,7 +138,7 @@ def test_window_uses_the_ribbon_and_hides_the_menu_bar(qapp, monkeypatch):
     try:
         bar = win._ribbon
         tabs = [bar.tabs.tabText(i) for i in range(bar.tabs.count())]
-        assert tabs == ["Home", "Model", "Loads", "Analysis", "Results", "View", "Tools"]
+        assert tabs == ["Home", "Model", "Loads", "Analysis", "Results", "View", "Modules", "Tools"]
         assert win.menuBar().isHidden()
         assert bar.file_button.menu() is win._file_menu
         # the ribbon's Solve button and the menu's Solve are the same action

@@ -233,6 +233,7 @@ class MainWindow(QMainWindow):
         self._build_edit_menu(mb)
         self._build_selection_menu(mb)
         self._build_tools_menu(mb)
+        self._build_modules_menu(mb)
         self._build_help_menu(mb)
 
         preset_menu = mb.addMenu("Presets")
@@ -531,6 +532,17 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._act["keyboard_shortcuts"])
         help_menu.addSeparator()
         help_menu.addAction(self._act["about"])
+
+    def _build_modules_menu(self, mb) -> None:
+        """Classic menus: the analysis modules (ui_qt/modules.py), grouped by status."""
+        from ui_qt.modules import MODULES
+        menu = mb.addMenu("Modules")
+        section = None
+        for spec in MODULES:
+            if spec.ribbon_group != section:
+                section = spec.ribbon_group
+                menu.addSection(section)
+            menu.addAction(self._act[spec.command_key])
 
     def _build_tools_menu(self, mb) -> None:
         a = self._act
