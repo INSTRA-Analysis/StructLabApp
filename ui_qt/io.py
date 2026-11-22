@@ -12,6 +12,8 @@ ModelState.to_dict() / ModelState.from_dict().
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from ui_qt.model_state import (
@@ -25,10 +27,26 @@ _FILE_VERSION = 3
 
 
 def save_model(state: ModelState, filepath: str | Path) -> None:
-    """Serialize ModelState to a .slab JSON file (version 3)."""
+    """Serialize ModelState to a .slab JSON file (version 3).
+
+    Written to a temporary file beside the target and then swapped in (``os.replace`` is
+    atomic on one volume), so a failed write — disk full, a crash, a sync tool holding the
+    file — leaves the previous version intact instead of a truncated model.
+    """
     data = state.to_dict()
     data["version"] = _FILE_VERSION
-    Path(filepath).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    text = json.dumps(data, indent=2)
+    target = Path(filepath)
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def load_model(filepath: str | Path, keep_2d: bool = False) -> ModelState:
