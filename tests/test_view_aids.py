@@ -218,7 +218,7 @@ def test_validation_issues_name_the_nodes_and_members(qapp):
     assert floating.node_ids == (c.id,)
     zero = next(i for i in issues if "zero length" in i.text)
     assert zero.member_ids == (state.members[1].id,) and set(zero.node_ids) == {b.id, z.id}
-    rollers = next(i for i in issues if i.text.startswith("No PIN or FIXED"))
+    rollers = next(i for i in issues if i.text.startswith("No support restrains translation along X"))
     assert rollers.node_ids == (a.id,)
     errors, _ = validate_model(state)                  # the string API is unchanged
     assert [i.text for i in issues if i.severity == "error"] == errors

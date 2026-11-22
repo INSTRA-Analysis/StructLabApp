@@ -66,7 +66,8 @@ _ETYPE_MAP: dict[str, ElementType] = {
 }
 
 # Translational restraint triple (rx, ry, rz) → support type. Rotations are immaterial
-# for all-BAR (truss) nodes, so a fully restrained node maps cleanly to FIXED.
+# for all-BAR (truss) nodes, so a fully restrained node maps cleanly to FIXED; any other
+# triple is stored as exactly those translational restraints (per-axis flags).
 _SUPPORT_MAP: dict[tuple[int, int, int], SupportType] = {
     (1, 1, 1): SupportType.FIXED,
     (1, 1, 0): SupportType.ROLLER_Z,   # free in Z, restrained in X,Y
@@ -220,16 +221,14 @@ def parse_structlab_csv(path: str | Path) -> tuple[ModelState, list[str]]:
             warnings.append(f"SUPPORTS: node {node_csv} not found — skipped")
             continue
         triple = (rx, ry, rz)
-        sup = _SUPPORT_MAP.get(triple)
-        if sup is None:
-            sup = SupportType.FIXED
-            warnings.append(
-                f"SUPPORTS: node {node_csv} restraint {triple} not directly "
-                f"representable — using FIXED"
-            )
         node = state.get_node(csv_to_internal[node_csv])
-        if node is not None:
+        if node is None:
+            continue
+        sup = _SUPPORT_MAP.get(triple)
+        if sup is not None:
             node.support_type = sup
+        else:                                  # any other set: the translations as given
+            node.set_restraints((bool(rx), bool(ry), bool(rz), False, False, False))
 
     # ── FORCES ─────────────────────────────────────────────────────────────────
     case = state.active_case

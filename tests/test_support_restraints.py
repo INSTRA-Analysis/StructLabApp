@@ -107,6 +107,66 @@ def test_wall_roller_frame_deflects_the_same_in_2d_and_after_switching_to_3d():
     assert cache["displacements"][tip.id * 6 + 2] == pytest.approx(v2d, rel=1e-6)
 
 
+# ── menus, labels, validation, CSV ──────────────────────────────────────────
+
+def test_menu_presets_follow_the_mode():
+    from ui_qt.support_editor import menu_presets
+    two, three = [p for _, p in menu_presets(True)], [p for _, p in menu_presets(False)]
+    assert SupportType.ROLLER_Z not in two and SupportType.ROLLER_Z in three
+    assert two[-1] is three[-1] is SupportType.FREE
+    assert SupportType.CUSTOM not in three and SupportType.SPRING not in three
+
+
+def test_describe_support_names_presets_and_lists_custom_restraints():
+    from ui_qt.model_state import describe_support
+    n = NodeData(id=0, x=0, y=0)
+    n.support_type = SupportType.ROLLER_Y
+    assert describe_support(n) == "Roller, free in Y"
+    n.support_type = SupportType.ROLLER_Z
+    assert describe_support(n, is_2d=True) == "Pinned"          # what 2D actually solves
+    n.set_restraints((True, True, True, False, False, False))
+    n.spring_ktheta = 4e5
+    assert describe_support(n) == "Restrains ux, uy, uz + springs θz"
+    n.spring_ktheta = 0.0
+    n.set_restraints((False, False, False, False, False, True))
+    assert describe_support(n, is_2d=True) == "Restrains θz"
+    n.set_restraints((False,) * 6)
+    assert describe_support(n) == "Free"
+
+
+def _two_rollers(first, second, is_2d=True):
+    s = ModelState()
+    s.analysis_mode = "2D" if is_2d else "3D"
+    a, b, c = s.add_node(0, 0, 0), s.add_node(3, 0, 0), s.add_node(0, 3, 0)
+    s.add_member(a.id, b.id)
+    s.add_member(a.id, c.id)
+    b.support_type, c.support_type = first, second
+    return s
+
+
+def test_validation_accepts_any_supports_that_hold_every_direction():
+    from ui_qt.solve_actions import validate_model
+    errors, _ = validate_model(_two_rollers(SupportType.ROLLER, SupportType.ROLLER_Y))
+    assert not any("restrains translation" in e for e in errors)   # used to demand a pin
+    errors, _ = validate_model(_two_rollers(SupportType.ROLLER, SupportType.ROLLER))
+    assert any(e.startswith("No support restrains translation along X") for e in errors)
+    errors, _ = validate_model(_two_rollers(SupportType.ROLLER, SupportType.ROLLER, is_2d=False))
+    assert any("along X" in e for e in errors) and not any("along X or" in e for e in errors)
+
+
+def test_csv_supports_keep_any_translation_set(tmp_path):
+    from ui_qt.csv_import import parse_structlab_csv
+    path = tmp_path / "m.csv"
+    path.write_text("#NODES\nid,x,y,z\n1,0,0,0\n2,2,0,0\n3,1,0,2\n"
+                    "#MEMBERS\nid,node_i,node_j,etype,group,E,A,fy,density\n"
+                    "1,1,3,bar,D,2e11,0.005,2.75e8,7850\n2,3,2,bar,D,2e11,0.005,2.75e8,7850\n"
+                    "#SUPPORTS\nnode,rx,ry,rz\n1,1,1,1\n2,0,0,1\n", encoding="utf-8")
+    state, warnings = parse_structlab_csv(path)
+    assert warnings == []                                  # was "not representable — using FIXED"
+    held_z_only = state.nodes[1]
+    assert held_z_only.restraints == (False, False, True, False, False, False)
+
+
 # ── files ────────────────────────────────────────────────────────────────────
 
 def test_custom_restraints_round_trip_through_the_file_format():

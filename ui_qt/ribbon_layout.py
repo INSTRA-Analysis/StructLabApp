@@ -30,18 +30,26 @@ def _menu_action(win, text: str, icon_name: str, menu: QMenu, tip: str = "",
 def _supports_menu(win) -> QMenu:
     """Assign a support type to the selected nodes (same as the canvas right-click menu)."""
     from ui_qt.canvas_items import NodeItem
-    from ui_qt.model_state import SupportType
+    from ui_qt.support_editor import menu_presets
     menu = QMenu(win)
-    for label, stype in (("Fixed", SupportType.FIXED), ("Pinned", SupportType.PIN),
-                         ("Roller", SupportType.ROLLER), ("Roller Y", SupportType.ROLLER_Y),
-                         ("Roller Z", SupportType.ROLLER_Z), ("None", SupportType.FREE)):
-        def apply(_checked=False, st=stype) -> None:
-            nodes = [it.node for it in win._scene.selectedItems() if isinstance(it, NodeItem)]
-            if not nodes:
-                win._sb.showMessage("Select one or more nodes first.")
-                return
-            win._view._set_support(nodes, st)
-        menu.addAction(label, apply)
+
+    def apply(stype) -> None:
+        nodes = [it.node for it in win._scene.selectedItems() if isinstance(it, NodeItem)]
+        if not nodes:
+            win._sb.showMessage("Select one or more nodes first.")
+            return
+        win._view._set_support(nodes, stype)
+
+    def fill() -> None:                       # rebuilt on opening: the presets follow 2D / 3D
+        menu.clear()
+        for label, stype in menu_presets(win._scene.model_state.is_2d):
+            menu.addAction(label, lambda st=stype: apply(st))
+        menu.addSeparator()
+        hint = menu.addAction("Per-axis restraints and springs: Properties panel")
+        hint.setEnabled(False)
+
+    menu.aboutToShow.connect(fill)
+    fill()
     return menu
 
 

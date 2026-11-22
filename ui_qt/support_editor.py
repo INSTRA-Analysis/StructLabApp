@@ -33,6 +33,16 @@ _PRESETS_3D = [
     (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
 ]
 _AXIS = ("X", "Y", "Z", "X", "Y", "Z")
+
+
+def menu_presets(is_2d: bool) -> list[tuple[str, SupportType]]:
+    """Presets for the ribbon and right-click "Set Support" menus (same names as the panel).
+
+    Spring and Custom need values or ticks, so they are set in the Properties panel.
+    """
+    rigid = [(text, p) for p, text in (_PRESETS_2D if is_2d else _PRESETS_3D)
+             if p not in (SupportType.FREE, SupportType.SPRING, SupportType.CUSTOM)]
+    return rigid + [("None (free)", SupportType.FREE)]
 _LABEL_2D = {0: "ux →", 1: "uy ↑", 5: "θz"}
 
 

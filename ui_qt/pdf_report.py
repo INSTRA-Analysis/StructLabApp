@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch
 
-from ui_qt.model_state import ModelState, SupportType
+from ui_qt.model_state import ModelState, SupportType, describe_support
 
 # ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -267,13 +267,13 @@ def _page_model(pdf: PdfPages, meta: Any, state: ModelState,
         y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Z (m)", "Support"],
                         [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
                           f"{0.0 if abs(n.z) < 1e-9 else n.z:.3f}",
-                          n.support_type.name]
+                          describe_support(n, is_2d=False)]
                          for n in state.nodes],
                         y)
     else:
         y = _draw_table(fig, ["ID", "X (m)", "Y (m)", "Support"],
                         [[str(n.id), f"{n.x:.3f}", f"{n.y:.3f}",
-                          n.support_type.name]
+                          describe_support(n, is_2d=True)]
                          for n in state.nodes],
                         y)
     y -= 0.018
@@ -443,7 +443,7 @@ def _page_reactions(pdf: PdfPages, meta: Any, state: ModelState,
         comps = [float(reactions[n.id * dpn + k]) for k in range(dpn)]
         for k in range(n_force):
             sums[k] += comps[k]
-        rows.append([str(n.id), n.support_type.name]
+        rows.append([str(n.id), describe_support(n, is_2d=not is_3d)]
                     + [f"{c/1e3:.4f}" for c in comps])
 
     headers = (["Node", "Support", "Rx (kN)", "Ry (kN)", "Rz (kN)",

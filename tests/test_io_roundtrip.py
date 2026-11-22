@@ -251,7 +251,7 @@ def test_validate_model_detects_no_supports():
 
 
 def test_validate_model_detects_only_rollers():
-    """validate_model warns when only ROLLER supports exist (no PIN/FIXED)."""
+    """validate_model flags rollers that all leave X free (nothing holds that direction)."""
     s = ModelState()
     n0 = s.add_node(0.0, 0.0)
     n0.support_type = SupportType.ROLLER
@@ -262,7 +262,7 @@ def test_validate_model_detects_only_rollers():
     m.E, m.A, m.I = 210e9, 0.01, 1e-4
 
     errors, _warnings = validate_model(s)
-    assert any("only ROLLER" in e for e in errors)
+    assert any("No support restrains translation along X" in e for e in errors)
 
 
 def test_validate_model_detects_zero_length():

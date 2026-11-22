@@ -459,6 +459,36 @@ def _set_support_type(self: NodeData, value: SupportType) -> None:
 NodeData.support_type = property(_get_support_type, _set_support_type)
 
 
+_SUPPORT_LABELS = {
+    SupportType.FREE: "Free", SupportType.FIXED: "Fixed", SupportType.PIN: "Pinned",
+    SupportType.ROLLER: "Roller, free in X", SupportType.ROLLER_Y: "Roller, free in Y",
+    SupportType.ROLLER_Z: "Roller, free in Z", SupportType.SPRING: "Spring",
+}
+_PLANAR_LABELS = {(True, True, True): "Fixed", (True, True, False): "Pinned",
+                  (False, True, False): "Roller, free in X", (True, False, False): "Roller, free in Y"}
+
+
+def describe_support(node: NodeData, is_2d: bool = False) -> str:
+    """Readable support label for reports and tooltips, true to the analysis mode.
+
+    2D reads the in-plane restraints (a support that differs only out of plane gets its 2D
+    name); anything without a preset name lists what it restrains, and springs alongside
+    restraints are listed too.
+    """
+    dofs = PLANAR_DOFS if is_2d else tuple(range(6))
+    held = [DOF_NAMES[i] for i in dofs if node.restraints[i]]
+    springs = [DOF_NAMES[i] for i in dofs if getattr(node, SPRING_FOR_DOF[i]) > 0]
+    if not held:
+        return "Spring" if (springs or node.support_type is SupportType.SPRING) else "Free"
+    if is_2d:
+        label = _PLANAR_LABELS.get(tuple(node.restraints[i] for i in PLANAR_DOFS))
+    else:
+        label = _SUPPORT_LABELS.get(node.support_type)
+    if label is None or springs:
+        label = "Restrains " + ", ".join(held)
+    return label + (f" + springs {', '.join(springs)}" if springs else "")
+
+
 def node_from_dict(nd: dict) -> NodeData:
     """A node from its saved form.
 

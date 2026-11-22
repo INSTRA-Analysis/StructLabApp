@@ -3250,15 +3250,8 @@ class StructView(QGraphicsView):
         # ── Set Support (nodes only) ──────────────────────────────────────────
         if nodes:
             sup_menu = menu.addMenu("Set Support")
-            _SUPPORT_LABELS = [
-                ("Fixed",    SupportType.FIXED),
-                ("Pinned",   SupportType.PIN),
-                ("Roller",   SupportType.ROLLER),
-                ("Roller Y", SupportType.ROLLER_Y),
-                ("Roller Z", SupportType.ROLLER_Z),
-                ("None",     SupportType.FREE),
-            ]
-            for label, stype in _SUPPORT_LABELS:
+            from ui_qt.support_editor import menu_presets
+            for label, stype in menu_presets(scene.model_state.is_2d):
                 a = sup_menu.addAction(label)
                 a.triggered.connect(
                     lambda _checked=False, st=stype: self._set_support(nodes, st)

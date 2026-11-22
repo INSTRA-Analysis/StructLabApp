@@ -57,20 +57,22 @@ def validate_model_issues(state) -> list[Issue]:
                       nodes=[n.id for n in floating])
 
     # Support checks
-    from ui_qt.model_state import SupportType
+    from ui_qt.model_state import SPRING_FOR_DOF, SupportType
     supports = [n for n in state.nodes if n.support_type != SupportType.FREE]
     if not supports:
         errors.append("No supports defined — structure is unsupported (will be singular)")
     else:
-        has_pin_or_fixed = any(
-            n.support_type in (SupportType.PIN, SupportType.FIXED)
-            for n in state.nodes
-        )
-        if not has_pin_or_fixed:
+        # Every translation direction must be held somewhere (restraint or spring); judged
+        # from the per-axis restraints, so any mix of rollers and custom supports is fine.
+        axes = (0, 1) if state.is_2d else (0, 1, 2)
+        unheld = ["XYZ"[d] for d in axes
+                  if not any(n.restraints[d] or getattr(n, SPRING_FOR_DOF[d]) > 0 for n in supports)]
+        if unheld:
+            along = " or ".join(unheld)
             errors.append(
-                "No PIN or FIXED support — only ROLLERs found.\n"
-                "Structure cannot resist horizontal forces (likely singular).\n"
-                "Change at least one ROLLER to PIN.",
+                f"No support restrains translation along {along} — the structure can slide "
+                "that way (it will be singular).\n"
+                f"Restrain {along} at one or more supports, for example change a roller to a pin.",
                 nodes=[n.id for n in supports],
             )
 

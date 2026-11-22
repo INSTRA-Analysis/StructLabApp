@@ -300,12 +300,8 @@ class NodeItem(QGraphicsEllipseItem):
             coords = f"x = {n.x:.3f}   y = {n.y:.3f}   z = {n.z:.3f} m"
         else:
             coords = f"x = {n.x:.3f}   y = {n.y:.3f} m"
-        support = n.support_type.name.replace("_", " ").capitalize()
-        if n.support_type == SupportType.CUSTOM:
-            from ui_qt.model_state import DOF_NAMES, PLANAR_DOFS
-            shown = range(6) if _display_3d(self._scene.model_state) else PLANAR_DOFS
-            held = [DOF_NAMES[i] for i in shown if n.restraints[i]]
-            support += f" (restrains {', '.join(held)})" if held else " (springs only)"
+        from ui_qt.model_state import describe_support
+        support = describe_support(n, is_2d=not _display_3d(self._scene.model_state))
         return "\n".join([f"Node {n.id}", coords, f"Support: {support}"] + self._result_lines())
 
     def _result_lines(self) -> list[str]:
