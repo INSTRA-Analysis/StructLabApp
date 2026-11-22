@@ -309,6 +309,8 @@ class SupportType(Enum):
 # physical meaning intact (a wall roller stays free vertically).  The presets below are the
 # same six flags in both modes and reproduce the solver's former per-mode tables exactly.
 DOF_NAMES: tuple[str, ...] = ("ux", "uy", "uz", "θx", "θy", "θz")
+# 3D analysis types -> per-node DOFs the solver holds at every node (core Model.locked_dofs).
+ANALYSIS_TYPES: dict[str, tuple[int, ...]] = {"space": (), "plane_xz": (1, 3, 5)}
 PLANAR_DOFS: tuple[int, ...] = (0, 1, 5)
 _T, _F = True, False
 SUPPORT_PRESETS: dict[SupportType, tuple[bool, ...]] = {
@@ -568,6 +570,9 @@ class ModelState:
     # swaps Y<->Z when toggling so a planar model keeps standing. The legacy boolean
     # `mode_3d` is kept as a property over this field for back-compat.
     analysis_mode: str = field(default="3D")
+    # 3D analysis type: "space" (all six DOFs) or "plane_xz" (a plane frame in an XZ plane:
+    # the solver holds uy, θx, θz at every node — a 2D analysis inside the 3D engine).
+    analysis_type: str = field(default="space")
     _next_node_id: int = field(default=0, repr=False)
     _next_member_id: int = field(default=0, repr=False)
     _next_case_id: int = field(default=1, repr=False)
@@ -814,6 +819,7 @@ class ModelState:
             **({"named_views": self.named_views} if self.named_views else {}),
             **({"crossing_braces": True} if self.crossing_braces else {}),
             "analysis_mode": self.analysis_mode,
+            "analysis_type": self.analysis_type,
             "mode_3d": self.mode_3d,
             "_next_node_id": self._next_node_id,
             "_next_member_id": self._next_member_id,
@@ -880,6 +886,9 @@ class ModelState:
         s._next_member_id = d.get("_next_member_id", len(s.members))
         # Prefer explicit analysis_mode (v4+); else fall back to the legacy
         # mode_3d boolean, or auto-detect 3D from z≠0 for the oldest files.
+        s.analysis_type = d.get("analysis_type", "space")
+        if s.analysis_type not in ANALYSIS_TYPES:
+            s.analysis_type = "space"
         if "analysis_mode" in d:
             s.analysis_mode = d["analysis_mode"]
         else:

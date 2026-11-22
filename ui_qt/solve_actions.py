@@ -154,7 +154,69 @@ def validate_model_issues(state) -> list[Issue]:
                 nodes=oop_nodes, members=oop_members,
             )
 
+    if not state.is_2d and state.analysis_type == "plane_xz" and state.nodes:
+        _check_plane_frame(state, lc, errors, warnings)
+
     return issues
+
+
+# A node counts as in the frame's XZ plane within this distance (m) of the median y.
+_PLANE_TOLERANCE_M = 1e-6
+
+
+def _check_plane_frame(state, lc, errors, warnings) -> None:
+    """Plane frame (XZ): one plane, sections in the plane, loads in the plane."""
+    import math
+    ys = sorted(n.y for n in state.nodes)
+    plane_y = ys[len(ys) // 2]
+    off = [n.id for n in state.nodes if abs(n.y - plane_y) > _PLANE_TOLERANCE_M]
+    if off:
+        errors.append(
+            f"Plane frame (XZ): node(s) {', '.join(map(str, off[:12]))}"
+            f"{' …' if len(off) > 12 else ''} lie outside the frame's plane y = {plane_y:g} m.\n"
+            "A plane frame must lie in one XZ plane. Move them, or switch the analysis "
+            "type to Space frame.",
+            nodes=off,
+        )
+    rolled = [m.id for m in state.members if abs(math.sin(m.beta_angle)) > 1e-9]
+    if rolled:
+        warnings.append(
+            f"Plane frame (XZ): member(s) {', '.join(map(str, rolled[:12]))} have a section "
+            "rotation β other than 0° or 180°, so their in-plane bending uses a mix of the "
+            "strong and weak axes. Set β to 0° unless that is intended.",
+            members=rolled,
+        )
+    oop_nodes = [n.id for n in state.nodes
+                 if (lambda nl: nl.fy != 0.0 or nl.moment_x != 0.0 or nl.moment != 0.0)(
+                     lc.get_node_load(n.id))]
+    oop_members = [mid for mid, ml in lc.member_loads.items()
+                   if any(v != 0.0 for v in ml.net("qy"))]
+    if oop_nodes or oop_members:
+        detail = []
+        if oop_nodes:
+            detail.append("nodal Fy/Mx/Mz at node(s) " + ", ".join(map(str, oop_nodes)))
+        if oop_members:
+            detail.append("'qy' load on member(s) " + ", ".join(map(str, oop_members)))
+        warnings.append(
+            "Plane frame (XZ): out-of-plane load — " + "; ".join(detail) + ".\n"
+            "The plane frame holds uy, θx and θz at every node, so these actions are taken "
+            "by those locks and do NOT reach the structure. Use Space frame to include them.",
+            nodes=oop_nodes, members=oop_members,
+        )
+
+
+def lock_force_note(cache) -> str | None:
+    """After a plane-frame solve: a note if the out-of-plane locks carried real force
+    (anything out of plane that the plane frame did not let act), else None."""
+    lock = cache.get("lock_forces")
+    if lock is None or not np.any(lock):
+        return None
+    worst = float(np.abs(lock).max())
+    scale = max(float(np.abs(cache["reactions"]).max()), 1.0)
+    if worst <= 1e-6 * scale:
+        return None
+    return (f"The plane-frame locks carried up to {worst / 1e3:.3g} kN (or kN·m) out of plane: "
+            "those actions are not in the results. Use Space frame to include them.")
 
 
 # ── Solve engine pipeline ─────────────────────────────────────────────────────

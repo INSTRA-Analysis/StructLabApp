@@ -23,7 +23,7 @@ from elements.frame_element import FrameElement
 from elements.bar_element import BarElement
 
 from ui_qt.model_state import (
-    ModelState, NodeData, SupportType, ElementType,
+    ANALYSIS_TYPES, ModelState, NodeData, SupportType, ElementType,
     LoadCase, NodeLoad, MemberLoad, PointLoadData, PartialDistLoad, DistLoad, LoadCombination,
 )
 
@@ -105,6 +105,8 @@ def build_model(state: ModelState,
     if not has_3d and any(nd.z != 0.0 for nd in state.nodes):
         raise ValueError("A 2D model must lie in the XY plane (z = 0 for every node).")
     model = Model(dimension=dimension)
+    if has_3d:                                  # a plane frame holds its out-of-plane DOFs
+        model.locked_dofs = ANALYSIS_TYPES[state.analysis_type]
 
     # ── UI nodes ──────────────────────────────────────────────────────────────
     node_registry: dict[int, Node] = {}
