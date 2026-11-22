@@ -413,7 +413,7 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
     from solver.postprocessor import Postprocessor, ElementResult
 
     asm = Assembler(model)
-    K = asm.global_stiffness_matrix(model.elements)
+    K = asm.global_stiffness_sparse(model.elements)
     F = asm.global_force_vector(model.elements)
     result = LinearSolver(model).solve(K, F)
     sub_results = Postprocessor(

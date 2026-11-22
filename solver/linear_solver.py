@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import sparse
+from scipy.sparse.linalg import splu
 
 from core.model import Model
 from core.support import SupportType
@@ -89,8 +91,11 @@ class LinearSolver:
         restrained_sorted = sorted(restrained)
         return free, restrained_sorted
 
-    def solve(self, K: np.ndarray, F: np.ndarray) -> SolverResult:
+    def solve(self, K: "np.ndarray | sparse.spmatrix", F: np.ndarray) -> SolverResult:
         """Solve the partitioned system and return displacements and reactions.
+
+        ``K`` may be dense (small models, tests) or sparse (``Assembler.global_stiffness_sparse``,
+        what the application uses): the sparse path factorises K_ff with SuperLU.
 
         Partitions K as:
             [ K_ff  K_fr ] { d_f }   { F_f }
@@ -106,35 +111,44 @@ class LinearSolver:
         zero under statics).
         """
         free_dofs, restrained_dofs = self._classify_dofs()
+        is_sparse = sparse.issparse(K)
+        if is_sparse:
+            K = K.tocsr()
+        diagonal = K.diagonal() if is_sparse else np.diag(K)
 
         # Exclude free DOFs where K diagonal is zero AND applied force is zero.
         # These arise at θ DOFs of nodes connected only to BarElements.
-        active_free = [
-            d for d in free_dofs
-            if abs(K[d, d]) > 1e-14 or abs(F[d]) > 1e-14
-        ]
+        free = np.asarray(free_dofs, dtype=int)
+        keep = (np.abs(diagonal[free]) > 1e-14) | (np.abs(F[free]) > 1e-14) if free.size else free
+        active = free[keep] if free.size else free
+        active_free = active.tolist()
+        F_f = F[active]
 
-        K_ff = K[np.ix_(active_free, active_free)]
-        F_f = F[active_free]
-
-        try:
-            d_f = np.linalg.solve(K_ff, F_f)
-        except np.linalg.LinAlgError as exc:
-            raise UnstableStructureError(
-                "the structure is unstable (check supports, floating nodes, mechanisms)"
-            ) from exc
+        unstable = "the structure is unstable (check supports, floating nodes, mechanisms)"
+        if active.size == 0:
+            d_f = np.zeros(0)
+        elif is_sparse:
+            # Sparse LU: memory and time grow roughly with the DOF count, not its square/cube.
+            K_ff = K[active][:, active].tocsc()
+            try:
+                d_f = splu(K_ff).solve(F_f)
+            except RuntimeError as exc:                   # "Factor is exactly singular"
+                raise UnstableStructureError(unstable) from exc
+        else:
+            try:
+                d_f = np.linalg.solve(K[np.ix_(active, active)], F_f)
+            except np.linalg.LinAlgError as exc:
+                raise UnstableStructureError(unstable) from exc
 
         displacements = np.zeros(self.num_dofs)
-        for i, dof in enumerate(active_free):
-            displacements[dof] = d_f[i]
+        displacements[active] = d_f
         self._check_for_mechanism(displacements)
 
         # True reactions: R = K @ d - F_effective (zero at free DOFs by construction)
         reactions = np.zeros(self.num_dofs)
-        K_rf = K[np.ix_(restrained_dofs, list(range(self.num_dofs)))]
-        r_values = K_rf @ displacements - F[restrained_dofs]
-        for i, dof in enumerate(restrained_dofs):
-            reactions[dof] = r_values[i]
+        if restrained_dofs:
+            K_r = K[restrained_dofs] if is_sparse else K[restrained_dofs, :]
+            reactions[restrained_dofs] = K_r @ displacements - F[restrained_dofs]
 
         # A DOF held only by the model's locks is not a support: its force is reported
         # separately (a support that also restrains it keeps it as a reaction).

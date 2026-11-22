@@ -1,6 +1,7 @@
 """Assembler: builds the global stiffness matrix and load vector from the model."""
 
 import numpy as np
+from scipy import sparse
 
 from core.model import Model
 from elements.frame_element import FrameElement
@@ -17,23 +18,39 @@ class Assembler:
         for element in model.elements:          # every element works in the model's dimension
             element.bind_dimension(self._dpn)
 
-    def global_stiffness_matrix(self, elements: list[FrameElement]) -> np.ndarray:
-        """Assemble and return the (num_dofs × num_dofs) global stiffness matrix.
+    def global_stiffness_sparse(self, elements: list[FrameElement]) -> sparse.csr_matrix:
+        """Assemble the (num_dofs × num_dofs) global stiffness matrix in sparse (CSR) form.
 
-        Includes element stiffness contributions (scatter approach) plus any
-        elastic spring stiffnesses defined on supports (added to K diagonal).
+        Element stiffness contributions are scattered as (row, col, value) triplets — summed
+        where they coincide — plus any elastic spring stiffnesses on supports (diagonal).
+        A frame's K has a few dozen non-zeros per row whatever its size, so this stays small
+        where the dense matrix grows with the square of the DOF count.
         """
-        K = np.zeros((self.num_dofs, self.num_dofs))
+        rows: list[np.ndarray] = []
+        cols: list[np.ndarray] = []
+        vals: list[np.ndarray] = []
         for element in elements:
             k_global = element.global_stiffness_matrix(self._dpn)
-            dofs = element.dof_indices(self._dpn)
-            for i, gi in enumerate(dofs):
-                for j, gj in enumerate(dofs):
-                    K[gi, gj] += k_global[i, j]
+            dofs = np.asarray(element.dof_indices(self._dpn))
+            rows.append(np.repeat(dofs, len(dofs)))
+            cols.append(np.tile(dofs, len(dofs)))
+            vals.append(k_global.ravel())
         for support in self.model.supports:
             for dof, k_spring in support.spring_contributions(self._dpn):
-                K[dof, dof] += k_spring
-        return K
+                rows.append(np.array([dof]))
+                cols.append(np.array([dof]))
+                vals.append(np.array([k_spring]))
+        if not vals:
+            return sparse.csr_matrix((self.num_dofs, self.num_dofs))
+        return sparse.coo_matrix(
+            (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+            shape=(self.num_dofs, self.num_dofs),
+        ).tocsr()                                       # duplicates are summed
+
+    def global_stiffness_matrix(self, elements: list[FrameElement]) -> np.ndarray:
+        """The global stiffness matrix as a dense array (small models, tests, inspection);
+        the application solves with ``global_stiffness_sparse``."""
+        return self.global_stiffness_sparse(elements).toarray()
 
     def global_force_vector(self, elements: list[FrameElement]) -> np.ndarray:
         """Assemble global force vector from nodal loads and element fixed-end forces."""
