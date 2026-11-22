@@ -9,7 +9,9 @@ Regression: the switch used to swap Y and Z (a mirror), which reversed nodal mom
 import pytest
 
 from ui_qt.model_builder import build_model
-from ui_qt.model_state import DistLoad, MemberLoad, ModelState, NodeLoad, SupportType
+from ui_qt.model_state import (
+    DistLoad, MemberLoad, ModelState, NodeLoad, PartialDistLoad, PointLoadData, SupportType,
+)
 from ui_qt.solve_actions import solve_engine
 
 E, A, I = 210e9, 8e-3, 2e-4
@@ -89,6 +91,51 @@ def test_qy_upward_load_still_acts_upward_after_the_switch():
     assert (dl.direction, dl.w_start) == ("qz", -5e3)                  # qz is positive down
     _, c3 = _solve(s)
     assert c3["displacements"][tip.id * 6 + 2] > 0                     # and lifts it in 3D
+
+
+# ── loads in a member's own axes (2D: y 90° anticlockwise; 3D: y upward) ────
+
+def _member_case(start, end, load):
+    s = ModelState()
+    s.analysis_mode = "2D"
+    a, b = s.add_node(*start, 0), s.add_node(*end, 0)
+    a.support_type = SupportType.FIXED
+    m = s.add_member(a.id, b.id)
+    m.E, m.A, m.I, m.I_y, m.J = E, A, I, I, 1e-5
+    s.active_case.set_member_load(m.id, load)
+    return s, b
+
+
+LOCAL = {
+    "w on a column": ((0, 0), (0, 3), MemberLoad(w_start=5e3, w_end=5e3)),
+    "w on a column drawn downward": ((0, 3), (0, 0), MemberLoad(w_start=5e3, w_end=2e3)),
+    "loads on a beam drawn right to left": ((4, 0), (0, 0), MemberLoad(
+        w_start=5e3, w_end=5e3,
+        point_loads=[PointLoadData("FORCE", 0.5, 2e3), PointLoadData("MOMENT", 0.8, 3e3)],
+        partial_loads=[PartialDistLoad(start_pos=0.2, end_pos=0.6, w_start=1e3, w_end=4e3)])),
+    "loads on a beam drawn left to right": ((0, 0), (4, 0), MemberLoad(
+        w_start=5e3, w_end=5e3, point_loads=[PointLoadData("MOMENT", 0.8, 3e3)])),
+}
+
+
+@pytest.mark.parametrize("name", list(LOCAL))
+def test_member_axis_loads_keep_their_direction_through_the_switch(name):
+    start, end, load = LOCAL[name]
+    s, tip = _member_case(start, end, load)
+    _, c2 = _solve(s)
+    s.rotate_axes("3D")
+    s.analysis_mode = "3D"
+    _, c3 = _solve(s)
+    d2, d3 = c2["displacements"], c3["displacements"]
+    scale = abs(d2).max()
+    assert scale > 1e-6
+    ux, uy, thz = d2[tip.id * 3: tip.id * 3 + 3]
+    assert (d3[tip.id * 6], d3[tip.id * 6 + 2], d3[tip.id * 6 + 4]) == pytest.approx(
+        (ux, uy, -thz), abs=1e-9 * scale)
+    s.rotate_axes("2D")
+    s.analysis_mode = "2D"
+    _, back = _solve(s)
+    assert back["displacements"] == pytest.approx(d2, abs=1e-12 * scale)
 
 
 def test_rotate_axes_rejects_an_unknown_mode():

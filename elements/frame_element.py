@@ -129,33 +129,28 @@ class FrameElement:
         The resulting 3×3 rotation matrix R (columns = basis vectors) maps
         local → global:  v_global = R @ v_local.
         """
-        L = self.length
-        x_hat = np.array([self._dx / L, self._dy / L, self._dz / L])
+        # 3×3 rotation: columns are the local axes in global coordinates.
+        self._R3: np.ndarray = self.local_axes_3d(self._dx, self._dy, self._dz, self.beta_angle)
 
-        # Reference: global +Z is "up" (elevation).
-        # We prefer local ŷ to have a positive Z component.
+    @classmethod
+    def local_axes_3d(cls, dx: float, dy: float, dz: float, beta_angle: float = 0.0) -> np.ndarray:
+        """Local axes (columns x̂, ŷ, ẑ) of a 3D member along (dx, dy, dz): ŷ towards +Z (the
+        top of the section faces up), from global X for a (near-)vertical member, then rolled
+        by ``beta_angle`` about x̂.  The single definition of the 3D local-axis convention."""
+        x_hat = np.array([dx, dy, dz], dtype=float)
+        x_hat /= np.linalg.norm(x_hat)
         ref = np.array([0.0, 0.0, 1.0])  # global +Z as "up"
-
-        if abs(np.dot(x_hat, ref)) > self._VERTICAL_THRESHOLD:
+        if abs(np.dot(x_hat, ref)) > cls._VERTICAL_THRESHOLD:
             # Member is (near-)vertical — use global X to define the local y-z plane.
             z_hat = np.cross(x_hat, np.array([1.0, 0.0, 0.0]))
-            z_hat /= np.linalg.norm(z_hat)
-            y_hat = np.cross(z_hat, x_hat)
         else:
             z_hat = np.cross(x_hat, ref)
-            z_hat /= np.linalg.norm(z_hat)
-            y_hat = np.cross(z_hat, x_hat)
-
-        # Apply beta rotation (section orientation about local x-axis).
-        if self.beta_angle != 0.0:
-            cb = math.cos(self.beta_angle)
-            sb = math.sin(self.beta_angle)
-            y_rot = cb * y_hat + sb * z_hat
-            z_rot = -sb * y_hat + cb * z_hat
-            y_hat, z_hat = y_rot, z_rot
-
-        # 3×3 rotation: columns are the local axes in global coordinates.
-        self._R3: np.ndarray = np.column_stack((x_hat, y_hat, z_hat))
+        z_hat /= np.linalg.norm(z_hat)
+        y_hat = np.cross(z_hat, x_hat)
+        if beta_angle != 0.0:
+            cb, sb = math.cos(beta_angle), math.sin(beta_angle)
+            y_hat, z_hat = cb * y_hat + sb * z_hat, -sb * y_hat + cb * z_hat
+        return np.column_stack((x_hat, y_hat, z_hat))
 
     # ── public interface ────────────────────────────────────────────────────
 

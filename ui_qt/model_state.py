@@ -10,9 +10,12 @@ Load architecture (7C):
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Literal
+
+import numpy as np
 
 
 # ── Load primitives ───────────────────────────────────────────────────────────
@@ -607,12 +610,20 @@ class ModelState:
             x, y, z = (x, -z, y) if to_3d else (x, z, -y)
             return x + 0.0, y + 0.0, z + 0.0           # no negative zeros
 
+        # Loads in a member's own axes (w, partial loads, member point forces and moments)
+        # keep their physical direction only if the member's local y does: 2D takes y 90°
+        # anticlockwise from the member, 3D takes it upward, and the two disagree on columns
+        # and on members drawn right to left.  Judged with the model in its 3D axes.
+        if not to_3d:
+            flipped = self._members_with_reversed_local_y()
         for n in self.nodes:
             n.x, n.y, n.z = rot(n.x, n.y, n.z)
             ux, uy, uz, rx, ry, rz = n.restraints
             n.restraints = (ux, uz, uy, rx, rz, ry)
             n.spring_ky, n.spring_kz = n.spring_kz, n.spring_ky
             n.spring_ktheta, n.spring_kry = n.spring_kry, n.spring_ktheta
+        if to_3d:
+            flipped = self._members_with_reversed_local_y()
         # qy (+Y force) and qz (downward = -Z force): to 3D qy' = qz, qz' = -qy;
         # to 2D qy' = -qz, qz' = qy.
         dist_map = ({"qy": ("qz", -1.0), "qz": ("qy", 1.0)} if to_3d
@@ -621,11 +632,39 @@ class ModelState:
             for nl in lc.node_loads.values():
                 nl.fx, nl.fy, nl.fz = rot(nl.fx, nl.fy, nl.fz)
                 nl.moment_x, nl.moment_y, nl.moment = rot(nl.moment_x, nl.moment_y, nl.moment)
-            for ml in lc.member_loads.values():
+            for member_id, ml in lc.member_loads.items():
+                reverse = member_id in flipped
                 for dl in ml.dist_loads:
                     if dl.direction in dist_map:
                         dl.direction, sign = dist_map[dl.direction]
                         dl.w_start, dl.w_end = sign * dl.w_start + 0.0, sign * dl.w_end + 0.0
+                    elif dl.direction == "w" and reverse:
+                        dl.w_start, dl.w_end = -dl.w_start + 0.0, -dl.w_end + 0.0
+                if reverse:
+                    for pdl in ml.partial_loads:
+                        pdl.w_start, pdl.w_end = -pdl.w_start + 0.0, -pdl.w_end + 0.0
+                    for pl in ml.point_loads:
+                        pl.magnitude = -pl.magnitude + 0.0
+
+    def _members_with_reversed_local_y(self) -> set[int]:
+        """Members of a planar model (in its 3D axes, XZ plane) whose 2D local y (90°
+        anticlockwise from the member, mapped into XZ) opposes the 3D local y."""
+        from elements.frame_element import FrameElement
+        out: set[int] = set()
+        for m in self.members:
+            a, b = self.get_node(m.node_i), self.get_node(m.node_j)
+            if a is None or b is None:
+                continue
+            dx, dz = b.x - a.x, b.z - a.z
+            length = math.hypot(dx, dz)
+            if length < 1e-12:
+                continue
+            c, s = dx / length, dz / length
+            y_2d = np.array([-s, 0.0, c])                     # (-sin, cos) in the XZ plane
+            y_3d = FrameElement.local_axes_3d(dx, b.y - a.y, dz, m.beta_angle)[:, 1]
+            if float(y_2d @ y_3d) < 0.0:
+                out.add(m.id)
+        return out
 
     # ── load case accessors ───────────────────────────────────────────────────
 
