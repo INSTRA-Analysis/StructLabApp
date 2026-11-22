@@ -197,11 +197,11 @@ def test_populate_preserves_axial_sign_through_the_full_solve_path(qapp):
 
     panel = ResultsPanel()
     panel.populate(
-        displacements=np.zeros(len(ms.nodes) * 3),
-        reactions=np.zeros(len(ms.nodes) * 3),
+        displacements=np.zeros(len(ms.nodes) * 6),     # the window solves 3D models
+        reactions=np.zeros(len(ms.nodes) * 6),
         member_results=[res],
         model_state=ms,
-        dpn=3,
+        dpn=6,
     )
     tbl = panel._design_table
     checks = [tbl.item(r, 1).text() for r in range(tbl.rowCount())]

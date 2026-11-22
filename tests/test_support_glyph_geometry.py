@@ -46,7 +46,7 @@ def _node(preset=None, flags=None, **springs):
 
 
 def test_restraint_flags_in_3d():
-    f = lambda p: sg.restraint_flags(_node(SupportType[p]), True)
+    f = lambda p: sg.restraint_flags(_node(SupportType[p]))
     assert f("FIXED") == (True,) * 6
     assert f("PIN") == (True, True, True, False, False, False)
     assert f("ROLLER") == (False, True, True, False, False, False)      # free in X
@@ -55,45 +55,29 @@ def test_restraint_flags_in_3d():
     assert f("SPRING") == (False,) * 6
 
 
-def test_restraint_flags_in_2d_and_roller_z_is_a_pin():
-    f = lambda p: sg.restraint_flags(_node(SupportType[p]), False)
-    assert f("FIXED") == (True, True, False, False, False, True)
-    assert f("ROLLER") == (False, True, False, False, False, False)
-    assert f("ROLLER_Y") == (True, False, False, False, False, False)
-    assert f("ROLLER_Z") == f("PIN")                       # the solver restrains X and Y
-    assert sg.bearing_kind(_node(SupportType.ROLLER_Z), False) == "PIN"
-
-
-def test_node_springs_reads_k_theta_and_only_in_plane_springs_in_2d():
+def test_node_springs_reads_k_theta_for_rotation_about_z():
     n = _node(SupportType.SPRING, spring_kx=5.0, spring_ktheta=7.0, spring_kz=9.0)
     assert sg.node_springs(n) == (5.0, 0.0, 9.0, 0.0, 0.0, 7.0)
-    assert sg.node_springs(n, three_d=False) == (5.0, 0.0, 0.0, 0.0, 0.0, 7.0)
 
 
 # ── which symbol: bearing for a preset, markers for anything else ────────────
 
 @pytest.mark.parametrize("preset", ["FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"])
 def test_presets_draw_their_bearing_in_3d(preset):
-    assert sg.bearing_kind(_node(SupportType[preset]), True) == preset
+    assert sg.bearing_kind(_node(SupportType[preset])) == preset
 
 
 def test_custom_supports_draw_restraint_markers():
     only_rz = _node(flags=(False, False, False, False, False, True))
-    assert sg.bearing_kind(only_rz, True) is None and sg.bearing_kind(only_rz, False) is None
+    assert sg.bearing_kind(only_rz) is None
     pin_spring = _node(SupportType.PIN, spring_ktheta=4e5)
     pin_spring.set_restraints((True, True, True, False, False, False))
     assert pin_spring.support_type is SupportType.CUSTOM
-    assert sg.bearing_kind(pin_spring, True) is None
+    assert sg.bearing_kind(pin_spring) is None
     cam = sg.Camera.from_angles(-45, 30)
-    ops = sg.support_ops(pin_spring, True, cam, restraints_view=False)
+    ops = sg.support_ops(pin_spring, cam, restraints_view=False)
     axis_fills = {op.fill.name() for op in ops if op.fill is not None}
     assert axis_fills and sg.SUPPORT not in axis_fills         # axis-coloured markers
-
-
-def test_a_support_differing_only_out_of_plane_keeps_its_2d_bearing():
-    n = _node(flags=(False, True, False, False, False, False))  # 2D roller without the uz hold
-    assert n.support_type is SupportType.CUSTOM
-    assert sg.bearing_kind(n, False) == "ROLLER"
 
 
 # ── camera, shading, culling ────────────────────────────────────────────────
@@ -162,23 +146,24 @@ class _FakeScene:
         pass
 
 
-def _node_item(kind, three_d):
+def _node_item(kind, analysis_type="space"):
     from ui_qt.canvas_items import NodeItem
-    ms = ModelState(nodes=[NodeData(id=0, x=1.0, y=2.0, z=4.0 if three_d else 0.0)])
-    ms.analysis_mode = "3D" if three_d else "2D"
+    ms = ModelState(nodes=[NodeData(id=0, x=1.0, y=0.0, z=4.0)])
+    ms.analysis_type = analysis_type
     ms.nodes[0].support_type = SupportType[kind]
     return NodeItem(ms.nodes[0], _FakeScene(ms))
 
 
 @pytest.mark.parametrize("kind", ALL)
-@pytest.mark.parametrize("three_d, az, el", [(False, -45, 30), (True, -45, 30), (True, -15, 60),
-                                             (True, -80, 10), (True, 120, -20)])
+@pytest.mark.parametrize("analysis_type, az, el", [
+    ("space", -45, 30), ("space", -15, 60), ("space", -80, 10), ("space", 120, -20),
+    ("plane_xz", 0, 2), ("plane_xz", -45, 30)])
 @pytest.mark.parametrize("restraints", [False, True])
-def test_every_support_draws_one_glyph_item(qapp, kind, three_d, az, el, restraints):
+def test_every_support_draws_one_glyph_item(qapp, kind, analysis_type, az, el, restraints):
     from ui_qt.canvas_items import SupportGlyphItem, set_show_restraints
     _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION = az, el
     set_show_restraints(restraints)
-    item = _node_item(kind, three_d)
+    item = _node_item(kind, analysis_type)
     assert len(item._support_items) == 1
     glyph = item._support_items[0]
     assert isinstance(glyph, SupportGlyphItem) and glyph.parentItem() is item

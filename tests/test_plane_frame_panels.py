@@ -29,7 +29,7 @@ def _state(kind):
     return s
 
 
-@pytest.mark.parametrize("kind", ["2d", "plane", "space"])
+@pytest.mark.parametrize("kind", ["plane", "space"])
 def test_support_layout_of_a_model(kind):
     assert support_layout(_state(kind)) == kind
     assert support_layout(None) == "space"
@@ -85,16 +85,6 @@ def test_node_form_shows_x_z_and_in_plane_loads(qapp):
     form._apply()
     nl = lc.get_node_load(3)
     assert nl.fz == -8e3 and nl.fy == 7.0                          # hidden Fy kept
-
-
-def test_2d_vertical_load_label_points_up(qapp):
-    """fy is positive upward: the label used to show ↓."""
-    from PyQt6.QtWidgets import QFormLayout, QGroupBox
-    from ui_qt.panels import _NodeForm
-    form = _NodeForm(NodeData(id=0, x=0, y=0), LoadCase(id=0, name="G", category="G"),
-                     on_apply=lambda: None, layout="2d")
-    box = next(b for b in form.findChildren(QGroupBox) if b.title().startswith("Applied load"))
-    assert box.layout().itemAt(1, QFormLayout.ItemRole.LabelRole).widget().text() == "Fy (kN) ↑:"
 
 
 def test_multi_node_form_uses_the_plane_layout(qapp):

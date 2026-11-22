@@ -17,9 +17,9 @@ def qapp():
     yield app
 
 
-def _editor(nodes, is_2d=False):
+def _editor(nodes, layout="space"):
     from ui_qt.support_editor import SupportEditor
-    return SupportEditor(nodes, is_2d)
+    return SupportEditor(nodes, layout)
 
 
 def _choose(ed, preset):
@@ -47,22 +47,6 @@ def test_ticking_a_box_selects_the_matching_preset_or_custom(qapp):
     assert ed.preset() is SupportType.FIXED
     ed.apply_to(node)
     assert node.restraints == (True,) * 6
-
-
-def test_2d_shows_the_in_plane_freedoms_and_keeps_out_of_plane_restraints(qapp):
-    node = NodeData(id=0, x=0, y=0)
-    ed = _editor([node], is_2d=True)
-    assert sorted(ed.boxes) == [0, 1, 5]
-    assert ed.combo.findData(SupportType.ROLLER_Z) == -1         # not a distinct preset in 2D
-    _choose(ed, SupportType.ROLLER_Y)                            # wall roller, free vertically
-    ed.apply_to(node)
-    assert node.restraints == SUPPORT_PRESETS[SupportType.ROLLER_Y]
-    ed2 = _editor([node], is_2d=True)
-    ed2.boxes[0].setChecked(False)
-    ed2.boxes[5].setChecked(True)                               # only theta_z
-    ed2.apply_to(node)
-    assert node.restraints == (False, False, False, False, False, True)
-    assert node.support_type is SupportType.CUSTOM
 
 
 def test_pin_with_a_rotational_spring_is_custom_and_reaches_the_solver(qapp):

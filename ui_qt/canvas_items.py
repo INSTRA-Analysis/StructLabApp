@@ -398,7 +398,7 @@ class NodeItem(QGraphicsEllipseItem):
         ms = self._scene.model_state
         elevation = (sg.elevation_side(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION)
                      if ms.analysis_type == "plane_xz" else 0)   # 2D symbols, front view
-        ops = sg.support_ops(self.node, True, cam, _SHOW_RESTRAINTS, elevation)
+        ops = sg.support_ops(self.node, cam, _SHOW_RESTRAINTS, elevation)
         if ops:
             self._support_items.append(SupportGlyphItem(ops, self))
 

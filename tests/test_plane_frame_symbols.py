@@ -37,7 +37,7 @@ def test_front_view_draws_the_2d_symbol(qapp, preset, kind_2d):
     node = NodeData(id=0, x=0, y=0)
     node.support_type = preset
     cam = sg.Camera.from_angles(0.0, 2.0)
-    ops = sg.support_ops(node, True, cam, False, elevation=1)
+    ops = sg.support_ops(node, cam, False, elevation=1)
     assert _rects(ops) == _rects(sg.drawing_ops_2d(kind_2d))
 
 
@@ -45,8 +45,8 @@ def test_back_view_is_the_mirror_image(qapp):
     node = NodeData(id=0, x=0, y=0)
     node.support_type = SupportType.ROLLER_Z            # wall roller: drawn to one side
     cam = sg.Camera.from_angles(180.0, 2.0)
-    front = _rects(sg.support_ops(node, True, cam, False, elevation=1))
-    back = _rects(sg.support_ops(node, True, cam, False, elevation=-1))
+    front = _rects(sg.support_ops(node, cam, False, elevation=1))
+    back = _rects(sg.support_ops(node, cam, False, elevation=-1))
     assert [(-r.right(), r.top()) for r in front] == pytest.approx([(r.left(), r.top()) for r in back])
 
 
@@ -55,11 +55,11 @@ def test_springs_and_restraint_view_map_to_the_plane(qapp):
     node.support_type = SupportType.SPRING
     node.spring_kz, node.spring_kry = 2e6, 5e5            # vertical + rotation in the plane
     cam = sg.Camera.from_angles(0.0, 2.0)
-    ops = sg.support_ops(node, True, cam, False, elevation=1)
+    ops = sg.support_ops(node, cam, False, elevation=1)
     assert _rects(ops) == _rects(sg.drawing_ops_2d("SPRING", (0, 2e6, 0, 0, 0, 5e5)))
     pin = NodeData(id=1, x=0, y=0)
     pin.support_type = SupportType.PIN
-    markers = sg.support_ops(pin, True, cam, True, elevation=1)
+    markers = sg.support_ops(pin, cam, True, elevation=1)
     assert _rects(markers) == _rects(sg.restraint_ops_2d((True, True, False, False, False, False)))
 
 

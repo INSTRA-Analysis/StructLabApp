@@ -198,8 +198,8 @@ _DL_DIRS = [
 
 class _NodeForm(QWidget):
     """One node: coordinates, support and applied load, showing the freedoms that exist for
-    the model: a 2D model (x, y; Fx, Fy, M), a plane frame in XZ (x, z; Fx, Fz, My, with y
-    shown as the frame's plane) or a space frame (all of them)."""
+    the model: a plane frame in XZ (x, z; Fx, Fz, My, with y shown as the frame's plane) or a
+    space frame (all of them)."""
 
     def __init__(self, node: NodeData, load_case: LoadCase | None,
                  on_apply, layout: str = "space") -> None:
@@ -208,7 +208,7 @@ class _NodeForm(QWidget):
         self._load_case = load_case
         self._on_apply  = on_apply
         self._layout    = layout
-        is_2d, plane = layout == "2d", layout == "plane"
+        plane = layout == "plane"
         box_layout = QVBoxLayout(self)
         box_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -227,9 +227,8 @@ class _NodeForm(QWidget):
             self._y.setToolTip("The plane frame lies in the XZ plane at this y.")
             form.addRow("y (m), frame plane:", self._y)
         else:
-            form.addRow("y (m) ↑:" if is_2d else "y (m):", self._y)
-            if not is_2d:
-                form.addRow("z (m):", self._z)
+            form.addRow("y (m):", self._y)
+            form.addRow("z (m):", self._z)
         box_layout.addWidget(coord_box)
 
         # ── support: preset + per-axis restraints + springs ───────────────────
@@ -250,12 +249,7 @@ class _NodeForm(QWidget):
         self._my = _spin(nl.moment_y / 1e3, -1e6, 1e6, 1)
         # Arrows show the positive direction (an upward force is positive; enter a negative
         # value for a downward one).  Hidden components keep their values on Apply.
-        if is_2d:
-            # 2D-XY: in-plane only — horizontal Fx, vertical Fy (Y up), moment.
-            lf.addRow("Fx (kN) →:", self._fx)
-            lf.addRow("Fy (kN) ↑:", self._fy)
-            lf.addRow("M (kN·m):",  self._m)
-        elif plane:
+        if plane:
             # Plane frame (XZ, Z up): in-plane only — Fx, vertical Fz, moment about Y.
             lf.addRow("Fx (kN) →:", self._fx)
             lf.addRow("Fz (kN) ↑:", self._fz)
@@ -1456,8 +1450,7 @@ class _MultiNodeForm(QWidget):
         self._m  = _spin(first_nl.moment / 1e3, -1e6, 1e6, 1)
         self._mx = _spin(first_nl.moment_x / 1e3, -1e6, 1e6, 1)
         self._my = _spin(first_nl.moment_y / 1e3, -1e6, 1e6, 1)
-        rows = {"2d": [("Fx (kN) →:", self._fx), ("Fy (kN) ↑:", self._fy), ("M (kN·m):", self._m)],
-                "plane": [("Fx (kN) →:", self._fx), ("Fz (kN) ↑:", self._fz),
+        rows = {"plane": [("Fx (kN) →:", self._fx), ("Fz (kN) ↑:", self._fz),
                           ("My (kN·m):", self._my)]}.get(kind)
         for text, spin in rows or [("Fx (kN):", self._fx), ("Fy (kN):", self._fy),
                                    ("Fz (kN):", self._fz), ("Mz (kN·m):", self._m),
@@ -1579,7 +1572,6 @@ class ResultsPanel(QWidget):
     # (DOF index, displacement header, reaction header) per layout.  A plane frame shows its
     # in-plane freedoms only: its locked uy, θx, θz are always zero.
     _DOF_COLUMNS = {
-        "2d": [(0, "dx (mm)", "Fx (kN)"), (1, "dy (mm)", "Fy (kN)"), (2, "θ (mrad)", "M (kN·m)")],
         "plane": [(0, "dx (mm)", "Fx (kN)"), (2, "dz (mm)", "Fz (kN)"), (4, "θy (mrad)", "My (kN·m)")],
         "space": [(0, "dx (mm)", "Fx (kN)"), (1, "dy (mm)", "Fy (kN)"), (2, "dz (mm)", "Fz (kN)"),
                   (3, "θx (mrad)", "Mx (kN·m)"), (4, "θy (mrad)", "My (kN·m)"),
@@ -1588,21 +1580,17 @@ class ResultsPanel(QWidget):
 
     def _configure_dof_tables(self, dpn: int, model_state=None) -> None:
         """Columns of the displacement and reaction tables: the DOFs of the model's layout."""
-        if dpn == 3:
-            layout = "2d"
-        else:
-            from ui_qt.support_editor import support_layout
-            layout = "plane" if support_layout(model_state) == "plane" else "space"
-        self._dof_cols = self._DOF_COLUMNS[layout]
+        from ui_qt.support_editor import support_layout
+        self._dof_cols = self._DOF_COLUMNS[support_layout(model_state)]
         for table, k in ((self._disp_table, 1), (self._react_table, 2)):
             table.setColumnCount(len(self._dof_cols) + 1)
             table.setHorizontalHeaderLabels(["Node"] + [c[k] for c in self._dof_cols])
 
     def populate(self, displacements, reactions, member_results, model_state,
-                 dpn: int = 3, **kwargs) -> None:
+                 dpn: int = 6, **kwargs) -> None:
         """Fill all three tables with solver results and rebuild row→ID maps.
 
-        dpn: degrees of freedom per node — 3 for 2D models, 6 for 3D models.
+        dpn: degrees of freedom per node (6: the window solves 3D models).
         kwargs: sub_results, member_el_map — used for peak moment scanning.
         """
         self._restore_force_tab()
@@ -1735,14 +1723,14 @@ class ResultsPanel(QWidget):
     # Separate table used for envelope member forces (3 columns, not 6)
     _env_force_table: "QTableWidget | None" = None
 
-    def populate_envelope(self, solve_runs: list, model_state, dpn: int = 3) -> None:
+    def populate_envelope(self, solve_runs: list, model_state, dpn: int = 6) -> None:
         """Fill all three tables with envelope values (max absolute across all runs).
 
         Member forces tab is replaced by a simplified 4-column table
         (max|N|, max|V|, max|M| across both ends) so it stays readable
         in a narrow panel.  Sign is preserved (governs for tension/compression).
 
-        dpn: degrees of freedom per node — 3 for 2D models, 6 for 3D models.
+        dpn: degrees of freedom per node (6: the window solves 3D models).
         """
         from ui_qt.model_state import SupportType as _ST
 

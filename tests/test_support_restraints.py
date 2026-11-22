@@ -111,10 +111,11 @@ def test_wall_roller_frame_deflects_the_same_in_2d_and_after_switching_to_3d():
 
 def test_menu_presets_follow_the_mode():
     from ui_qt.support_editor import menu_presets
-    two, three = [p for _, p in menu_presets(True)], [p for _, p in menu_presets(False)]
-    assert SupportType.ROLLER_Z not in two and SupportType.ROLLER_Z in three
-    assert two[-1] is three[-1] is SupportType.FREE
-    assert SupportType.CUSTOM not in three and SupportType.SPRING not in three
+    plane, space = [p for _, p in menu_presets("plane")], [p for _, p in menu_presets("space")]
+    assert SupportType.ROLLER_Y not in plane and SupportType.ROLLER_Y in space
+    assert SupportType.ROLLER_Z in plane and SupportType.ROLLER_Z in space
+    assert plane[-1] is space[-1] is SupportType.FREE
+    assert SupportType.CUSTOM not in space and SupportType.SPRING not in space
 
 
 def test_describe_support_names_presets_and_lists_custom_restraints():

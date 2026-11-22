@@ -70,45 +70,35 @@ class DrawOp:
 
 # ── which DOFs a node's support restrains (from the solver's own table) ─────
 
-def restraint_flags(node, three_d: bool) -> tuple[bool, ...]:
+def restraint_flags(node) -> tuple[bool, ...]:
     """(ux, uy, uz, θx, θy, θz) the solver restrains at ``node``.
 
     Read through ``core.Support.restrained_dofs`` with the node's own flags, so the drawing
-    can never disagree with the analysis.  In 2D only ux, uy and θz exist; the other three are
-    reported False.
+    can never disagree with the analysis.
     """
     from core.support import Support, SupportType as CoreType
-    dpn = 6 if three_d else 3
     dofs = set(Support(node_id=0, support_type=CoreType.FREE,
-                       restrained=tuple(node.restraints)).restrained_dofs(dpn))
-    if three_d:
-        return tuple(i in dofs for i in range(6))
-    return (0 in dofs, 1 in dofs, False, False, False, 2 in dofs)
+                       restrained=tuple(node.restraints)).restrained_dofs(6))
+    return tuple(i in dofs for i in range(6))
 
 
-# Bearing symbol for each in-plane restraint set (ux, uy, θz) in 2D.
+# 2D drawing-office symbol for each in-plane restraint set (ux, vertical, rotation), as a plane
+# frame shows it in elevation.
 _PLANAR_KIND = {(True, True, True): "FIXED", (True, True, False): "PIN",
                 (False, True, False): "ROLLER", (True, False, False): "ROLLER_Y"}
 _SPACE_KIND = {"FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"}
 
 
-def bearing_kind(node, three_d: bool) -> str | None:
-    """The bearing symbol for ``node``, or None when only restraint markers describe it.
-
-    3D: the preset the node's flags match.  2D: the in-plane restraints, so a support that
-    only differs out of plane still draws as its 2D bearing.  Springs together with
-    restraints, and any unusual set (only θz held, say), have no bearing: markers are drawn.
-    """
-    flags = restraint_flags(node, three_d)
-    springs = node_springs(node, three_d)
-    if three_d:
-        kind = node.support_type.name
-        return kind if kind in _SPACE_KIND else None
-    return _planar_kind(flags, springs, node.support_type.name == "SPRING")
+def bearing_kind(node) -> str | None:
+    """The 3D bearing for ``node`` (the preset its flags match), or None when only restraint
+    markers describe it: springs together with restraints, or an unusual set."""
+    kind = node.support_type.name
+    return kind if kind in _SPACE_KIND else None
 
 
 def _planar_kind(flags: tuple[bool, ...], springs: tuple[float, ...], spring_preset: bool) -> str | None:
-    """2D bearing for in-plane restraints (ux, uy, θz in the 2D layout), None for markers."""
+    """Drawing-office bearing for in-plane restraints given as (ux, vertical, ., ., ., rotation),
+    None for markers."""
     planar = (flags[0], flags[1], flags[5])
     if not any(planar):
         return "SPRING" if (any(springs) or spring_preset) else None
@@ -132,8 +122,8 @@ def elevation_side(azimuth_deg: float, elevation_deg: float) -> int:
 
 def _planar_ops(flags: tuple[bool, ...], springs: tuple[float, ...], restraints_view: bool,
                 spring_preset: bool) -> list[DrawOp]:
-    """2D drawing-office symbol (or 2D restraint markers) for in-plane restraints given in the
-    2D layout (ux, uy = vertical, θz) — used by 2D models and by plane frames in elevation."""
+    """Drawing-office symbol (or 2D restraint markers) for in-plane restraints given as
+    (ux, vertical, ., ., ., rotation): a plane frame seen in elevation."""
     if not any(flags) and not any(springs) and not spring_preset:
         return []
     kind = None if restraints_view else _planar_kind(flags, springs, spring_preset)
@@ -144,8 +134,7 @@ def _planar_ops(flags: tuple[bool, ...], springs: tuple[float, ...], restraints_
     return drawing_ops_2d(kind, springs)
 
 
-def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool,
-                elevation: int = 0) -> list[DrawOp]:
+def support_ops(node, cam: "Camera", restraints_view: bool, elevation: int = 0) -> list[DrawOp]:
     """Everything drawn at a supported node: its bearing, or restraint markers when asked for
     (View > Show Restraints) or when no bearing fits its restraints.
 
@@ -153,11 +142,8 @@ def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool
     symbols: its (ux, uz, θy) are the 2D (ux, uy, θz) on screen, mirrored from the back.
     """
     spring_preset = node.support_type.name == "SPRING"
-    if not three_d:
-        return _planar_ops(restraint_flags(node, False), node_springs(node, False),
-                           restraints_view, spring_preset)
-    flags = restraint_flags(node, three_d)
-    springs = node_springs(node, three_d)
+    flags = restraint_flags(node)
+    springs = node_springs(node)
     if elevation:
         f2 = (flags[0], flags[2], False, False, False, flags[4])
         s2 = (springs[0], springs[2], 0.0, 0.0, 0.0, springs[4])
@@ -165,23 +151,16 @@ def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool
         return _mirrored(ops) if elevation < 0 else ops
     if not any(flags) and not any(springs) and not spring_preset:
         return []
-    kind = None if restraints_view else bearing_kind(node, three_d)
+    kind = None if restraints_view else bearing_kind(node)
     if kind is None:
         if not any(springs) and not any(flags):          # a spring support with no k typed yet:
-            springs = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0) if three_d else (0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
-        if three_d:
-            return glyph_ops(restraint_glyph(flags, springs), cam)
-        return restraint_ops_2d(flags, springs)
-    if three_d:
-        return glyph_ops(bearing_glyph(kind, cam, springs), cam)
-    return drawing_ops_2d(kind, springs)
+            springs = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
+        return glyph_ops(restraint_glyph(flags, springs), cam)
+    return glyph_ops(bearing_glyph(kind, cam, springs), cam)
 
 
-def node_springs(node, three_d: bool = True) -> tuple[float, ...]:
-    """(kx, ky, kz, krx, kry, kθz) as the solver reads them (θz from k_theta); in 2D only the
-    in-plane springs (kx, ky, kθz) act."""
-    if not three_d:
-        return (node.spring_kx, node.spring_ky, 0.0, 0.0, 0.0, node.spring_ktheta)
+def node_springs(node) -> tuple[float, ...]:
+    """(kx, ky, kz, krx, kry, kθz) as the solver reads them (θz from k_theta)."""
     return (node.spring_kx, node.spring_ky, node.spring_kz,
             node.spring_krx, node.spring_kry, node.spring_ktheta)
 

@@ -1,9 +1,10 @@
 """Support editor for the Properties panel: a preset plus per-axis restraints and springs.
 
 The preset combo (Free, Fixed, Pinned, rollers, Spring, Custom) is a shortcut that ticks the
-restraint boxes; ticking boxes yourself selects the matching preset, or Custom.  2D shows the
-in-plane freedoms (ux, uy, θz) and keeps sensible out-of-plane restraints for a later switch
-to 3D (``model_state.planar_restraints``); 3D shows all six.  A spring stiffness can be given
+restraint boxes; ticking boxes yourself selects the matching preset, or Custom.  A plane
+frame shows its in-plane freedoms (ux, uz, θy) and keeps sensible out-of-plane restraints for a
+later change to a space frame (``plane_frame_restraints``); a space frame shows all six.  A spring
+stiffness can be given
 on any free DOF.  Edits are written only when the support was actually changed, so editing a
 selection's loads never overwrites different supports.
 """
@@ -16,16 +17,9 @@ from PyQt6.QtWidgets import (
 )
 
 from ui_qt.model_state import (
-    DOF_NAMES, PLANAR_DOFS, SPRING_FOR_DOF, SUPPORT_PRESETS, NodeData, SupportType,
-    classify_support, planar_restraints,
+    DOF_NAMES, SPRING_FOR_DOF, SUPPORT_PRESETS, NodeData, SupportType, classify_support,
 )
 
-_PRESETS_2D = [
-    (SupportType.FREE, "Free"), (SupportType.FIXED, "Fixed"), (SupportType.PIN, "Pinned"),
-    (SupportType.ROLLER, "Roller, free in X (horizontal)"),
-    (SupportType.ROLLER_Y, "Roller, free in Y (vertical)"),
-    (SupportType.SPRING, "Spring"), (SupportType.CUSTOM, "Custom"),
-]
 _PRESETS_3D = [
     (SupportType.FREE, "Free"), (SupportType.FIXED, "Fixed"), (SupportType.PIN, "Pinned"),
     (SupportType.ROLLER, "Roller, free in X"), (SupportType.ROLLER_Y, "Roller, free in Y"),
@@ -40,25 +34,16 @@ _PRESETS_PLANE = [
 ]
 _AXIS = ("X", "Y", "Z", "X", "Y", "Z")
 
-# Three layouts: a 2D model (XY, Y up), a plane frame in XZ (Z up; uy, θx, θz locked) and a
-# space frame.  Each shows only the DOFs that exist for it.
-LAYOUT_DOFS = {"2d": PLANAR_DOFS, "plane": (0, 2, 4), "space": tuple(range(6))}
-_LABELS = {"2d": {0: "ux →", 1: "uy ↑", 5: "θz"}, "plane": {0: "ux →", 2: "uz ↑", 4: "θy"}}
-_LAYOUT_PRESETS = {"2d": _PRESETS_2D, "plane": _PRESETS_PLANE, "space": _PRESETS_3D}
+# Two layouts: a plane frame in XZ (Z up; uy, θx, θz locked) and a space frame.  Each shows
+# only the DOFs that exist for it.
+LAYOUT_DOFS = {"plane": (0, 2, 4), "space": tuple(range(6))}
+_LABELS = {"plane": {0: "ux →", 2: "uz ↑", 4: "θy"}}
+_LAYOUT_PRESETS = {"plane": _PRESETS_PLANE, "space": _PRESETS_3D}
 
 
 def support_layout(state) -> str:
-    """'2d', 'plane' (a 3D plane frame) or 'space' for a ModelState."""
-    if state is None or not state.mode_3d:
-        return "2d" if state is not None and state.is_2d else "space"
-    return "plane" if state.analysis_type == "plane_xz" else "space"
-
-
-def _layout(value) -> str:
-    """Accept a layout name, or the older is_2d flag."""
-    if isinstance(value, bool):
-        return "2d" if value else "space"
-    return value
+    """'plane' for a plane frame, else 'space'."""
+    return "plane" if state is not None and state.analysis_type == "plane_xz" else "space"
 
 
 def plane_frame_restraints(ux: bool, uz: bool, ry: bool) -> tuple[bool, ...]:
@@ -74,7 +59,7 @@ def menu_presets(layout) -> list[tuple[str, SupportType]]:
 
     Spring and Custom need values or ticks, so they are set in the Properties panel.
     """
-    rigid = [(text, p) for p, text in _LAYOUT_PRESETS[_layout(layout)]
+    rigid = [(text, p) for p, text in _LAYOUT_PRESETS[layout]
              if p not in (SupportType.FREE, SupportType.SPRING, SupportType.CUSTOM)]
     return rigid + [("None (free)", SupportType.FREE)]
 
@@ -95,7 +80,7 @@ class SupportEditor(QGroupBox):
 
     def __init__(self, nodes: list[NodeData], layout, parent=None) -> None:
         super().__init__("Support", parent)
-        self._layout = _layout(layout)                 # "2d", "plane" or "space"
+        self._layout = layout                          # "plane" or "space"
         self._dofs = LAYOUT_DOFS[self._layout]
         labels = _LABELS.get(self._layout)
         self._syncing = False
@@ -151,10 +136,8 @@ class SupportEditor(QGroupBox):
         return self.combo.currentData()
 
     def flags(self) -> tuple[bool, ...]:
-        """The six restraint flags the ticks describe (2D and plane frames add the
-        out-of-plane ones a later change of analysis would want)."""
-        if self._layout == "2d":
-            return planar_restraints(*(self.boxes[d].isChecked() for d in PLANAR_DOFS))
+        """The six restraint flags the ticks describe (a plane frame adds the out-of-plane
+        ones a later change to a space frame would want)."""
         if self._layout == "plane":
             return plane_frame_restraints(*(self.boxes[d].isChecked() for d in (0, 2, 4)))
         return tuple(self.boxes[d].isChecked() for d in range(6))
