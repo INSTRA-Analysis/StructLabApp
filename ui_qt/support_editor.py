@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox, QLabel, QVBoxLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox, QLabel, QSizePolicy,
+    QVBoxLayout,
 )
 
 from ui_qt.model_state import (
@@ -125,7 +126,9 @@ class SupportEditor(QGroupBox):
             note.setWordWrap(True)
             lay.addWidget(note)
 
-        lay.addStretch(1)                                # keep the rows packed at the top
+        # Its natural height, never more: a stretch here made the box swallow the panel's spare
+        # height, leaving a large gap before the next box (Applied load).
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self._show_preset(first.support_type)
         self.combo.currentIndexChanged.connect(self._on_preset)
         self._refresh_springs()
