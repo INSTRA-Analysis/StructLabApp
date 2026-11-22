@@ -324,9 +324,49 @@ class NodeItem(QGraphicsEllipseItem):
         return lines
 
     def set_movable(self, movable: bool) -> None:
-        if movable and is_3d_model(self._scene.model_state.nodes):
-            movable = False  # 3D: disable drag, use properties panel for coordinates
+        ms = self._scene.model_state
+        if movable and is_3d_model(ms.nodes) and not self._is_plane_frame():
+            movable = False  # space frame: no drag, coordinates in the Properties panel
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
+
+    # A position change is a user drag only between mouse press and release; re-projection
+    # (orbit, refresh) also calls setPos and must never snap or edit the node's coordinates.
+    _dragging: bool = False
+
+    def mousePressEvent(self, event) -> None:
+        self._dragging = True
+        self._drag_from = (self.node.x, self.node.y, self.node.z)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        self._dragging = False
+        self._finish_drag()
+
+    def _finish_drag(self) -> None:
+        """A drag that moved the node is a model edit: mark it changed (dirty, stale results
+        cleared).  The canvas saved the undo snapshot when the press began."""
+        start = getattr(self, "_drag_from", None)
+        self._drag_from = None
+        if start is not None and start != (self.node.x, self.node.y, self.node.z):
+            signal = getattr(self._scene, "model_changed", None)
+            if signal is not None:
+                signal.emit()
+
+    def _is_plane_frame(self) -> bool:
+        ms = self._scene.model_state
+        return ms.mode_3d and getattr(ms, "analysis_type", "space") == "plane_xz"
+
+    def _plane_drag_xz(self, pos: QPointF) -> tuple[float, float] | None:
+        """(x, z) under ``pos`` in the frame's XZ plane, snapped to 0.25 m — only for a plane
+        frame seen in elevation (Front / Back); None otherwise (the drag is refused)."""
+        from ui_qt.projection import inverse_isometric_xz
+        from ui_qt.support_glyphs import elevation_side
+        if not self._is_plane_frame() or not elevation_side(_proj_mod.ISO_AZIMUTH,
+                                                            _proj_mod.ISO_ELEVATION):
+            return None
+        x, z = inverse_isometric_xz(pos.x(), pos.y(), self.node.y)
+        return round(x * 4) / 4, round(z * 4) / 4
 
     def update_visual_scale(self, view_scale: float) -> None:
         s = max(0.2, min(5.0, view_scale))
@@ -343,12 +383,25 @@ class NodeItem(QGraphicsEllipseItem):
                 x = round(value.x() / step) * step
                 y = round(value.y() / step) * step
                 return QPointF(x, y)
+            if self._is_plane_frame() and self._dragging:
+                xz = self._plane_drag_xz(value)
+                if xz is None:
+                    return self.pos()                  # orbited: no drag off the frame's plane
+                return QPointF(*isometric(xz[0], self.node.y, xz[1]))
 
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            moved = False
             if not in_3d:
                 # Sync NodeData coordinates from 2D scene position (XY plane).
                 self.node.x = px_to_m(self.pos().x())
                 self.node.y = -px_to_m(self.pos().y())
+                moved = True
+            elif self._is_plane_frame() and self._dragging:
+                xz = self._plane_drag_xz(self.pos())
+                if xz is not None and xz != (self.node.x, self.node.z):
+                    self.node.x, self.node.z = xz      # stays in the frame's plane (y unchanged)
+                    moved = True
+            if moved:
                 # Redraw symbols at new position
                 self._draw_support_symbol()
                 self._draw_load_symbols()
