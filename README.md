@@ -1,11 +1,13 @@
 # StructLab
 
-A **2D and 3D** structural analysis application for beams, frames, and trusses
-using the Direct Stiffness Method (matrix stiffness analysis). Ships as a PyQt6
-desktop app with an interactive canvas, plus a scriptable Python SDK.
+A structural analysis application for beams, frames, and trusses — plane and
+space — using the Direct Stiffness Method (matrix stiffness analysis). Ships as a
+PyQt6 desktop app with an interactive 3D canvas, plus a scriptable Python SDK.
 
 ## Features
-- 2D (3 DOF/node) and 3D (6 DOF/node) frame, beam, and truss elements
+- One 3D environment (Z up, 6 DOF/node): space frames, and plane frames drawn in the
+  XZ plane and analysed in-plane (uy, θx, θz held at every node)
+- Frame, beam, and truss (bar) elements; old 2D `.slab` files open as plane frames
 - Pin/moment releases, spring supports, rollers (X/Y/Z), fixed & pinned supports
 - Point, uniform, linearly varying, and partial distributed loads
 - Load cases, load combinations, pattern loading, and result envelopes
@@ -13,7 +15,7 @@ desktop app with an interactive canvas, plus a scriptable Python SDK.
 - Section library, PDF report export (reportlab), embedded Jupyter console (qtconsole)
 
 ## Tech stack
-- Python 3.12
+- Python 3.14 (3.12 for the OpenSeesPy benchmarks)
 - NumPy / SciPy — matrix assembly and linear solve
 - Matplotlib — force diagrams and plots
 - PyQt6 — desktop UI
@@ -48,16 +50,16 @@ Run analyses from a script or notebook without opening the GUI:
 ```python
 import sdk as sl
 
-m = sl.Model()                      # 2D model (use Model(mode_3d=True) for 3D)
-n0 = m.add_node(0, 0, 0)
+m = sl.Model()                      # plane frame in XZ, Z up (Model("space") for 3D)
+n0 = m.add_node(0, 0, 0)            # (x, y, z): keep y = 0 in a plane frame
 n1 = m.add_node(6, 0, 0)
 m.pin(n0)
-m.roller(n1)
+m.roller(n1)                        # free in X, held vertically
 m.add_member(n0, n1, E=210e9, A=6.64e-3, I=8.36e-5)
 m.add_udl(0, w=10e3)                # 10 kN/m downward
 
 result = m.solve()
-print(result.reactions(n0))         # [Fx, Fy, Mz]  (N, N, N·m)
+print(result.reactions(n0))         # [Fx, Fy, Fz, Mx, My, Mz]; in-plane: Fx, Fz, My
 print(result.max_moment(0))         # peak |M| along member 0
 result.plot("BMD")                  # matplotlib Figure
 ```
@@ -66,11 +68,10 @@ See `sdk_examples/` for worked beam and frame scripts. Running `python sdk.py`
 executes a self-test (simply-supported beam under UDL) against the closed-form
 `R = wL/2`, `M = wL²/8`.
 
-> **Coordinates & 2D vs 3D.** A model is solved in 3D (6 DOF/node) only if at
-> least one node has a non-zero z coordinate. If every node lies at z = 0 the
-> model is solved in 2D — out-of-plane actions (nodal Fz/Mx/My, `qz` member
-> loads) are then ignored, and the solver warns you. Model genuinely 3D
-> structures (including grillages) with real z-geometry.
+> **Coordinates.** Z is up everywhere. A plane frame lies in the XZ plane; nodes
+> off it fail validation (an old 2D script with heights in y is refused rather
+> than solved as something else). `Model("space")` is a full 6-DOF space frame
+> whatever the coordinates, so a frame laid flat in XY is a horizontal grid.
 
 ## Build (Windows desktop bundle)
 
