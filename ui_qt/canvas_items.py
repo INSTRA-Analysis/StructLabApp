@@ -301,6 +301,11 @@ class NodeItem(QGraphicsEllipseItem):
         else:
             coords = f"x = {n.x:.3f}   y = {n.y:.3f} m"
         support = n.support_type.name.replace("_", " ").capitalize()
+        if n.support_type == SupportType.CUSTOM:
+            from ui_qt.model_state import DOF_NAMES, PLANAR_DOFS
+            shown = range(6) if _display_3d(self._scene.model_state) else PLANAR_DOFS
+            held = [DOF_NAMES[i] for i in shown if n.restraints[i]]
+            support += f" (restrains {', '.join(held)})" if held else " (springs only)"
         return "\n".join([f"Node {n.id}", coords, f"Support: {support}"] + self._result_lines())
 
     def _result_lines(self) -> list[str]:
@@ -378,21 +383,14 @@ class NodeItem(QGraphicsEllipseItem):
             self._scene.removeItem(it)
         self._support_items.clear()
 
-        stype = self.node.support_type
-        if stype == SupportType.FREE:
+        if self.node.support_type == SupportType.FREE:
             return
         from ui_qt import support_glyphs as sg
         in_3d = _display_3d(self._scene.model_state)
-        springs = sg.node_springs(self.node)
         cam = sg.Camera.from_angles(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION) if in_3d else None
-        if _SHOW_RESTRAINTS:
-            flags = sg.restraint_flags(stype.name, in_3d)
-            ops = (sg.glyph_ops(sg.restraint_glyph(flags, springs), cam) if in_3d
-                   else sg.restraint_ops_2d(flags, springs))
-        else:
-            ops = (sg.glyph_ops(sg.bearing_glyph(stype.name, cam, springs), cam) if in_3d
-                   else sg.drawing_ops_2d(stype.name, springs))
-        self._support_items.append(SupportGlyphItem(ops, self))
+        ops = sg.support_ops(self.node, in_3d, cam, _SHOW_RESTRAINTS)
+        if ops:
+            self._support_items.append(SupportGlyphItem(ops, self))
 
     # ── hinge indicator ───────────────────────────────────────────────────────
 

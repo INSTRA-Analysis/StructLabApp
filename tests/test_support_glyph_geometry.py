@@ -34,34 +34,66 @@ ALL = ["FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"]
 
 # ── restraints come from the solver's own table ─────────────────────────────
 
+def _node(preset=None, flags=None, **springs):
+    n = NodeData(id=0, x=0, y=0)
+    if preset is not None:
+        n.support_type = preset
+    if flags is not None:
+        n.set_restraints(flags)
+    for name, value in springs.items():
+        setattr(n, name, value)
+    return n
+
+
 def test_restraint_flags_in_3d():
-    f = sg.restraint_flags
-    assert f("FIXED", True) == (True,) * 6
-    assert f("PIN", True) == (True, True, True, False, False, False)
-    assert f("ROLLER", True) == (False, True, True, False, False, False)      # free in X
-    assert f("ROLLER_Y", True) == (True, False, True, False, False, False)    # free in Y
-    assert f("ROLLER_Z", True) == (True, True, False, False, False, False)    # free in Z
-    assert f("SPRING", True) == (False,) * 6
+    f = lambda p: sg.restraint_flags(_node(SupportType[p]), True)
+    assert f("FIXED") == (True,) * 6
+    assert f("PIN") == (True, True, True, False, False, False)
+    assert f("ROLLER") == (False, True, True, False, False, False)      # free in X
+    assert f("ROLLER_Y") == (True, False, True, False, False, False)    # free in Y
+    assert f("ROLLER_Z") == (True, True, False, False, False, False)    # free in Z
+    assert f("SPRING") == (False,) * 6
 
 
 def test_restraint_flags_in_2d_and_roller_z_is_a_pin():
-    f = sg.restraint_flags
-    assert f("FIXED", False) == (True, True, False, False, False, True)
-    assert f("ROLLER", False) == (False, True, False, False, False, False)
-    assert f("ROLLER_Y", False) == (True, False, False, False, False, False)
-    assert f("ROLLER_Z", False) == f("PIN", False)          # the solver restrains X and Y
-    pin_ops = sg.drawing_ops_2d("PIN")
-    rz_ops = sg.drawing_ops_2d("ROLLER_Z")
-    assert [op.path.boundingRect() for op in rz_ops] == [op.path.boundingRect() for op in pin_ops]
+    f = lambda p: sg.restraint_flags(_node(SupportType[p]), False)
+    assert f("FIXED") == (True, True, False, False, False, True)
+    assert f("ROLLER") == (False, True, False, False, False, False)
+    assert f("ROLLER_Y") == (True, False, False, False, False, False)
+    assert f("ROLLER_Z") == f("PIN")                       # the solver restrains X and Y
+    assert sg.bearing_kind(_node(SupportType.ROLLER_Z), False) == "PIN"
 
 
-def test_node_springs_reads_k_theta_for_rotation_about_z():
-    n = NodeData(id=0, x=0, y=0)
-    n.support_type = SupportType.SPRING
-    n.spring_kx, n.spring_ktheta = 5.0, 7.0
-    assert sg.node_springs(n) == (5.0, 0.0, 0.0, 0.0, 0.0, 7.0)
-    n.support_type = SupportType.PIN                         # springs ignored by the solver
-    assert sg.node_springs(n) == (0.0,) * 6
+def test_node_springs_reads_k_theta_and_only_in_plane_springs_in_2d():
+    n = _node(SupportType.SPRING, spring_kx=5.0, spring_ktheta=7.0, spring_kz=9.0)
+    assert sg.node_springs(n) == (5.0, 0.0, 9.0, 0.0, 0.0, 7.0)
+    assert sg.node_springs(n, three_d=False) == (5.0, 0.0, 0.0, 0.0, 0.0, 7.0)
+
+
+# ── which symbol: bearing for a preset, markers for anything else ────────────
+
+@pytest.mark.parametrize("preset", ["FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"])
+def test_presets_draw_their_bearing_in_3d(preset):
+    assert sg.bearing_kind(_node(SupportType[preset]), True) == preset
+
+
+def test_custom_supports_draw_restraint_markers():
+    only_rz = _node(flags=(False, False, False, False, False, True))
+    assert sg.bearing_kind(only_rz, True) is None and sg.bearing_kind(only_rz, False) is None
+    pin_spring = _node(SupportType.PIN, spring_ktheta=4e5)
+    pin_spring.set_restraints((True, True, True, False, False, False))
+    assert pin_spring.support_type is SupportType.CUSTOM
+    assert sg.bearing_kind(pin_spring, True) is None
+    cam = sg.Camera.from_angles(-45, 30)
+    ops = sg.support_ops(pin_spring, True, cam, restraints_view=False)
+    axis_fills = {op.fill.name() for op in ops if op.fill is not None}
+    assert axis_fills and sg.SUPPORT not in axis_fills         # axis-coloured markers
+
+
+def test_a_support_differing_only_out_of_plane_keeps_its_2d_bearing():
+    n = _node(flags=(False, True, False, False, False, False))  # 2D roller without the uz hold
+    assert n.support_type is SupportType.CUSTOM
+    assert sg.bearing_kind(n, False) == "ROLLER"
 
 
 # ── camera, shading, culling ────────────────────────────────────────────────

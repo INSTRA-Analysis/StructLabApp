@@ -70,28 +70,74 @@ class DrawOp:
 
 # ── which DOFs a node's support restrains (from the solver's own table) ─────
 
-def restraint_flags(support_name: str, three_d: bool) -> tuple[bool, ...]:
-    """(ux, uy, uz, θx, θy, θz) restrained by a UI support type, as the solver applies it.
+def restraint_flags(node, three_d: bool) -> tuple[bool, ...]:
+    """(ux, uy, uz, θx, θy, θz) the solver restrains at ``node``.
 
-    In 2D only ux, uy and θz exist; uz, θx, θy are reported False.
+    Read through ``core.Support.restrained_dofs`` with the node's own flags, so the drawing
+    can never disagree with the analysis.  In 2D only ux, uy and θz exist; the other three are
+    reported False.
     """
-    from core.support import Support
-    from ui_qt.model_builder import _RIGID_MAP
-    from ui_qt.model_state import SupportType
-    core_type = _RIGID_MAP[SupportType[support_name]]
+    from core.support import Support, SupportType as CoreType
     dpn = 6 if three_d else 3
-    dofs = set(Support(node_id=0, support_type=core_type).restrained_dofs(dpn))
+    dofs = set(Support(node_id=0, support_type=CoreType.FREE,
+                       restrained=tuple(node.restraints)).restrained_dofs(dpn))
     if three_d:
         return tuple(i in dofs for i in range(6))
     return (0 in dofs, 1 in dofs, False, False, False, 2 in dofs)
 
 
-def node_springs(node) -> tuple[float, ...]:
-    """(kx, ky, kz, krx, kry, krz) of a SPRING node; θz uses k_theta (what the solver reads)."""
-    if node.support_type.name != "SPRING":
-        return (0.0,) * 6
+# Bearing symbol for each in-plane restraint set (ux, uy, θz) in 2D.
+_PLANAR_KIND = {(True, True, True): "FIXED", (True, True, False): "PIN",
+                (False, True, False): "ROLLER", (True, False, False): "ROLLER_Y"}
+_SPACE_KIND = {"FIXED", "PIN", "ROLLER", "ROLLER_Y", "ROLLER_Z", "SPRING"}
+
+
+def bearing_kind(node, three_d: bool) -> str | None:
+    """The bearing symbol for ``node``, or None when only restraint markers describe it.
+
+    3D: the preset the node's flags match.  2D: the in-plane restraints, so a support that
+    only differs out of plane still draws as its 2D bearing.  Springs together with
+    restraints, and any unusual set (only θz held, say), have no bearing: markers are drawn.
+    """
+    flags = restraint_flags(node, three_d)
+    springs = node_springs(node, three_d)
+    if three_d:
+        kind = node.support_type.name
+        return kind if kind in _SPACE_KIND else None
+    planar = (flags[0], flags[1], flags[5])
+    if not any(planar):
+        return "SPRING" if (any(springs) or node.support_type.name == "SPRING") else None
+    if any(springs):
+        return None
+    return _PLANAR_KIND.get(planar)
+
+
+def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool) -> list[DrawOp]:
+    """Everything drawn at a supported node: its bearing, or restraint markers when asked for
+    (View > Show Restraints) or when no bearing fits its restraints."""
+    flags = restraint_flags(node, three_d)
+    springs = node_springs(node, three_d)
+    if not any(flags) and not any(springs) and node.support_type.name != "SPRING":
+        return []
+    kind = None if restraints_view else bearing_kind(node, three_d)
+    if kind is None:
+        if not any(springs) and not any(flags):          # a spring support with no k typed yet:
+            springs = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0) if three_d else (0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+        if three_d:
+            return glyph_ops(restraint_glyph(flags, springs), cam)
+        return restraint_ops_2d(flags, springs)
+    if three_d:
+        return glyph_ops(bearing_glyph(kind, cam, springs), cam)
+    return drawing_ops_2d(kind, springs)
+
+
+def node_springs(node, three_d: bool = True) -> tuple[float, ...]:
+    """(kx, ky, kz, krx, kry, kθz) as the solver reads them (θz from k_theta); in 2D only the
+    in-plane springs (kx, ky, kθz) act."""
+    if not three_d:
+        return (node.spring_kx, node.spring_ky, 0.0, 0.0, 0.0, node.spring_ktheta)
     return (node.spring_kx, node.spring_ky, node.spring_kz,
-            node.spring_krx, node.spring_kry, node.spring_ktheta or node.spring_krz)
+            node.spring_krx, node.spring_kry, node.spring_ktheta)
 
 
 # ── camera ───────────────────────────────────────────────────────────────────
