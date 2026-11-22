@@ -213,6 +213,7 @@ class PropertiesPanel(QWidget):
     def _replace(self, widget: QWidget | None) -> None:
         if self._content:
             self._layout.removeWidget(self._content)
+            self._content.hide()            # deleteLater waits for the event loop: never paint it
             self._content.deleteLater()
             self._content = None
 
