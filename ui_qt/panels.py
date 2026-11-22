@@ -1656,7 +1656,10 @@ class ResultsPanel(QWidget):
             M_plus  = 0.0;  xL_p = 0.0
             M_minus = 0.0;  xL_m = 0.0
 
-            if member_el_map and sub_by_id and row < len(member_el_map):
+            if res.moment_extremes is not None:
+                # exact along the member (load positions, shear zeros), from the solve
+                M_plus, xL_p, M_minus, xL_m = res.moment_extremes
+            elif member_el_map and sub_by_id and row < len(member_el_map):
                 sub_ids = member_el_map[row]
                 n_sub   = len(sub_ids)
                 for k, sid in enumerate(sub_ids):

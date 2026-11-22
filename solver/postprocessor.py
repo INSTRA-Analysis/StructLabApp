@@ -35,6 +35,8 @@ class ElementResult:
     peak_moment_signed: float | None = None
     moment_stations: np.ndarray | None = None
     deflection: object | None = None       # ui_qt.solve_actions.MemberDeflection on members
+    # (largest sagging M, its fraction t of the member, largest hogging M, its t) — members only
+    moment_extremes: tuple[float, float, float, float] | None = None
 
     @property
     def is_3d(self) -> bool:

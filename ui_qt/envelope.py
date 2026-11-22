@@ -51,15 +51,19 @@ def _style_table(tbl: QTableWidget) -> None:
 
 # ── point-wise sampling ────────────────────────────────────────────────────────
 
-def _sample_member(sub_results: list, el_ids: list[int],
-                   n_per_sub: int = 8) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _sample_member(sub_results: list, el_ids: list[int], n_per_sub: int = 8,
+                   model=None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (x_norm, M_Nm, V_N) sampled along one UI member.
 
-    x_norm is in [0, 1].  M and V are linearly interpolated between sub-element
-    end forces — accurate to O(L_sub²) with the default n_sub=10 discretisation.
+    x_norm is in [0, 1].  With the run's ``model`` the values are exact (the element loads
+    through ``bending_profile``, at least 24 samples per member however few sub-elements);
+    without it, linear between sub-element end forces (accurate only for short elements).
     """
     res_map = {r.element_id: r for r in sub_results}
     n_sub = len(el_ids)
+    if model is not None:
+        x_norm = np.linspace(0.0, 1.0, max(n_per_sub * n_sub, 24) + 1)
+        return (x_norm,) + _exact_along(model, res_map, el_ids, x_norm)
     n_pts = n_per_sub * n_sub + 1
 
     x_norm = np.linspace(0.0, 1.0, n_pts)
@@ -75,6 +79,28 @@ def _sample_member(sub_results: list, el_ids: list[int],
         V_arr[i] = (1.0 - t) * r.V_i - t * r.V_j
 
     return x_norm, M_arr, V_arr
+
+
+def _exact_along(model, res_map: dict, el_ids: list[int],
+                 x_norm: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(M, V) at fractions ``x_norm`` of a member, exact on each sub-element, in the plane each
+    sub-element reports (ElementResult._weak_plane), as the canvas diagrams draw them."""
+    from solver.postprocessor import bending_profile
+    els = {el.id: el for el in model.elements}
+    loads: dict[int, list] = {}
+    for ld in model.element_loads:
+        loads.setdefault(ld.element_id, []).append(ld)
+    lengths = np.array([els[e].length for e in el_ids])
+    bounds = np.concatenate([[0.0], np.cumsum(lengths)]) / lengths.sum()
+    M = np.empty(len(x_norm))
+    V = np.empty(len(x_norm))
+    for k, e in enumerate(el_ids):
+        mask = (x_norm >= bounds[k]) & ((x_norm < bounds[k + 1]) | (k == len(el_ids) - 1))
+        r = res_map[e]
+        plane = "y" if r.is_3d and r._weak_plane else "z"
+        x_local = (x_norm[mask] - bounds[k]) * lengths.sum()
+        V[mask], M[mask] = bending_profile(r.end_forces, loads.get(e, []), lengths[k], x_local, plane)
+    return M, V
 
 
 # ── envelope plotting ──────────────────────────────────────────────────────────
@@ -125,7 +151,7 @@ def _draw_envelope_on_ax(ax, solve_runs_rich: list, state: ModelState,
 
         for run in solve_runs_rich:
             el_ids = run['member_el_map'][i]
-            x, M, V = _sample_member(run['sub_results'], el_ids)
+            x, M, V = _sample_member(run['sub_results'], el_ids, model=run.get('model'))
             vals = M if kind == 'M' else V
 
             if x_norm is None:

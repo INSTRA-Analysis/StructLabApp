@@ -274,17 +274,24 @@ def _shear_zeros(end_forces, loads, length: float, xs: np.ndarray, plane: str) -
 
 
 def member_moment_peaks(el_ids, res_by_id, el_by_id, load_map
-                        ) -> tuple[float, float, np.ndarray]:
-    """(peak resultant moment, governing signed moment, moments at fixed stations) of one member.
+                        ) -> tuple[float, float, np.ndarray, tuple[float, float, float, float]]:
+    """(peak resultant moment, governing signed moment, moments at fixed stations, extremes)
+    of one member.
 
     The moment is evaluated exactly (``bending_profile``) in both bending planes on every
-    sub-element, at fixed stations plus both sides of each point load: the peak is found
-    wherever it is, not only at the member ends (a simply supported beam's ends carry none).
-    The fixed-station array is the same for every load case, so cases can be superposed.
+    sub-element, at fixed stations plus both sides of each point load and the shear zeros:
+    the peak is found wherever it is, not only at the member ends (a simply supported beam's
+    ends carry none).  The fixed-station array is the same for every load case, so cases can
+    be superposed.  ``extremes`` = (largest sagging M, at fraction t of the member, largest
+    hogging M, at t) in the plane each sub-element reports (ElementResult._weak_plane) —
+    the results table's M+ / M− columns.
     """
     from solver.postprocessor import bending_profile, sample_points
     stations: list[np.ndarray] = []
     peak, signed = 0.0, 0.0
+    m_plus, t_plus, m_minus, t_minus = 0.0, 0.0, 0.0, 0.0
+    total = sum(el_by_id[e].length for e in el_ids)
+    x0 = 0.0
     for el_id in el_ids:
         res, el = res_by_id[el_id], el_by_id[el_id]
         loads = load_map.get(el_id, [])
@@ -303,7 +310,14 @@ def member_moment_peaks(el_ids, res_by_id, el_by_id, load_map
         if size[k] > peak:
             row = m_every[k]
             peak, signed = float(size[k]), float(row[np.argmax(np.abs(row))])
-    return peak, signed, np.vstack(stations)
+        reported = m_every[:, planes.index("y" if res.is_3d and res._weak_plane else "z")]
+        hi, lo = int(np.argmax(reported)), int(np.argmin(reported))
+        if reported[hi] > m_plus:
+            m_plus, t_plus = float(reported[hi]), (x0 + every[hi]) / total
+        if reported[lo] < m_minus:
+            m_minus, t_minus = float(reported[lo]), (x0 + every[lo]) / total
+        x0 += el.length
+    return peak, signed, np.vstack(stations), (m_plus, t_plus, m_minus, t_minus)
 
 
 def member_peak_moment(result) -> float:
@@ -448,9 +462,9 @@ def solve_engine(model, member_el_map, state) -> dict[str, Any]:
                     last.N_j,  last.V_j,  last.M_j,
                 ])
             ))
-        peaks = member_moment_peaks(el_ids, res_by_id, el_by_id, load_map)
-        member_results[-1].peak_moment, member_results[-1].peak_moment_signed, \
-            member_results[-1].moment_stations = peaks
+        mr = member_results[-1]
+        mr.peak_moment, mr.peak_moment_signed, mr.moment_stations, mr.moment_extremes = \
+            member_moment_peaks(el_ids, res_by_id, el_by_id, load_map)
         member_results[-1].deflection = member_deflection(
             el_ids, el_by_id, res_by_id, load_map, result.displacements, model.dofs_per_node)
 

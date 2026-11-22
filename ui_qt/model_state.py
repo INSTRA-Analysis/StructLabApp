@@ -518,7 +518,9 @@ class MemberData:
     I: float = DEFAULT_I        # I_z — strong-axis moment of inertia (m⁴)
     I_y: float | None = None    # weak-axis moment of inertia (m⁴, defaults to I)
     J: float = 0.0              # torsional constant (m⁴, 3D only)
-    n_sub: int = 20    # sub-elements per member for analysis mesh
+    # Sub-elements per member. Every load, diagram, peak and deflection is exact per element,
+    # so this no longer buys accuracy (it was 20); 4 keeps a few intermediate nodes.
+    n_sub: int = 4
     density: float = 0.0  # kg/m³ — 0 disables self-weight for this member
     beta_angle: float = 0.0  # rad — section rotation about local x-axis (3D only)
     fy: float = 275e6   # Pa — yield strength / fck / fk depending on material

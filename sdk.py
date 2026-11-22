@@ -125,7 +125,7 @@ class Model:
         I: float,
         I_y: float | None = None,
         J: float = 0.0,
-        n_sub: int = 10,
+        n_sub: int = 4,
         element_type: str = "BEAM",
     ) -> int:
         """Add a member between nodes i and j and return its id.
@@ -138,7 +138,8 @@ class Model:
         I         : strong-axis moment of inertia I_z (m⁴)
         I_y       : weak-axis moment of inertia (m⁴); defaults to I if None
         J         : torsional constant (m⁴, 3D only)
-        n_sub     : number of sub-elements used for internal mesh (default 10)
+        n_sub     : sub-elements for the internal mesh (default 4; results are exact per
+                    element for every load type, so more only adds intermediate nodes)
         element_type : "BEAM" | "BAR" | "PIN_LEFT" | "PIN_RIGHT"
         """
         md = self._state.add_member(i, j)
