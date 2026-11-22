@@ -36,6 +36,7 @@ _RIGID_MAP = {
     SupportType.ROLLER_Y: CoreSupportType.ROLLER_Y,
     SupportType.ROLLER_Z: CoreSupportType.ROLLER_Z,
     SupportType.SPRING:   CoreSupportType.FREE,
+    SupportType.CUSTOM:   CoreSupportType.FREE,     # label only: Support.restrained carries the DOFs
 }
 
 _GRAVITY = 9.81  # m/s²
@@ -116,33 +117,21 @@ def build_model(state: ModelState,
         node_registry[nd.id] = n
 
     # ── supports ──────────────────────────────────────────────────────────────
+    # The node's six restraint flags go to the solver as they are (same table in 2D and 3D);
+    # springs act wherever a stiffness is set (a rigid preset clears them, see NodeData).
     for nd in state.nodes:
-        if nd.support_type == SupportType.FREE:
-            has_spring = (nd.spring_kx > 0 or nd.spring_ky > 0
-                          or nd.spring_ktheta > 0 or nd.spring_kz > 0
-                          or nd.spring_krx > 0 or nd.spring_kry > 0
-                          or nd.spring_krz > 0)
-            if not has_spring:
-                continue
-
-        is_spring = nd.support_type == SupportType.SPRING
-        spring_x     = nd.spring_kx     if is_spring else 0.0
-        spring_y     = nd.spring_ky     if is_spring else 0.0
-        spring_theta = nd.spring_ktheta if is_spring else 0.0
-        spring_z     = nd.spring_kz     if is_spring else 0.0
-        spring_rx    = nd.spring_krx    if is_spring else 0.0
-        spring_ry    = nd.spring_kry    if is_spring else 0.0
-        spring_rz    = nd.spring_krz    if is_spring else 0.0
-
+        if not any(nd.restraints) and not nd.has_springs():
+            continue
         model.supports.append(Support(
             node_id=nd.id,
             support_type=_RIGID_MAP[nd.support_type],
-            spring_stiffness_x=spring_x,
-            spring_stiffness_y=spring_y,
-            spring_stiffness_theta=spring_theta,
-            spring_stiffness_z=spring_z,
-            spring_stiffness_rx=spring_rx,
-            spring_stiffness_ry=spring_ry,
+            spring_stiffness_x=nd.spring_kx,
+            spring_stiffness_y=nd.spring_ky,
+            spring_stiffness_theta=nd.spring_ktheta,
+            spring_stiffness_z=nd.spring_kz,
+            spring_stiffness_rx=nd.spring_krx,
+            spring_stiffness_ry=nd.spring_kry,
+            restrained=tuple(nd.restraints),
         ))
 
     # ── elements with sub-division ────────────────────────────────────────────

@@ -296,6 +296,41 @@ class SupportType(Enum):
     ROLLER_Y = auto()   # horizontal roller — free in Y, restrained in X
     ROLLER_Z = auto()   # Z-direction roller — free in Z, restrained in X,Y (3D only)
     SPRING   = auto()
+    CUSTOM   = auto()   # any other set of restrained DOFs, ticked axis by axis
+
+
+# ── Support restraints: six flags per node, one table for 2D and 3D ──────────
+# A support is stored as the DOFs it restrains, (ux, uy, uz, θx, θy, θz), in the model's
+# own axes.  2D analyses ux, uy and θz (PLANAR_DOFS); the other three hold the
+# out-of-plane restraints, so swap_yz carries a support through a 2D <-> 3D switch with its
+# physical meaning intact (a wall roller stays free vertically).  The presets below are the
+# same six flags in both modes and reproduce the solver's former per-mode tables exactly.
+DOF_NAMES: tuple[str, ...] = ("ux", "uy", "uz", "θx", "θy", "θz")
+PLANAR_DOFS: tuple[int, ...] = (0, 1, 5)
+_T, _F = True, False
+SUPPORT_PRESETS: dict[SupportType, tuple[bool, ...]] = {
+    SupportType.FREE:     (_F, _F, _F, _F, _F, _F),
+    SupportType.FIXED:    (_T, _T, _T, _T, _T, _T),
+    SupportType.PIN:      (_T, _T, _T, _F, _F, _F),
+    SupportType.ROLLER:   (_F, _T, _T, _F, _F, _F),   # free in X
+    SupportType.ROLLER_Y: (_T, _F, _T, _F, _F, _F),   # free in Y
+    SupportType.ROLLER_Z: (_T, _T, _F, _F, _F, _F),   # free in Z
+    SupportType.SPRING:   (_F, _F, _F, _F, _F, _F),
+}
+_SPRING_FIELDS = ("spring_kx", "spring_ky", "spring_ktheta", "spring_kz",
+                  "spring_krx", "spring_kry", "spring_krz")
+
+
+def classify_support(restraints: tuple[bool, ...], has_springs: bool,
+                     spring_preset: bool = False) -> SupportType:
+    """The preset a set of restraints matches, CUSTOM if none; springs only on a free node."""
+    restraints = tuple(bool(r) for r in restraints)
+    if not any(restraints):
+        return SupportType.SPRING if (has_springs or spring_preset) else SupportType.FREE
+    for preset, flags in SUPPORT_PRESETS.items():
+        if flags == restraints and preset not in (SupportType.FREE, SupportType.SPRING):
+            return preset
+    return SupportType.CUSTOM
 
 
 class ElementType(Enum):
@@ -372,6 +407,55 @@ class NodeData:
     spring_krx: float = 0.0     # N·m/rad  (θ_x, 3D only)
     spring_kry: float = 0.0     # N·m/rad  (θ_y, 3D only)
     spring_krz: float = 0.0     # N·m/rad  (θ_z, 3D only) — alias for ktheta in 3D
+    # ``restraints`` (six flags, see SUPPORT_PRESETS) is the stored truth; ``support_type`` is a
+    # property over it (installed below): reading gives the matching preset (or CUSTOM),
+    # assigning a preset sets the flags and, for a rigid preset, clears the springs.
+
+    def has_springs(self) -> bool:
+        return any(getattr(self, name, 0.0) > 0 for name in _SPRING_FIELDS)
+
+    def set_restraints(self, flags) -> None:
+        """Set the six restrained-DOF flags (ux, uy, uz, θx, θy, θz)."""
+        flags = tuple(bool(f) for f in flags)
+        if len(flags) != 6:
+            raise ValueError(f"six restraint flags expected, got {len(flags)}")
+        self.restraints = flags
+
+
+def _get_support_type(self: NodeData) -> SupportType:
+    return classify_support(self.restraints, self.has_springs(), getattr(self, "_spring_preset", False))
+
+
+def _set_support_type(self: NodeData, value: SupportType) -> None:
+    if value is SupportType.CUSTOM:
+        if not hasattr(self, "restraints"):
+            self.restraints = SUPPORT_PRESETS[SupportType.FREE]
+        return                                   # custom flags are set with set_restraints
+    self.restraints = SUPPORT_PRESETS[value]
+    self._spring_preset = value is SupportType.SPRING
+    if value is not SupportType.SPRING:
+        for name in _SPRING_FIELDS:
+            setattr(self, name, 0.0)
+
+
+NodeData.support_type = property(_get_support_type, _set_support_type)
+
+
+def node_from_dict(nd: dict) -> NodeData:
+    """A node from its saved form.
+
+    Files written before per-axis restraints have only the preset name: its flags are the
+    preset's, and springs count only on a SPRING node (the solver ignored them elsewhere), so
+    old models solve exactly as before.  Newer files carry the six flags explicitly.
+    """
+    support = SupportType[nd.get("support", "FREE")]
+    springs_apply = "restraints" in nd or support is SupportType.SPRING
+    node = NodeData(id=nd["id"], x=nd["x"], y=nd["y"], z=nd.get("z", 0.0),
+                    support_type=support,
+                    **{name: (nd.get(name, 0.0) if springs_apply else 0.0) for name in _SPRING_FIELDS})
+    if "restraints" in nd:
+        node.set_restraints(nd["restraints"])
+    return node
 
 
 @dataclass
@@ -466,6 +550,8 @@ class ModelState:
         """
         for n in self.nodes:
             n.y, n.z = n.z, n.y
+            ux, uy, uz, rx, ry, rz = n.restraints          # restraints follow the axes
+            n.restraints = (ux, uz, uy, rx, rz, ry)
             n.spring_ky, n.spring_kz = n.spring_kz, n.spring_ky
             n.spring_ktheta, n.spring_kry = n.spring_kry, n.spring_ktheta
         for lc in self.load_cases:
@@ -596,6 +682,7 @@ class ModelState:
             "nodes": [
                 {"id": n.id, "x": n.x, "y": n.y, "z": n.z,
                  "support": n.support_type.name,
+                 "restraints": [int(r) for r in n.restraints],
                  "spring_kx": n.spring_kx, "spring_ky": n.spring_ky,
                  "spring_ktheta": n.spring_ktheta,
                  "spring_kz": n.spring_kz, "spring_krx": n.spring_krx,
@@ -644,18 +731,7 @@ class ModelState:
         if "metadata" in d:
             s.metadata = ProjectMetadata.from_dict(d["metadata"])
         for nd in d["nodes"]:
-            s.nodes.append(NodeData(
-                id=nd["id"], x=nd["x"], y=nd["y"],
-                z=nd.get("z", 0.0),
-                support_type=SupportType[nd["support"]],
-                spring_kx=nd.get("spring_kx", 0.0),
-                spring_ky=nd.get("spring_ky", 0.0),
-                spring_ktheta=nd.get("spring_ktheta", 0.0),
-                spring_kz=nd.get("spring_kz", 0.0),
-                spring_krx=nd.get("spring_krx", 0.0),
-                spring_kry=nd.get("spring_kry", 0.0),
-                spring_krz=nd.get("spring_krz", 0.0),
-            ))
+            s.nodes.append(node_from_dict(nd))
         for md in d["members"]:
             s.members.append(MemberData(
                 id=md["id"], node_i=md["ni"], node_j=md["nj"],

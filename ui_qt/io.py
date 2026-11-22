@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 from ui_qt.model_state import (
-    ModelState, NodeData, MemberData,
+    ModelState, NodeData, MemberData, node_from_dict,
     SupportType, ElementType, PointLoadData,
     LoadCase, NodeLoad, MemberLoad, LoadCombination,
 )
@@ -47,14 +47,8 @@ def load_model(filepath: str | Path) -> ModelState:
     # ── Version 1 backward-compat ────────────────────────────────────────────
     s = ModelState()
     for nd in raw["nodes"]:
-        node = NodeData(
-            id=nd["id"], x=nd["x"], y=nd["y"],
-            support_type=SupportType[nd["support"]],
-            spring_kx=nd.get("spring_kx", 0.0),
-            spring_ky=nd.get("spring_ky", 0.0),
-            spring_ktheta=nd.get("spring_ktheta", 0.0),
-        )
-        s.nodes.append(node)
+        s.nodes.append(node_from_dict({k: nd[k] for k in nd if k in (
+            "id", "x", "y", "support", "spring_kx", "spring_ky", "spring_ktheta")}))
 
     for md in raw["members"]:
         member = MemberData(

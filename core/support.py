@@ -38,14 +38,20 @@ class Support:
     spring_stiffness_z: float = field(default=0.0)      # N/m      (dz, 3D only)
     spring_stiffness_rx: float = field(default=0.0)     # N·m/rad  (θ_x, 3D only)
     spring_stiffness_ry: float = field(default=0.0)     # N·m/rad  (θ_y, 3D only)
+    # Explicit restraints (ux, uy, uz, θx, θy, θz), True = restrained.  When given they
+    # override ``support_type``; a 2D model uses ux, uy and θz (indices 0, 1, 5).
+    restrained: tuple[bool, ...] | None = field(default=None)
 
     def restrained_dofs(self, dofs_per_node: int = 3) -> list[int]:
-        """Return global DOF indices fully restrained by rigid support type.
+        """Return global DOF indices fully restrained by this support.
 
         With dofs_per_node=3 (2D): indices in [0, 1, 2] range per node.
         With dofs_per_node=6 (3D): indices in [0..5] range per node.
         """
         base = self.node_id * dofs_per_node
+        if self.restrained is not None:
+            axes = range(6) if dofs_per_node == 6 else (0, 1, 5)
+            return [base + k for k, axis in enumerate(axes) if self.restrained[axis]]
         if dofs_per_node == 3:
             restraints_2d = {
                 SupportType.FREE:     [],
