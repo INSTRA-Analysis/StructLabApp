@@ -65,6 +65,26 @@ def test_toggle_sets_the_type_updates_the_badge_and_undoes(win):
     assert win._scene.model_state.analysis_type == "space" and not act.isChecked()
 
 
+def test_switching_plane_frame_on_faces_the_front_in_the_frames_plane(win):
+    import ui_qt.projection as proj
+    s = _portal()
+    for n in s.nodes:
+        n.y = 2.5                                              # the frame's plane is y = 2.5
+    win._scene.load_state(s)
+    win._act["plane_frame"].setChecked(True)
+    assert (proj.ISO_AZIMUTH, proj.ISO_ELEVATION) == (0.0, 2.0)
+    assert win._scene._working_plane.name == "XZ" and win._scene._plane_offset == 2.5
+
+
+def test_a_wizard_frame_opens_on_the_front_view(win):
+    import ui_qt.projection as proj
+    from ui_qt import presets
+    ipe = (210e9, 5.38e-3, 8.356e-5)
+    win._apply_model_state(presets.portal_wizard(12.0, 5.0, False, *ipe, *ipe, udl_g=6e3), "Portal")
+    assert (proj.ISO_AZIMUTH, proj.ISO_ELEVATION) == (0.0, 2.0)
+    assert win._act["plane_frame"].isChecked()
+
+
 def test_the_toggle_is_disabled_for_a_2d_model(win):
     win._scene.load_state(_portal("2D"))
     win._update_status_stats()

@@ -2256,6 +2256,8 @@ class MainWindow(QMainWindow):
         self._scene.save_snapshot()                     # undoable like any model edit
         state.analysis_type = wanted
         self._scene.model_changed.emit()                # dirty, stale results cleared
+        if checked:
+            self._face_plane_frame()                    # show the frame in its plane
         self._sb.showMessage("Analysis type: " + ("Plane frame (XZ) — uy, θx, θz restrained "
                              "at every node" if checked else "Space frame — all six DOFs"))
 
