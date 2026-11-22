@@ -104,20 +104,66 @@ def bearing_kind(node, three_d: bool) -> str | None:
     if three_d:
         kind = node.support_type.name
         return kind if kind in _SPACE_KIND else None
+    return _planar_kind(flags, springs, node.support_type.name == "SPRING")
+
+
+def _planar_kind(flags: tuple[bool, ...], springs: tuple[float, ...], spring_preset: bool) -> str | None:
+    """2D bearing for in-plane restraints (ux, uy, θz in the 2D layout), None for markers."""
     planar = (flags[0], flags[1], flags[5])
     if not any(planar):
-        return "SPRING" if (any(springs) or node.support_type.name == "SPRING") else None
+        return "SPRING" if (any(springs) or spring_preset) else None
     if any(springs):
         return None
     return _PLANAR_KIND.get(planar)
 
 
-def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool) -> list[DrawOp]:
+def elevation_side(azimuth_deg: float, elevation_deg: float) -> int:
+    """+1 when the camera looks at the XZ plane from the front (azimuth 0°), -1 from the back
+    (180°), 0 otherwise: a plane frame seen this way is drawn with the 2D symbols."""
+    if abs(elevation_deg) > 10.0:
+        return 0
+    az = (azimuth_deg + 180.0) % 360.0 - 180.0
+    if abs(az) <= 5.0:
+        return 1
+    if abs(abs(az) - 180.0) <= 5.0:
+        return -1
+    return 0
+
+
+def _planar_ops(flags: tuple[bool, ...], springs: tuple[float, ...], restraints_view: bool,
+                spring_preset: bool) -> list[DrawOp]:
+    """2D drawing-office symbol (or 2D restraint markers) for in-plane restraints given in the
+    2D layout (ux, uy = vertical, θz) — used by 2D models and by plane frames in elevation."""
+    if not any(flags) and not any(springs) and not spring_preset:
+        return []
+    kind = None if restraints_view else _planar_kind(flags, springs, spring_preset)
+    if kind is None:
+        if not any(springs) and not any(flags):          # a spring support with no k typed yet
+            springs = (0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+        return restraint_ops_2d(flags, springs)
+    return drawing_ops_2d(kind, springs)
+
+
+def support_ops(node, three_d: bool, cam: "Camera | None", restraints_view: bool,
+                elevation: int = 0) -> list[DrawOp]:
     """Everything drawn at a supported node: its bearing, or restraint markers when asked for
-    (View > Show Restraints) or when no bearing fits its restraints."""
+    (View > Show Restraints) or when no bearing fits its restraints.
+
+    ``elevation`` (+1 front, -1 back) draws a plane frame seen in its XZ plane with the 2D
+    symbols: its (ux, uz, θy) are the 2D (ux, uy, θz) on screen, mirrored from the back.
+    """
+    spring_preset = node.support_type.name == "SPRING"
+    if not three_d:
+        return _planar_ops(restraint_flags(node, False), node_springs(node, False),
+                           restraints_view, spring_preset)
     flags = restraint_flags(node, three_d)
     springs = node_springs(node, three_d)
-    if not any(flags) and not any(springs) and node.support_type.name != "SPRING":
+    if elevation:
+        f2 = (flags[0], flags[2], False, False, False, flags[4])
+        s2 = (springs[0], springs[2], 0.0, 0.0, 0.0, springs[4])
+        ops = _planar_ops(f2, s2, restraints_view, spring_preset)
+        return _mirrored(ops) if elevation < 0 else ops
+    if not any(flags) and not any(springs) and not spring_preset:
         return []
     kind = None if restraints_view else bearing_kind(node, three_d)
     if kind is None:
@@ -398,6 +444,13 @@ def _triangle(height: float, half: float) -> DrawOp:
     path.lineTo(half, height)
     path.closeSubpath()
     return DrawOp(path, SUPPORT_TINT, QColor(SUPPORT), 1.8)
+
+
+def _mirrored(ops: list[DrawOp]) -> list[DrawOp]:
+    """Left-right mirror (a plane frame seen from the back)."""
+    from PyQt6.QtGui import QTransform
+    t = QTransform().scale(-1.0, 1.0)
+    return [DrawOp(t.map(op.path), op.fill, op.pen, op.width) for op in ops]
 
 
 def _rotated(ops: list[DrawOp], degrees: float) -> list[DrawOp]:

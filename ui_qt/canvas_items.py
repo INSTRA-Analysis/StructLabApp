@@ -384,7 +384,10 @@ class NodeItem(QGraphicsEllipseItem):
         from ui_qt import support_glyphs as sg
         in_3d = _display_3d(self._scene.model_state)
         cam = sg.Camera.from_angles(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION) if in_3d else None
-        ops = sg.support_ops(self.node, in_3d, cam, _SHOW_RESTRAINTS)
+        ms = self._scene.model_state
+        elevation = (sg.elevation_side(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION)
+                     if in_3d and ms.analysis_type == "plane_xz" else 0)   # 2D symbols, front view
+        ops = sg.support_ops(self.node, in_3d, cam, _SHOW_RESTRAINTS, elevation)
         if ops:
             self._support_items.append(SupportGlyphItem(ops, self))
 
