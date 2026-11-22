@@ -44,6 +44,19 @@ _GRID_MINOR = "#3f4d60"      # blue-grey grid lines on the navy-tinted viewport
 _GRID_MAJOR = "#586a82"
 
 
+def floor_visibility(elevation_deg: float) -> float:
+    """How much of the XY ground grid to draw (0..1): full above 12° of elevation, none
+    below 6°, fading between.  Seen nearly edge-on (the Front view's 2° tilt) its lines
+    collapse into a dense band, so the working-plane grid takes over instead."""
+    return min(1.0, max(0.0, (abs(elevation_deg) - 6.0) / 6.0))
+
+
+def _faded(colour: str, factor: float, alpha: int = 255) -> QColor:
+    c = QColor(colour)
+    c.setAlpha(int(alpha * factor))
+    return c
+
+
 def _fade_pen(colour: QColor, centre: QPointF, radius: float, width: float = 1.0) -> QPen:
     """Cosmetic pen whose colour fades to transparent with distance from ``centre``.
 
@@ -2784,10 +2797,28 @@ class StructView(QGraphicsView):
                 break
         major_spacing = spacing * 5.0
 
-        # ── Viewport centre in model space at z = 0 ───────────────────────────
+        scene  = self.scene()
+        plane  = scene._working_plane
+        offset = scene._plane_offset
+        az, el = _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION
+        floor  = floor_visibility(el)
+
+        # ── Viewport centre in model space, found in the plane being worked in ─
+        # (the ground plane is useless near edge-on: recovering a point on it divides
+        #  by sin(elevation), so the Front view would centre the grid far away)
         vp_rect      = self.mapToScene(self.viewport().rect()).boundingRect()
         vc           = vp_rect.center()
-        cx, cy       = inverse_isometric(vc.x(), vc.y(), 0.0)
+        cz           = 0.0
+        if plane == WorkingPlane.XZ and abs(math.cos(math.radians(az))) > 0.09:
+            cx, cz = inverse_isometric_xz(vc.x(), vc.y(), offset)
+            cy = offset
+        elif plane == WorkingPlane.YZ and abs(math.sin(math.radians(az))) > 0.09:
+            cy, cz = inverse_isometric_yz(vc.x(), vc.y(), offset)
+            cx = offset
+        elif abs(math.sin(math.radians(el))) > 0.05:
+            cx, cy = inverse_isometric(vc.x(), vc.y(), 0.0)
+        else:
+            cx = cy = 0.0
 
         # ── Extent: enough to fill viewport, capped at 50 m ──────────────────
         extent_m = min(
@@ -2797,25 +2828,22 @@ class StructView(QGraphicsView):
 
         # ── Pens ──────────────────────────────────────────────────────────────
         fade_c, fade_r = self._grid_fade()
-        minor_pen = _fade_pen(QColor(_GRID_MINOR), fade_c, fade_r)
-        major_pen = _fade_pen(QColor(_GRID_MAJOR), fade_c, fade_r, 1.3)
-        pl_minor  = QPen(QColor(0, 120, 140, 110)); pl_minor.setCosmetic(True)
-        pl_major  = QPen(QColor(0, 155, 175, 180)); pl_major.setCosmetic(True)
-        pl_major.setWidthF(1.4)
-
-        scene  = self.scene()
-        plane  = scene._working_plane
-        offset = scene._plane_offset
+        minor_pen = _fade_pen(_faded(_GRID_MINOR, floor), fade_c, fade_r)
+        major_pen = _fade_pen(_faded(_GRID_MAJOR, floor), fade_c, fade_r, 1.3)
+        if floor < 0.5:
+            # Seen edge-on, the floor is gone: the working plane's grid is THE grid, drawn in
+            # the neutral grid colours (a plane frame's Front view reads like a 2D drawing).
+            pl_minor = _fade_pen(QColor(_GRID_MINOR), fade_c, fade_r)
+            pl_major = _fade_pen(QColor(_GRID_MAJOR), fade_c, fade_r, 1.3)
+        else:
+            pl_minor = QPen(QColor(0, 120, 140, 110)); pl_minor.setCosmetic(True)
+            pl_major = QPen(QColor(0, 155, 175, 180)); pl_major.setCosmetic(True)
+            pl_major.setWidthF(1.4)
 
         # ── Helpers ───────────────────────────────────────────────────────────
         def _range(center: float, ext: float) -> list[float]:
             i0 = math.floor((center - ext) / spacing)
             i1 = math.ceil( (center + ext) / spacing) + 1
-            return [i * spacing for i in range(i0, i1)]
-
-        def _z_range(ext: float) -> list[float]:
-            i0 = math.floor(-ext / spacing)
-            i1 = math.ceil(ext / spacing) + 1
             return [i * spacing for i in range(i0, i1)]
 
         def _is_major(val: float) -> bool:
@@ -2826,24 +2854,28 @@ class StructView(QGraphicsView):
 
         x_vals = _range(cx, extent_m)
         y_vals = _range(cy, extent_m)
-        z_vals = _z_range(extent_m)
+        z_vals = _range(cz, extent_m)
         x0, x1 = cx - extent_m, cx + extent_m
         y0, y1 = cy - extent_m, cy + extent_m
         z0 = z_vals[0] if z_vals else -2.0
+        z1 = z_vals[-1] if z_vals else extent_m
 
-        # ── XY ground floor ───────────────────────────────────────────────────
-        for y_val in y_vals:
-            painter.setPen(_pen(y_val, minor_pen, major_pen))
-            painter.drawLine(QLineF(*isometric(x0, y_val, 0), *isometric(x1, y_val, 0)))
-        for x_val in x_vals:
-            painter.setPen(_pen(x_val, minor_pen, major_pen))
-            painter.drawLine(QLineF(*isometric(x_val, y0, 0), *isometric(x_val, y1, 0)))
+        # ── XY ground floor (fades out as the view approaches edge-on) ────────
+        if floor > 0.0:
+            for y_val in y_vals:
+                painter.setPen(_pen(y_val, minor_pen, major_pen))
+                painter.drawLine(QLineF(*isometric(x0, y_val, 0), *isometric(x1, y_val, 0)))
+            for x_val in x_vals:
+                painter.setPen(_pen(x_val, minor_pen, major_pen))
+                painter.drawLine(QLineF(*isometric(x_val, y0, 0), *isometric(x_val, y1, 0)))
 
-        # Ground axes across the whole floor: X red along y = 0, Y green along x = 0
-        for colour, (a, b) in ((_theme.AXIS_X, ((x0, 0.0), (x1, 0.0))),
-                               (_theme.AXIS_Y, ((0.0, y0), (0.0, y1)))):
-            c = QColor(colour); c.setAlpha(200)
-            painter.setPen(_fade_pen(c, fade_c, fade_r, 1.8))
+        # Ground axes across the whole floor: X red along y = 0 (always: it is the ground
+        # line in an elevation), Y green along x = 0 (fades with the floor)
+        for colour, (a, b), factor in ((_theme.AXIS_X, ((x0, 0.0), (x1, 0.0)), 1.0),
+                                       (_theme.AXIS_Y, ((0.0, y0), (0.0, y1)), floor)):
+            if factor <= 0.0:
+                continue
+            painter.setPen(_fade_pen(_faded(colour, factor, 200), fade_c, fade_r, 1.8))
             painter.drawLine(QLineF(*isometric(*a, 0), *isometric(*b, 0)))
 
         # ── Active working plane overlay ──────────────────────────────────────
@@ -2860,14 +2892,14 @@ class StructView(QGraphicsView):
                 painter.drawLine(QLineF(*isometric(x0, offset, z_val), *isometric(x1, offset, z_val)))
             for x_val in x_vals:
                 painter.setPen(_pen(x_val, pl_minor, pl_major))
-                painter.drawLine(QLineF(*isometric(x_val, offset, z0), *isometric(x_val, offset, extent_m)))
+                painter.drawLine(QLineF(*isometric(x_val, offset, z0), *isometric(x_val, offset, z1)))
         elif plane == WorkingPlane.YZ:
             for z_val in z_vals:
                 painter.setPen(_pen(z_val, pl_minor, pl_major))
                 painter.drawLine(QLineF(*isometric(offset, y0, z_val), *isometric(offset, y1, z_val)))
             for y_val in y_vals:
                 painter.setPen(_pen(y_val, pl_minor, pl_major))
-                painter.drawLine(QLineF(*isometric(offset, y_val, z0), *isometric(offset, y_val, extent_m)))
+                painter.drawLine(QLineF(*isometric(offset, y_val, z0), *isometric(offset, y_val, z1)))
 
         # ── World-origin axis indicators (X=red, Y=green, Z=blue) ──────────────
         def _axis3_pen(r: int, g: int, b: int) -> QPen:
@@ -2894,9 +2926,10 @@ class StructView(QGraphicsView):
         painter.setPen(QPen(QColor(_theme.AXIS_X)))
         painter.drawText(QPointF(xa + 5 / scale, ya_x + 5 / scale), "X")
 
-        ya_x2, ya_y2 = isometric(0, arm_m, 0)
-        painter.setPen(QPen(QColor(_theme.AXIS_Y)))
-        painter.drawText(QPointF(ya_x2 - 14 / scale, ya_y2 + 5 / scale), "Y")
+        if floor > 0.0:                          # the Y axis is hidden edge-on, so is its label
+            ya_x2, ya_y2 = isometric(0, arm_m, 0)
+            painter.setPen(QPen(_faded(_theme.AXIS_Y, floor)))
+            painter.drawText(QPointF(ya_x2 - 14 / scale, ya_y2 + 5 / scale), "Y")
 
         # Z arm — blue (straight up in scene space)
         za_sx, za_sy = isometric(0, 0, arm_m)
