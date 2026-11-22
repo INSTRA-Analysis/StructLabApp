@@ -3,9 +3,11 @@
 Layout (Blender-splash style, framed like the main window)::
 
     ┌ banner: wordmark, version, tagline over a faint lattice drawing ────────────┐
-    ├ Start ───────────────┐ ┌ Recent models ─────────────────────────────────────┤
-    │ New 3D model         │ │ [thumb] tower.slab   [thumb] bridge.slab   …       │
-    │ New plane frame      │ │  folder · date        folder · date                │
+    ├ Start ───────────────┐ ┌ Modules ───────────────────────────────────────────┤
+    │ New 3D model         │ │ Static (included) · Dynamics, Plates (coming soon)  │
+    │ New plane frame      │ ├ Recent models ─────────────────────────────────────┤
+    │                      │ │ [thumb] tower.slab   [thumb] bridge.slab   …       │
+    │                      │ │  folder · date        folder · date                │
     │ Open…                │ │                                                    │
     │ Templates (wizards)  │ │                                                    │
     └──────────────────────┘ └────────────────────────────────────────────────────┘
@@ -35,7 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui_qt import theme
-from ui_qt.icons import icon
+from ui_qt.icons import icon, icon_pixmap
 from ui_qt.version import VERSION_LABEL
 
 Segment = tuple[tuple[float, float, float], tuple[float, float, float]]
@@ -235,9 +237,9 @@ class _Banner(QWidget):
         f2 = QFont(); f2.setPointSize(10)
         p.setFont(f2)
         p.setPen(QColor(theme.CYAN))
-        p.drawText(QPointF(32, 92), f"{VERSION_LABEL}   ·   2D and 3D structural analysis")
+        p.drawText(QPointF(32, 92), f"{VERSION_LABEL}   ·   Plane and space frame analysis")
         p.setPen(QColor(theme.TEXT_DIM))
-        p.drawText(QPointF(32, 114), "Beams · frames · trusses · space structures  —  "
+        p.drawText(QPointF(32, 114), "Beams · frames · trusses · towers  —  "
                                      "Direct Stiffness Method")
         p.end()
 
@@ -291,6 +293,55 @@ class _Card(QFrame):
         super().mouseReleaseEvent(event)
 
 
+class _ModuleTile(QFrame):
+    """A module on the start page: icon in its colour, status badge, title, summary.
+    Available modules are information only; a coming-soon one is clickable (opens its card)."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, spec) -> None:
+        super().__init__()
+        self.spec = spec
+        soon = spec.status == "coming_soon"
+        self.setObjectName("start_module_soon" if soon else "start_module")
+        if soon:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip(f"{spec.title}: coming soon — click to see what it will do")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(5)
+
+        top = QHBoxLayout()
+        ico = QLabel()
+        ico.setPixmap(icon_pixmap(spec.icon, spec.hue, 40, self.devicePixelRatioF()))
+        ico.setStyleSheet("background: transparent; border: none;")
+        top.addWidget(ico)
+        top.addStretch(1)
+        badge = QLabel("Coming soon" if soon else "Included")
+        badge.setObjectName("start_badge_soon" if soon else "start_badge_included")
+        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(top)
+
+        title = QLabel(spec.title)
+        title.setObjectName("start_card_title")
+        lay.addWidget(title)
+        summary = QLabel(spec.summary)
+        summary.setObjectName("start_card_sub")
+        summary.setWordWrap(True)
+        lay.addWidget(summary)
+        if soon:
+            more = QLabel("What it will do →")
+            more.setObjectName("start_module_more")
+            lay.addWidget(more)
+        lay.addStretch(1)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if (self.spec.status == "coming_soon" and event.button() == Qt.MouseButton.LeftButton
+                and self.rect().contains(event.pos())):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 _STYLE = f"""
 QDialog#start_page {{ background: {theme.FRAME_GAP}; }}
 QFrame#start_box {{
@@ -317,6 +368,22 @@ QPushButton#start_link {{
 }}
 QPushButton#start_link:hover {{ color: {theme.CYAN}; }}
 QScrollArea#start_scroll, QWidget#start_recent {{ background: transparent; border: none; }}
+QFrame#start_module {{
+    background: {theme.SURFACE2}; border: 1px solid {theme.BORDER}; border-radius: 6px;
+}}
+QFrame#start_module_soon {{
+    background: #2f3640; border: 1px dashed {theme.FRAME_LINE}; border-radius: 6px;
+}}
+QFrame#start_module_soon:hover {{ border: 1px dashed {theme.RESULT}; background: #353c48; }}
+QLabel#start_badge_included {{
+    background: #1d3b2a; color: #8be29a; border-radius: 9px; padding: 1px 8px;
+    font-size: 11px; font-weight: bold;
+}}
+QLabel#start_badge_soon {{
+    background: #3a2f52; color: #cdb6f5; border-radius: 9px; padding: 1px 8px;
+    font-size: 11px; font-weight: bold;
+}}
+QLabel#start_module_more {{ color: {theme.AQUA}; font-size: 11px; background: transparent; }}
 """
 
 
@@ -334,10 +401,11 @@ class WelcomeDialog(QDialog):
         self.setWindowTitle("Welcome to StructLab")
         self.setModal(True)
         self.setStyleSheet(_STYLE)
-        self.resize(1040, 660)
+        self.resize(1080, 720)
         self.choice: str = "blank"
         self.start_mode: str = "3D"
         self.recent_cards: list[_Card] = []
+        self.module_tiles: list[_ModuleTile] = []
         self._build_ui(recent_files or [])
 
     # ── layout ────────────────────────────────────────────────────────────────
@@ -397,8 +465,28 @@ class WelcomeDialog(QDialog):
         lay.addStretch(1)
         return box
 
+    def _modules_row(self, lay: QVBoxLayout) -> None:
+        """What StructLab does (Static Analysis) beside the modules from ui_qt/modules.py; a
+        coming-soon module opens its card over the start page."""
+        from ui_qt.modules import MODULES, STATIC_ANALYSIS
+        lay.addWidget(self._heading("Modules"))
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        for spec in (STATIC_ANALYSIS,) + MODULES:
+            tile = _ModuleTile(spec)
+            tile.clicked.connect(lambda s=spec: self._show_module(s))
+            row.addWidget(tile, 1)
+            self.module_tiles.append(tile)
+        lay.addLayout(row)
+        lay.addSpacing(6)
+
+    def _show_module(self, spec) -> None:
+        from ui_qt.module_card import show_module_card
+        show_module_card(self, spec)
+
     def _recent_box(self, recent_files: list[str]) -> QFrame:
         box, lay = self._box()
+        self._modules_row(lay)
         lay.addWidget(self._heading("Recent models"))
         if not recent_files:
             empty = QLabel("Models you open or save will appear here.")
