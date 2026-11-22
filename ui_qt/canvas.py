@@ -2455,7 +2455,7 @@ class StructView(QGraphicsView):
         painter.setFont(font)
         name_pen = QPen(QColor(215, 215, 215));  name_pen.setCosmetic(True)
         painter.setPen(name_pen)
-        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 0.88), "StructLabPro")
+        painter.drawText(QPointF(text_x, y0 + pad_y + line_h * 0.88), "StructLab")
 
         font.setPointSize(7);  font.setBold(False)
         painter.setFont(font)
