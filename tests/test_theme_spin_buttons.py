@@ -18,10 +18,10 @@ def test_spin_buttons_render_their_signs():
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PyQt6.QtWidgets import QApplication, QDoubleSpinBox
-    from ui_qt.theme import apply_theme
-    app = QApplication.instance() or QApplication([])
-    apply_theme(app)
+    from ui_qt.theme import STYLESHEET
+    app = QApplication.instance() or QApplication([])   # keep a reference while widgets live
     box = QDoubleSpinBox()
+    box.setStyleSheet(STYLESHEET)          # this widget only: the shared test app stays unthemed
     box.resize(120, 26)
     box.setValue(1.0)
     img = box.grab().toImage()
