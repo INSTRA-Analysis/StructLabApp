@@ -115,6 +115,10 @@ COMMANDS: tuple[Command, ...] = (
     # ── view ──────────────────────────────────────────────────────────────────
     Command("show_loads", "Show Loads", "_on_show_loads_toggled", "arrow-down-to-line", "L",
             "Show load arrows and labels (L)", True, True),
+    Command("show_restraints", "Show Restraints", "_on_show_restraints_toggled", "support", "",
+            "Draw supports as restraint markers instead of bearings: a cone into the node for each\n"
+            "restrained translation, a disc (a ring in 2D) for each restrained rotation, a coil or\n"
+            "spiral for each spring.  Red = X  Green = Y  Blue = Z", True),
     Command("colour_group", "Colour by Group", "_on_colour_by_group_toggled", "paintbrush", "Ctrl+G",
             "Tint members by their group label, with a legend (Ctrl+G)", True),
     Command("thickness", "Thickness by Section", "_on_thickness_toggled", "pen-line", "Ctrl+T",
@@ -146,6 +150,7 @@ def _category_keys() -> dict[str, str]:
         theme.GEOMETRY: ("mode_node", "mode_member", "duplicate", "set_bars", "set_beams",
                          "rotate_selection", "scale_selection", "beam_wizard", "portal_wizard",
                          "truss_wizard", "frame_wizard"),
+        theme.SUPPORT:  ("show_restraints",),
         theme.LOAD:     ("add_lc", "remove_lc", "self_weight", "combinations", "show_loads"),
         theme.RESULT:   ("solve", "ov_bmd", "ov_sfd", "ov_afd", "ov_def", "ov_labels",
                          "force_colours", "animate"),

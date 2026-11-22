@@ -1705,6 +1705,14 @@ class StructCanvas(QGraphicsScene):
     # an L 200x20 has ~15x the area of an L 50x5, which would make the small bracing vanish.
     _THICKNESS_MIN, _THICKNESS_MAX = 0.6, 2.2
 
+    def set_show_restraints(self, enabled: bool) -> None:
+        """Draw supports as restraint markers (on) or as bearings (off) and redraw them."""
+        from ui_qt.canvas_items import set_show_restraints
+        set_show_restraints(enabled)
+        for item in self._node_items.values():
+            item._draw_support_symbol()
+        self.update()
+
     def set_thickness_by_section(self, enabled: bool) -> None:
         """Toggle the 'Thickness by section' view: member line width follows the
         square root of its section area, scaled to the sizes present in the model."""

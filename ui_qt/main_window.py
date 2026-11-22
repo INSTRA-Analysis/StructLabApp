@@ -528,7 +528,7 @@ class MainWindow(QMainWindow):
     def _build_tools_menu(self, mb) -> None:
         a = self._act
         tools_menu = mb.addMenu("Tools")
-        for key in ("show_loads", "colour_group", "thickness", "animate", "section_cut"):
+        for key in ("show_loads", "show_restraints", "colour_group", "thickness", "animate", "section_cut"):
             tools_menu.addAction(a[key])
         tools_menu.addSeparator()
         tools_menu.addAction(a["check_duplicates"])
@@ -791,6 +791,9 @@ class MainWindow(QMainWindow):
             else:
                 act = shortcuts_menu.addAction(f"    {name}\t{key}")
             act.setEnabled(False)
+
+    def _on_show_restraints_toggled(self, checked: bool) -> None:
+        self._scene.set_show_restraints(checked)
 
     def _on_toggle_local_axes(self, checked: bool) -> None:
         from ui_qt.canvas_items import set_show_local_axes

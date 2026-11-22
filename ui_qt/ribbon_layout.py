@@ -151,7 +151,7 @@ def build_ribbon(win) -> RibbonBar:
     g.add_widget(win._plane_label)
     g.add_widget(win._plane_spin)
     g = view.add_group("Display")
-    for key in ("show_loads", "colour_group", "thickness", "local_axes", "section_cut"):
+    for key in ("show_loads", "show_restraints", "colour_group", "thickness", "local_axes", "section_cut"):
         g.add_small(a[key])
     g = view.add_group("Panels")
     for key in ("panel_properties", "panel_results", "panel_groups", "reset_layout"):

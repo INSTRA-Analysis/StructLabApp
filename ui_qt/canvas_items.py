@@ -33,6 +33,50 @@ def set_show_local_axes(show: bool) -> None:
     global _SHOW_LOCAL_AXES_ALL
     _SHOW_LOCAL_AXES_ALL = show
 
+
+# ── support display: bearings (default) or restraint markers ──────────────────
+_SHOW_RESTRAINTS: bool = False
+
+
+def set_show_restraints(show: bool) -> None:
+    """Draw supports as restraint markers (cones/discs per restrained DOF) instead of bearings."""
+    global _SHOW_RESTRAINTS
+    _SHOW_RESTRAINTS = bool(show)
+
+
+class SupportGlyphItem(QGraphicsItem):
+    """Paints a support symbol (a list of support_glyphs.DrawOp) under its node.
+
+    A child of the NodeItem stacked behind it, so the node dot sits on top of the symbol and the
+    symbol follows the node's scale. It takes no mouse buttons: clicks reach the node or members.
+    """
+
+    def __init__(self, ops: list, parent: QGraphicsItem) -> None:
+        super().__init__(parent)
+        self.ops = ops
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemStacksBehindParent)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        rect = QRectF()
+        for op in ops:
+            rect = rect.united(op.path.boundingRect())
+        self._bounds = rect.adjusted(-2, -2, 2, 2)
+
+    def boundingRect(self) -> QRectF:
+        return self._bounds
+
+    def paint(self, painter, option, widget=None) -> None:
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        for op in self.ops:
+            if op.pen is None:
+                painter.setPen(Qt.PenStyle.NoPen)
+            else:
+                pen = QPen(op.pen, op.width)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+            painter.setBrush(QBrush(op.fill) if op.fill is not None else Qt.BrushStyle.NoBrush)
+            painter.drawPath(op.path)
+
 _VERT_THRESHOLD = 0.95   # same as FrameElement._VERTICAL_THRESHOLD
 
 def _compute_local_axes(xi: float, yi: float, zi: float,
@@ -63,9 +107,6 @@ GRID_STEP  = PX_PER_M          # major grid lines every 1 m
 GRID_SUB   = GRID_STEP // 4    # minor grid lines every 0.25 m
 NODE_R     = 6
 SNAP_PX    = NODE_R * 3
-_SUPP_S_PX      = 16.0                    # base support-glyph unit, screen-px at zoom=1
-_SUPP_S_M       = _SUPP_S_PX / PX_PER_M   # ~0.20 m
-_SUPP_STANDOFF_M = NODE_R / PX_PER_M      # gap between the node dot and glyph geometry
 ARROW_LEN  = 40                # px — nodal load arrow shaft
 ARROW_HEAD = 7                 # px — arrowhead half-width
 UDL_LEN    = 22                # px — UDL arrow shaft
@@ -218,136 +259,6 @@ def _proj_y_screen_dir() -> tuple[float, float]:
     return (sx / mag, sy / mag) if mag > 1e-9 else (0.0, 1.0)
 
 
-def _support_bar_axis_world() -> tuple[float, float, float]:
-    """World unit ground-plane axis (X or Y), whichever reads widest on screen
-    under the current orbit — keeps FIXED/PIN/ROLLER glyphs' base bar readable
-    from any orbit angle (avoids a nearly edge-on bar when one axis nearly
-    vanishes on screen). Screen-x extent of world X is cos(az), of world Y is
-    sin(az) — independent of elevation.
-    """
-    az = math.radians(_proj_mod.ISO_AZIMUTH)
-    x_bx = math.cos(az)
-    y_bx = math.sin(az)
-    return (1.0, 0.0, 0.0) if abs(x_bx) >= abs(y_bx) else (0.0, 1.0, 0.0)
-
-
-# ── true-3D support-glyph geometry primitives ─────────────────────────────────
-# Vertices are world-metre offsets FROM THE NODE. isometric() is linear/
-# homogeneous (no translation term), so projecting an offset directly gives
-# the correct NodeItem-local (child) point — no need to subtract the node's
-# own projected position.
-
-def _node_local_pt(dx: float, dy: float, dz: float) -> QPointF:
-    sx, sy = isometric(dx, dy, dz)
-    return QPointF(sx, sy)
-
-
-def _project_poly_3d(offsets_m: list[tuple[float, float, float]]) -> QPolygonF:
-    return QPolygonF([_node_local_pt(*p) for p in offsets_m])
-
-
-def _project_path_3d(offsets_m: list[tuple[float, float, float]], closed: bool = True) -> QPainterPath:
-    path = QPainterPath()
-    pts = [_node_local_pt(*p) for p in offsets_m]
-    path.moveTo(pts[0])
-    for pt in pts[1:]:
-        path.lineTo(pt)
-    if closed:
-        path.closeSubpath()
-    return path
-
-
-def _project_polyline_3d(strokes: list[list[tuple[float, float, float]]]) -> QPainterPath:
-    """One QPainterPath combining several disjoint open polylines (hatch
-    lines, arrow segments, a helix/spiral point sequence, ...)."""
-    path = QPainterPath()
-    for stroke in strokes:
-        if not stroke:
-            continue
-        pts = [_node_local_pt(*p) for p in stroke]
-        path.moveTo(pts[0])
-        for pt in pts[1:]:
-            path.lineTo(pt)
-    return path
-
-
-def _face_towards_camera(offsets_m: list[tuple[float, float, float]]) -> bool:
-    """True if a planar face (3+ world-metre points, CCW winding as seen from
-    outside the solid) faces the viewer under the current orbit."""
-    p0, p1, p2 = (np.array(offsets_m[i]) for i in (0, 1, 2))
-    normal = np.cross(p1 - p0, p2 - p0)
-    cam = np.array(_proj_mod.camera_dir())
-    return float(np.dot(normal, cam)) >= 0.0
-
-
-def _circle_poly_points(center_m: tuple[float, float, float],
-                        u: tuple[float, float, float], v: tuple[float, float, float],
-                        radius_m: float, n: int = 12) -> list[tuple[float, float, float]]:
-    """N-gon approximating a 3D circle of given radius, centered at center_m
-    (world offset), lying in the plane spanned by unit vectors u, v."""
-    pts = []
-    for i in range(n):
-        th = 2 * math.pi * i / n
-        pts.append(tuple(center_m[k] + radius_m * (math.cos(th) * u[k] + math.sin(th) * v[k])
-                          for k in range(3)))
-    return pts
-
-
-_AXIS_PERP_BASIS: dict[tuple[float, float, float], tuple] = {
-    (1.0, 0.0, 0.0):  ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-    (-1.0, 0.0, 0.0): ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-    (0.0, 1.0, 0.0):  ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-    (0.0, -1.0, 0.0): ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-    (0.0, 0.0, 1.0):  ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-    (0.0, 0.0, -1.0): ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-}
-
-
-def _perp_basis(axis: tuple[float, float, float]):
-    """(u, v) unit vectors perpendicular to axis, for circles/helices/spirals."""
-    basis = _AXIS_PERP_BASIS.get(axis)
-    if basis is not None:
-        return basis
-    helper = (0.0, 0.0, 1.0) if abs(axis[2]) < 0.9 else (1.0, 0.0, 0.0)
-    u = np.cross(axis, helper); u = tuple(u / np.linalg.norm(u))
-    v = tuple(np.cross(axis, u))
-    return u, v
-
-
-def _helix_points(axis: tuple[float, float, float], turns: float, n_per_turn: int,
-                  length_m: float, radius_m: float, standoff: float = 0.0
-                  ) -> list[tuple[float, float, float]]:
-    """Translational-spring coil points: a helix along axis starting at
-    `standoff` from the node."""
-    u, v = _perp_basis(axis)
-    n = max(1, int(turns * n_per_turn))
-    pts = []
-    for i in range(n + 1):
-        t = i / n
-        along = standoff + t * length_m
-        ang = t * turns * 2 * math.pi
-        pts.append(tuple(along * axis[k] + radius_m * (math.cos(ang) * u[k] + math.sin(ang) * v[k])
-                          for k in range(3)))
-    return pts
-
-
-def _spiral_points(axis: tuple[float, float, float], wraps: float, n_per_wrap: int,
-                   r_start_m: float, r_end_m: float, standoff: float = 0.0
-                   ) -> list[tuple[float, float, float]]:
-    """Rotational-spring coil points: a flat spiral in the plane perpendicular
-    to axis, offset `standoff` along axis from the node."""
-    u, v = _perp_basis(axis)
-    n = max(1, int(wraps * n_per_wrap))
-    pts = []
-    for i in range(n + 1):
-        t = i / n
-        r = r_start_m + t * (r_end_m - r_start_m)
-        ang = t * wraps * 2 * math.pi
-        pts.append(tuple(standoff * axis[k] + r * (math.cos(ang) * u[k] + math.sin(ang) * v[k])
-                          for k in range(3)))
-    return pts
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # NodeItem
 # ─────────────────────────────────────────────────────────────────────────────
@@ -460,22 +371,7 @@ class NodeItem(QGraphicsEllipseItem):
         option.state = option.state & ~QStyle.StateFlag.State_Selected
         super().paint(painter, option, widget)
 
-    # ── support symbol ────────────────────────────────────────────────────────
-
-    # ── support glyph item factories ─────────────────────────────────────────
-
-    def _supp_path_item(self, path: QPainterPath, fill: str | None, pen: str = "#ffffff",
-                        pw: float = 1.5, z: float = 1.0) -> None:
-        # Parent=self so Qt auto-hides this item when NodeItem is hidden.
-        # path is built from world-metre offsets via _project_path_3d/_project_poly_3d/
-        # _project_polyline_3d (or, for 2D glyphs, plain screen-px QPainterPath).
-        it = QGraphicsPathItem(path, self)
-        it.setBrush(QBrush(QColor(fill)) if fill is not None else QBrush(Qt.BrushStyle.NoBrush))
-        it.setPen(QPen(QColor(pen), pw))
-        it.setZValue(z)
-        self._support_items.append(it)
-
-    # ── dispatcher ────────────────────────────────────────────────────────────
+    # ── support symbol (drawing office in 2D, solid bearings in 3D; see support_glyphs.py) ──
 
     def _draw_support_symbol(self) -> None:
         for it in self._support_items:
@@ -485,247 +381,18 @@ class NodeItem(QGraphicsEllipseItem):
         stype = self.node.support_type
         if stype == SupportType.FREE:
             return
-
-        ms = self._scene.model_state
-        in_3d = _display_3d(ms)
-
-        _COL = {
-            SupportType.FIXED:    ("#c0392b", "#7b241c"),
-            SupportType.PIN:      ("#2980b9", "#1a5276"),
-            SupportType.ROLLER:   ("#f39c12", "#9a7d0a"),
-            SupportType.ROLLER_Y: ("#f39c12", "#9a7d0a"),
-            SupportType.ROLLER_Z: ("#00BCD4", "#00838F"),
-            SupportType.SPRING:   ("#27ae60", "#1e8449"),
-        }
-        col, col_dk = _COL.get(stype, ("#cccccc", "#888888"))
-
-        if stype == SupportType.FIXED:
-            self._draw_fixed_3d(col, col_dk) if in_3d else self._draw_fixed_2d(col, col_dk)
-        elif stype == SupportType.PIN:
-            self._draw_pin_3d(col, col_dk) if in_3d else self._draw_pin_2d(col, col_dk)
-        elif stype in (SupportType.ROLLER, SupportType.ROLLER_Y):
-            axis = "x" if stype == SupportType.ROLLER else "y"
-            (self._draw_roller_3d if in_3d else self._draw_roller_2d)(col, col_dk, axis)
-        elif stype == SupportType.ROLLER_Z:
-            self._draw_roller_z_3d(col, col_dk) if in_3d else self._draw_roller_z_2d_disabled(col)
-        elif stype == SupportType.SPRING:
-            self._draw_spring_3d(col) if in_3d else self._draw_spring_2d(col)
-
-    # ── FIXED ─────────────────────────────────────────────────────────────────
-
-    def _draw_fixed_3d(self, col: str, col_dk: str) -> None:
-        bar = _support_bar_axis_world()
-        perp = (-bar[1], bar[0], 0.0)
-        half_w, depth, z0 = _SUPP_S_M, 0.6 * _SUPP_S_M, -_SUPP_STANDOFF_M
-        corners = [tuple(t * half_w * bar[k] + u * depth * perp[k] + (z0 if k == 2 else 0.0)
-                        for k in range(3))
-                  for (t, u) in [(-1, 0), (1, 0), (1, 1), (-1, 1)]]
-        self._supp_path_item(_project_path_3d(corners), col, col_dk, pw=1.0, z=0.9)
-
-        strokes = []
-        for i in range(5):
-            t = -1.0 + i * (2.0 / 4)
-            p0 = tuple(t * half_w * bar[k] + (z0 if k == 2 else 0.0) for k in range(3))
-            p1 = tuple(p0[k] + depth * perp[k] for k in range(3))
-            strokes.append([p0, p1])
-        strokes.append([(0.0, 0.0, 0.0), (0.0, 0.0, z0)])   # "planted" stem
-        self._supp_path_item(_project_polyline_3d(strokes), None, col_dk, pw=1.2, z=1.0)
-
-    def _draw_fixed_2d(self, col: str, col_dk: str) -> None:
-        s = 14
-        plate = QPainterPath()
-        plate.moveTo(-s, NODE_R)
-        plate.lineTo( s, NODE_R)
-        plate.lineTo( s - 4, NODE_R + 8)
-        plate.lineTo(-s - 4, NODE_R + 8)
-        plate.closeSubpath()
-        self._supp_path_item(plate, col, col_dk, pw=0, z=0.9)
-        hatch = QPainterPath()
-        for i in range(5):
-            x = -s + i * (2 * s / 4)
-            hatch.moveTo(x, NODE_R)
-            hatch.lineTo(x - 6, NODE_R + 8)
-        self._supp_path_item(hatch, col, "#ffffff", pw=1.5, z=1.0)
-
-    # ── PIN ───────────────────────────────────────────────────────────────────
-
-    def _draw_pin_3d(self, col: str, col_dk: str) -> None:
-        apex = (0.0, 0.0, 0.0)
-        h_m, r_b = 1.0 * _SUPP_S_M, 0.55 * _SUPP_S_M
-        base = [(r_b * math.cos(math.radians(a)), r_b * math.sin(math.radians(a)), -h_m)
-               for a in (45, 135, 225, 315)]
-        for k in range(4):
-            face = [apex, base[k], base[(k + 1) % 4]]
-            front = _face_towards_camera(face)
-            self._supp_path_item(_project_path_3d(face), col if front else col_dk,
-                                 "#ffffff", pw=1.2, z=(1.0 if front else 0.9))
-        ring = _circle_poly_points((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
-                                   0.22 * _SUPP_S_M, n=10)
-        self._supp_path_item(_project_path_3d(ring), None, col_dk, pw=1.4, z=1.1)
-
-    def _draw_pin_2d(self, col: str, col_dk: str) -> None:
-        s = 14
-        tri = QPainterPath()
-        tri.moveTo(0, NODE_R)
-        tri.lineTo(-s, s + NODE_R)
-        tri.lineTo( s, s + NODE_R)
-        tri.closeSubpath()
-        self._supp_path_item(tri, col, "#ffffff", pw=1.5)
-
-    # ── ROLLER / ROLLER_Y (shared, parametrized by restrained/free ground axis) ─
-
-    _ROLLER_AXES = {
-        "x": ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0)),   # ROLLER:   restrained Y, free X
-        "y": ((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),   # ROLLER_Y: restrained X, free Y
-    }
-
-    def _draw_roller_3d(self, col: str, col_dk: str, axis: str) -> None:
-        r_axis, f_axis = self._ROLLER_AXES[axis]
-        self._draw_roller_3d_axes(col, col_dk, r_axis, f_axis)
-
-    def _draw_roller_3d_axes(self, col: str, col_dk: str,
-                             r_axis: tuple[float, float, float],
-                             f_axis: tuple[float, float, float]) -> None:
-        z_axis = (0.0, 0.0, 1.0)
-        apex = tuple(a * _SUPP_STANDOFF_M for a in r_axis)
-        base_center = tuple(a * (_SUPP_STANDOFF_M + _SUPP_S_M) for a in r_axis)
-        base = [tuple(base_center[k] + 0.55 * _SUPP_S_M
-                     * (math.cos(math.radians(a)) * f_axis[k] + math.sin(math.radians(a)) * z_axis[k])
-                     for k in range(3))
-               for a in (90, 210, 330)]
-        for k in range(3):
-            face = [apex, base[k], base[(k + 1) % 3]]
-            front = _face_towards_camera(face)
-            self._supp_path_item(_project_path_3d(face), col if front else col_dk,
-                                 "#ffffff", pw=1.2, z=(1.0 if front else 0.9))
-
-        wheel_centers = [tuple(base_center[k] + sgn * 0.5 * _SUPP_S_M * f_axis[k] for k in range(3))
-                         for sgn in (-1, 1)]
-        for c in wheel_centers:
-            wheel = _circle_poly_points(c, z_axis, r_axis, 0.28 * _SUPP_S_M, n=12)
-            self._supp_path_item(_project_path_3d(wheel), None, col_dk, pw=1.2, z=1.1)
-
-        # Slide-direction arrow, placed past the wheels along r so it never
-        # crosses the wedge/wheel body.
-        arrow_c = tuple(base_center[k] + r_axis[k] * 0.6 * _SUPP_S_M for k in range(3))
-        shaft = 1.6 * _SUPP_S_M
-        p0 = tuple(arrow_c[k] - f_axis[k] * shaft / 2 for k in range(3))
-        p1 = tuple(arrow_c[k] + f_axis[k] * shaft / 2 for k in range(3))
-        strokes = [[p0, p1]]
-        second = z_axis if abs(f_axis[2]) < 0.9 else r_axis
-        head = 0.28 * _SUPP_S_M
-        for tip, d in ((p0, tuple(-c for c in f_axis)), (p1, f_axis)):
-            for sgn in (-1, 1):
-                wing = tuple(0.85 * d[k] + sgn * 0.55 * second[k] for k in range(3))
-                end = tuple(tip[k] + head * wing[k] for k in range(3))
-                strokes.append([tip, end])
-        self._supp_path_item(_project_polyline_3d(strokes), None, "#ffffff", pw=1.6, z=1.2)
-
-    def _draw_roller_2d(self, col: str, col_dk: str, axis: str) -> None:
-        s = 14
-        if axis == "y":   # ROLLER_Y: horizontal roller, symbol to the left of the node
-            tri = QPainterPath()
-            tri.moveTo(-NODE_R, 0)
-            tri.lineTo(-(s + NODE_R), -s)
-            tri.lineTo(-(s + NODE_R),  s)
-            tri.closeSubpath()
-            self._supp_path_item(tri, col, "#ffffff", pw=1.5)
-            wheels = QPainterPath()
-            wheels.addEllipse(-(s + NODE_R + 11), -s,      8, 8)
-            wheels.addEllipse(-(s + NODE_R + 11), -s + 12, 8, 8)
-            self._supp_path_item(wheels, col_dk, "#ffffff", pw=1.0)
-        else:              # ROLLER: vertical roller, symbol below the node
-            tri = QPainterPath()
-            tri.moveTo(0, NODE_R)
-            tri.lineTo(-s, s + NODE_R)
-            tri.lineTo( s, s + NODE_R)
-            tri.closeSubpath()
-            self._supp_path_item(tri, col, "#ffffff", pw=1.5)
-            wheels = QPainterPath()
-            wheels.addEllipse(-s,      s + NODE_R + 3, 8, 8)
-            wheels.addEllipse(-s + 12, s + NODE_R + 3, 8, 8)
-            self._supp_path_item(wheels, col_dk, "#ffffff", pw=1.0)
-
-    # ── ROLLER_Z (3D-only concept: free in Z, restrained in X & Y) ─────────────
-
-    def _draw_roller_z_3d(self, col: str, col_dk: str) -> None:
-        r_axis = _support_bar_axis_world()
-        self._draw_roller_3d_axes(col, col_dk, r_axis, (0.0, 0.0, 1.0))
-
-    def _draw_roller_z_2d_disabled(self, col: str) -> None:
-        """ROLLER_Z is selectable/importable even for 2D models, where it has
-        no meaning (2D has no out-of-plane Z-slide). Show a faded 'assigned
-        but inactive' badge instead of the old, meaningless downward triangle."""
-        ring = QPainterPath()
-        r = NODE_R + 6
-        ring.addEllipse(-r, -r, 2 * r, 2 * r)
-        it = QGraphicsPathItem(ring, self)
-        it.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        pen = QPen(QColor(col), 1.5)
-        pen.setStyle(Qt.PenStyle.DashLine)
-        it.setPen(pen)
-        it.setOpacity(0.55)
-        it.setZValue(1.0)
-        self._support_items.append(it)
-        label = QGraphicsSimpleTextItem("Z̸", self)   # Z with a slash through it
-        label.setBrush(QBrush(QColor(col)))
-        f = label.font(); f.setPointSize(9); f.setBold(True); label.setFont(f)
-        label.setPos(-5, -r - 14)
-        label.setOpacity(0.75)
-        label.setZValue(1.0)
-        self._support_items.append(label)
-
-    # ── SPRING (one coil per active spring constant) ────────────────────────────
-
-    def _draw_spring_3d(self, default_col: str) -> None:
-        node = self.node
-        helix_len = 2.2 * _SUPP_S_M
-        specs = [
-            ((1.0, 0.0, 0.0),  node.spring_kx,  node.spring_krx, "#dc3c3c"),   # X — red
-            ((0.0, 1.0, 0.0),  node.spring_ky,  node.spring_kry, "#32c832"),   # Y — green
-            ((0.0, 0.0, -1.0), node.spring_kz,  node.spring_krz, "#3c6ee6"),   # Z (down) — blue
-        ]
-        drew_any = False
-        for axis, k_trans, k_rot, col_ax in specs:
-            if k_trans != 0.0:
-                pts = _helix_points(axis, turns=4, n_per_turn=10, length_m=helix_len,
-                                    radius_m=0.12 * _SUPP_S_M, standoff=0.0)
-                u, _v = _perp_basis(axis)
-                end = pts[-1]
-                crossbar = [tuple(end[j] - 0.25 * _SUPP_S_M * u[j] for j in range(3)),
-                           tuple(end[j] + 0.25 * _SUPP_S_M * u[j] for j in range(3))]
-                self._supp_path_item(_project_polyline_3d([pts, crossbar]), None, col_ax, pw=1.6, z=1.0)
-                drew_any = True
-            if k_rot != 0.0:
-                standoff = (helix_len + 0.3 * _SUPP_S_M) if k_trans != 0.0 else 0.4 * _SUPP_S_M
-                pts = _spiral_points(axis, wraps=2.5, n_per_wrap=10, r_start_m=0.15 * _SUPP_S_M,
-                                     r_end_m=0.5 * _SUPP_S_M, standoff=standoff)
-                u, v = _perp_basis(axis)
-                tang_ang = 2.5 * 2 * math.pi
-                tangent = tuple(-math.sin(tang_ang) * u[j] + math.cos(tang_ang) * v[j] for j in range(3))
-                tip = pts[-1]
-                arrow_tip = tuple(tip[j] + 0.12 * _SUPP_S_M * tangent[j] for j in range(3))
-                self._supp_path_item(_project_polyline_3d([pts, [tip, arrow_tip]]), None, col_ax, pw=1.6, z=1.0)
-                drew_any = True
-        if not drew_any:
-            # No spring constant set yet — show a generic placeholder coil so a
-            # freshly-assigned SPRING support isn't invisible.
-            pts = _helix_points((0.0, 0.0, -1.0), turns=4, n_per_turn=10, length_m=helix_len,
-                                radius_m=0.12 * _SUPP_S_M, standoff=0.0)
-            self._supp_path_item(_project_polyline_3d([pts]), None, default_col, pw=1.6, z=1.0)
-
-    def _draw_spring_2d(self, col: str) -> None:
-        s = 14
-        path = QPainterPath()
-        y = NODE_R
-        path.moveTo(0, y)
-        for i in range(6):
-            x = 8 * (1 if i % 2 == 0 else -1)
-            path.lineTo(x, y + (i + 1) * 4)
-        path.lineTo(0, y + 28)
-        path.moveTo(-s, y + 30)
-        path.lineTo( s, y + 30)
-        self._supp_path_item(path, col, col, pw=1.5)
+        from ui_qt import support_glyphs as sg
+        in_3d = _display_3d(self._scene.model_state)
+        springs = sg.node_springs(self.node)
+        cam = sg.Camera.from_angles(_proj_mod.ISO_AZIMUTH, _proj_mod.ISO_ELEVATION) if in_3d else None
+        if _SHOW_RESTRAINTS:
+            flags = sg.restraint_flags(stype.name, in_3d)
+            ops = (sg.glyph_ops(sg.restraint_glyph(flags, springs), cam) if in_3d
+                   else sg.restraint_ops_2d(flags, springs))
+        else:
+            ops = (sg.glyph_ops(sg.bearing_glyph(stype.name, cam, springs), cam) if in_3d
+                   else sg.drawing_ops_2d(stype.name, springs))
+        self._support_items.append(SupportGlyphItem(ops, self))
 
     # ── hinge indicator ───────────────────────────────────────────────────────
 
