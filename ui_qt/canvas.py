@@ -1641,19 +1641,14 @@ class StructCanvas(QGraphicsScene):
         self.set_view()
 
     def set_analysis_mode(self, mode: str) -> bool:
-        """Switch between 2D (flat XY) and 3D (Z-up) live. Rotates the model so a planar
-        model keeps standing and every load keeps its direction, flips the flag, and
-        reprojects. The 3D→2D planarity guard is handled by the caller. Returns True if
-        it changed."""
-        if mode not in ("2D", "3D") or mode == self.model_state.analysis_mode:
+        """Take a 2D model to 3D live: it becomes the same structure as a plane frame in the
+        XZ plane (rotated so every load keeps its direction), shown from the front.  Going to
+        2D is refused: StructLab no longer makes 2D models (use Plane Frame (XZ)).
+        Returns True if it changed."""
+        if mode != "3D" or not self.model_state.convert_to_plane_frame():
             return False
-        self.model_state.rotate_axes(mode)   # height moves Y→Z (or back), loads keep their sense
-        self.model_state.analysis_mode = mode
         self.clear_overlays()
-        if mode == "3D":
-            self.set_view(-45.0, 30.0)   # restore isometric (also reprojects)
-        else:
-            self.reproject()             # flat XY reposition
+        self.set_view(0.0, 2.0)          # front elevation of the plane frame (also reprojects)
         self.model_changed.emit()
         return True
 

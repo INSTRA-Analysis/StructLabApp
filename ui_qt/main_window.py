@@ -644,8 +644,17 @@ class MainWindow(QMainWindow):
         Uses redraw(), NOT load_state(self._scene.model_state) — the console
         edits model_state in place, so it's already the scene's current
         object; load_state() would clear it out from under itself (see its
-        docstring)."""
+        docstring).
+
+        A console script that set the model to 2D gets the same structure as a plane frame,
+        like every other way into the window (the window shows 3D models only)."""
+        state = self._scene.model_state
+        if state.convert_to_plane_frame():
+            self._sb.showMessage("The 2D model is now a plane frame in the XZ plane (Z up) — "
+                                 "same structure, same results.")
+            self._face_plane_frame()
         self._scene.redraw()
+        self._update_status_stats()
         self._results_panel.clear()
         self._scene.clear_overlays()
         self._set_overlay_controls_enabled(False)

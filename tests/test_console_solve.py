@@ -39,11 +39,10 @@ def _console_shell(win):
     return win._console_dialog._widget.kernel_manager.kernel.shell
 
 
-def _seed_2d_template(win) -> None:
-    """A leftover 2D model the example has to replace."""
+def _seed_template(win) -> None:
+    """A leftover space-frame model the example has to replace."""
     state = win._scene.model_state
-    state.analysis_mode = "2D"
-    a, b = state.add_node(0, 0), state.add_node(3, 0)
+    a, b = state.add_node(0, 0, 0), state.add_node(3, 2, 1)
     state.add_member(a.id, b.id)
 
 
@@ -53,28 +52,30 @@ def test_console_exposes_solve(window):
 
 
 def test_example_frame_builds_and_solves_in_the_app(window):
-    _seed_2d_template(window)
+    _seed_template(window)
     shell = _console_shell(window)
     with open(EXAMPLE, encoding="utf-8") as fh:
         result = shell.run_cell(fh.read())
     assert result.error_in_exec is None and result.error_before_exec is None
 
     state = window._scene.model_state
-    assert state.is_2d
+    assert (state.analysis_mode, state.analysis_type) == ("3D", "plane_xz")
     assert len(state.nodes) == 4 and len(state.members) == 3   # template was replaced
 
     cache = window._solve_cache
     assert cache is not None
-    assert cache["model"].dofs_per_node == 3
+    assert cache["model"].dofs_per_node == 6 and cache["model"].locked_dofs == (1, 3, 5)
     reactions = np.asarray(cache["reactions"])
-    assert reactions[0::3].sum() == pytest.approx(-20e3, abs=1.0)   # wind balanced
-    assert reactions[1::3].sum() == pytest.approx(90e3, abs=1.0)    # 15 kN/m x 6 m
+    assert reactions[0::6].sum() == pytest.approx(-20e3, abs=1.0)   # wind balanced
+    assert reactions[2::6].sum() == pytest.approx(90e3, abs=1.0)    # 15 kN/m x 6 m, upward
 
 
-def test_example_frame_refuses_3d_project(window):
+def test_example_frame_runs_from_a_2d_leftover_too(window):
+    """Even a model a script set to 2D is replaced by the plane frame."""
+    state = window._scene.model_state
+    state.analysis_mode = "2D"
     shell = _console_shell(window)
-    window._scene.model_state.analysis_mode = "3D"
     with open(EXAMPLE, encoding="utf-8") as fh:
         result = shell.run_cell(fh.read())
-    assert isinstance(result.error_in_exec, RuntimeError)
-    assert window._solve_cache is None
+    assert result.error_in_exec is None
+    assert window._solve_cache is not None and state.analysis_type == "plane_xz"
