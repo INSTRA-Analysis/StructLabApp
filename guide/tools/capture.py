@@ -351,6 +351,30 @@ def capture_supports() -> None:
     close_window(win)
 
 
+# ── Chapter 5: loads ─────────────────────────────────────────────────────────────
+def capture_loads() -> None:
+    from PyQt6.QtWidgets import QTabWidget
+    from ui_qt.combinations import CombinationsDialog
+    win = open_window(portal_frame())
+    win.resizeDocks([win._left_dock], [420], Qt.Orientation.Horizontal)   # room for the tables
+    select_items(win, members=(1,))
+    tabs = win._left_dock.findChild(QTabWidget)
+    tabs.setCurrentIndex(tabs.indexOf(next(tabs.widget(i) for i in range(tabs.count())
+                                           if tabs.tabText(i) == "Loads")))
+    settle(6)
+    save(win._left_dock.grab().toImage(), "properties_member_loads.png")
+    close_window(win)
+
+    win = open_window(TOWER)
+    dlg = CombinationsDialog(win._scene.model_state, lambda combo: None, None, win)
+    dlg.resize(1000, 560)
+    dlg.show()
+    settle(10)
+    save(dlg.grab().toImage(), "combinations.png")
+    dlg.close()
+    close_window(win)
+
+
 def main() -> None:
     IMAGES.mkdir(parents=True, exist_ok=True)
     capture_start_page()
@@ -363,6 +387,7 @@ def main() -> None:
     capture_properties()
     capture_section_picker()
     capture_supports()
+    capture_loads()
 
 
 if __name__ == "__main__":

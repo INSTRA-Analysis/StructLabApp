@@ -10,8 +10,10 @@ listed without links.
    member properties, the section library, element types, local axes, checks
 4. [Supports and releases](04_supports_and_releases.md): support types, single directions,
    springs, symbols, end releases, stability
-5. Loads: load cases, self-weight, combinations, pattern loading
-6. Solving: validation, warnings, mechanisms
+5. [Loads](05_loads.md): load cases, nodal and member loads, self-weight, combinations,
+   pattern loading
+6. [Solving](06_solving.md): running a solve, the checks, mechanisms, what the analysis
+   includes
 7. Results: diagrams, tables, colouring, envelopes, the PDF report
 8. Steel design checks and Optimise
 9. Worked examples: a portal frame and a transmission tower
