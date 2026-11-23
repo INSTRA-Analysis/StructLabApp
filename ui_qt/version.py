@@ -4,5 +4,5 @@
 exported SVGs. (The .slab file-format version is separate: ui_qt/io.py ``_FILE_VERSION``.)
 """
 
-APP_VERSION = "2.0"
-VERSION_LABEL = f"V{APP_VERSION}"        # "V2.0" — as shown in the interface
+APP_VERSION = "3.0"
+VERSION_LABEL = f"V{APP_VERSION}"        # "V3.0" — as shown in the interface
