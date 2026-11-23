@@ -375,6 +375,46 @@ def capture_loads() -> None:
     close_window(win)
 
 
+# ── Chapters 7 and 8: results, design ────────────────────────────────────────────
+def results_tab(win, title: str) -> None:
+    """Bring the Results panel forward on its ``title`` tab."""
+    from ui_qt.panels import ResultsPanel
+    tabs = win.findChild(ResultsPanel)._tabs
+    tabs.setCurrentIndex(next(i for i in range(tabs.count()) if tabs.tabText(i) == title))
+    win._right_dock.raise_()
+    win.resizeDocks([win._right_dock], [640], Qt.Orientation.Horizontal)   # every column shown
+    settle(6)
+
+
+def capture_results() -> None:
+    win = open_window(portal_frame())
+    win._on_solve()
+    settle()
+    overlays = ("ov_def", "ov_bmd", "ov_sfd", "ov_afd")
+
+    def only(*keys: str, labels: bool = True) -> None:
+        for key in overlays:
+            win._act[key].setChecked(key in keys)
+        win._act["ov_labels"].setChecked(labels)
+        win._view.zoom_to_fit()
+        settle(15)
+
+    for key, name in (("ov_def", "diagram_deformed"), ("ov_bmd", "diagram_bmd"),
+                      ("ov_sfd", "diagram_sfd"), ("ov_afd", "diagram_afd")):
+        only(key)
+        save(model_crop(win, margin=90), f"{name}.png")
+    results_tab(win, "Member forces")
+    save(win._right_dock.grab().toImage(), "results_member_forces.png")
+    results_tab(win, "Reactions")
+    save(win._right_dock.grab().toImage(), "results_reactions.png")
+    close_window(win)
+
+    win = solved_tower()
+    results_tab(win, "Design")
+    save(win._right_dock.grab().toImage(), "results_design.png")
+    close_window(win)
+
+
 def main() -> None:
     IMAGES.mkdir(parents=True, exist_ok=True)
     capture_start_page()
@@ -388,6 +428,7 @@ def main() -> None:
     capture_section_picker()
     capture_supports()
     capture_loads()
+    capture_results()
 
 
 if __name__ == "__main__":

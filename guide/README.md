@@ -14,8 +14,10 @@ listed without links.
    pattern loading
 6. [Solving](06_solving.md): running a solve, the checks, mechanisms, what the analysis
    includes
-7. Results: diagrams, tables, colouring, envelopes, the PDF report
-8. Steel design checks and Optimise
+7. [Results](07_results.md): diagrams, result sets, the tables, colouring, the envelope,
+   the PDF report
+8. [Design checks and Optimise](08_design_and_optimise.md): what each check covers,
+   steel angles, crossing bracing, choosing angle sizes by group
 9. Worked examples: a portal frame and a transmission tower
 10. Reference: files, CSV import, Python SDK, keyboard shortcuts, sign conventions,
     limitations
