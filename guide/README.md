@@ -6,8 +6,10 @@ listed without links.
 1. [Getting started](01_getting_started.md): installing, the start page, plane or space
    frame, saving, a first model
 2. [The window](02_the_window.md): ribbon, workspaces, the view, panels, preferences
-3. Building a model: nodes, members, sections, groups, editing tools
-4. Supports and releases
+3. [Building a model](03_building_a_model.md): drawing, selecting, moving and copying,
+   member properties, the section library, element types, local axes, checks
+4. [Supports and releases](04_supports_and_releases.md): support types, single directions,
+   springs, symbols, end releases, stability
 5. Loads: load cases, self-weight, combinations, pattern loading
 6. Solving: validation, warnings, mechanisms
 7. Results: diagrams, tables, colouring, envelopes, the PDF report

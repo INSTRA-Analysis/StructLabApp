@@ -246,6 +246,111 @@ def portal_frame() -> Path:
     return path
 
 
+# ── Chapters 3 and 4: building a model, supports ─────────────────────────────────
+def select_items(win, nodes: tuple[int, ...] = (), members: tuple[int, ...] = ()) -> None:
+    """Select nodes / members by id, as a click would, and let the Properties panel update."""
+    scene = win._scene
+    scene.clearSelection()
+    for nid in nodes:
+        scene._node_items[nid].setSelected(True)
+    for mid in members:
+        scene._member_items[mid].setSelected(True)
+    settle(6)
+
+
+def capture_properties() -> None:
+    win = open_window(portal_frame())
+    select_items(win, members=(1,))
+    save(win._left_dock.grab().toImage(), "properties_member.png")
+    select_items(win, nodes=(0,))
+    save(win._left_dock.grab().toImage(), "properties_node_plane.png")
+    close_window(win)
+
+    win = open_window(TOWER)
+    base = next(n.id for n in win._scene.model_state.nodes if n.restraints and any(n.restraints))
+    select_items(win, nodes=(base,))
+    save(win._left_dock.grab().toImage(), "properties_node_space.png")
+    close_window(win)
+
+
+def capture_section_picker() -> None:
+    from ui_qt.section_picker import SectionPickerDialog
+    dlg = SectionPickerDialog(210e9, 5.38e-3, 8.36e-5)
+    dlg.show()
+    settle(10)
+    save(dlg.grab().toImage(), "section_picker.png")
+    dlg.close()
+
+
+def support_demo(plane: bool) -> Path:
+    """One support of each kind: short columns joined by a beam (space), or a beam (plane)."""
+    from ui_qt.io import save_model
+    from ui_qt.model_state import ModelState, SupportType
+    state = ModelState()
+    if plane:
+        state.analysis_type = "plane_xz"
+        kinds = (SupportType.FIXED, SupportType.PIN, SupportType.ROLLER, SupportType.ROLLER_Z,
+                 SupportType.SPRING)
+        nodes = [state.add_node(1.5 * i, 0, 0) for i in range(len(kinds))]
+        for a, b in zip(nodes, nodes[1:]):
+            state.add_member(a.id, b.id)
+        supported = nodes
+    else:
+        kinds = (SupportType.FIXED, SupportType.PIN, SupportType.ROLLER, SupportType.ROLLER_Y,
+                 SupportType.ROLLER_Z, SupportType.SPRING)
+        supported, tops = [], []
+        for i in range(len(kinds)):
+            base, top = state.add_node(3.0 * i, 0, 0), state.add_node(3.0 * i, 0, 2.5)
+            state.add_member(base.id, top.id)
+            supported.append(base)
+            tops.append(top)
+        for a, b in zip(tops, tops[1:]):
+            state.add_member(a.id, b.id)
+    for node, kind in zip(supported, kinds):
+        node.support_type = kind
+        if kind == SupportType.SPRING:
+            node.spring_kz = 5e6
+    path = _TMP / ("supports_plane.slab" if plane else "supports_space.slab")
+    save_model(state, str(path))
+    return path
+
+
+def model_crop(win, margin: int = 70) -> QImage:
+    """The view's picture cropped to the model's nodes plus ``margin`` pixels."""
+    view = win._view
+    points = [view.mapFromScene(item.pos()) for item in win._scene._node_items.values()]
+    xs, ys = [p.x() for p in points], [p.y() for p in points]
+    image = view.viewport().grab().toImage()
+    left, top = max(0, min(xs) - margin), max(0, min(ys) - margin)
+    right, bottom = min(image.width(), max(xs) + margin), min(image.height(), max(ys) + margin)
+    return image.copy(left, top, right - left, bottom - top)
+
+
+def capture_supports() -> None:
+    win = open_window(support_demo(plane=False))
+    win._act["view_sw"].trigger()
+    win._view.zoom_to_fit()
+    settle(20)
+    save(model_crop(win), "supports_3d.png")
+    win._act["show_restraints"].setChecked(True)
+    settle(10)
+    save(model_crop(win), "supports_markers.png")
+    win._act["show_restraints"].setChecked(False)
+    win._act["local_axes"].setChecked(True)
+    settle(10)
+    save(model_crop(win), "local_axes.png")
+    win._act["local_axes"].setChecked(False)
+    close_window(win)
+
+    win = open_window(support_demo(plane=True))
+    win.resize(1000, 700)                # a narrower view: the symbols keep their pixel size
+    settle()
+    win._view.zoom_to_fit()
+    settle(20)
+    save(model_crop(win, margin=50), "supports_plane.png")
+    close_window(win)
+
+
 def main() -> None:
     IMAGES.mkdir(parents=True, exist_ok=True)
     capture_start_page()
@@ -255,6 +360,9 @@ def main() -> None:
     save(win.grab().toImage(), "workspace_results.png")
     close_window(win)
     capture_workspaces()
+    capture_properties()
+    capture_section_picker()
+    capture_supports()
 
 
 if __name__ == "__main__":
