@@ -104,7 +104,7 @@ def test_interface_preference_reads_the_environment_override(monkeypatch):
 
 def test_version_is_shown_consistently(win):
     from ui_qt.version import APP_VERSION, VERSION_LABEL
-    assert APP_VERSION == "3.0" and VERSION_LABEL == "V3.0"
+    assert APP_VERSION == "3.0.1" and VERSION_LABEL == "V3.0.1"
     assert "StructLab V3.0" in win.windowTitle()
 
 
