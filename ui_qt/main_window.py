@@ -915,14 +915,10 @@ class MainWindow(QMainWindow):
 
         from ui_qt.banner_themes import next_banner
         prefs = _preferences()
-        skip = str(prefs.value("ui/skip_module_chooser", False)).lower() == "true"
-        last = str(prefs.value("ui/last_module", "static"))
         dlg = WelcomeDialog(self, recent_files=RF.load(), banner_art=next_banner(),
-                            start_module=last if skip else None, skip_chooser=skip)
+                            start_module=str(prefs.value("ui/last_module", "static")))
         accepted = dlg.exec() == QDialog.DialogCode.Accepted
-        prefs.setValue("ui/skip_module_chooser", dlg.skip_chooser)
-        if dlg.current_page != WelcomeDialog.CHOOSER:
-            prefs.setValue("ui/last_module", dlg.current_page)   # the module the user ended in
+        prefs.setValue("ui/last_module", dlg.current_page)   # reopen on the tab used last
         if not accepted:
             return  # closed without choosing → blank canvas
 

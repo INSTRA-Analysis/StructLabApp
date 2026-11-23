@@ -79,8 +79,7 @@ def test_new_model_from_the_start_page(qapp, monkeypatch, tmp_path, start_mode, 
     monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
 
     class FakeStart:
-        CHOOSER = "modules"
-        skip_chooser, current_page = False, "static"     # the start page's module state
+        current_page = "static"                           # the tab the user was on
 
         def __init__(self, *a, **k):
             self.choice, self.start_mode = "blank", start_mode
@@ -143,8 +142,7 @@ def test_window_acts_on_the_start_page_choice(qapp, monkeypatch, tmp_path, choic
     monkeypatch.setattr(MainWindow, "_check_autosave_recovery", lambda self: False)
 
     class FakeStart:
-        CHOOSER = "modules"
-        skip_chooser, current_page = False, "static"     # the start page's module state
+        current_page = "static"                           # the tab the user was on
 
         def __init__(self, *a, **k):
             self.choice, self.start_mode = choice, "3D"

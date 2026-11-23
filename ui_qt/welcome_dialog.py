@@ -1,19 +1,18 @@
-"""Start page shown at launch: choose a module, then that module's own start page.
+"""Start page shown at launch: one page, one tab per module.
 
-Pages (one stack, framed like the main window)::
+Layout (Blender-splash style, framed like the main window)::
 
-    modules   ┌ banner: wordmark, tagline, the rotating art ───────────────────────────┐
-              ├ Choose a module ───────────────────────────────────────────────────────┤
-              │ [Static Analysis]  [Dynamic Analysis]  [Plates & Shells]   (registry)  │
-              │ □ Skip this page next time and open the last module I used            │
-              └────────────────────────────────────────────────────────────────────────┘
-    static    ← All modules · Static Analysis header; Start / Templates | Recent models
-    <module>  ← All modules · the module's header; coming soon: planned scope, needs,
-              and the way to Static Analysis meanwhile (ui_qt/modules.py drives it all)
+    ┌ banner: wordmark, version, tagline over the rotating art ──────────────────┐
+    ├ [Static Analysis] [Dynamic Analysis · soon] [Plates & Shells · soon]  tabs ┤
+    ├ Static Analysis tab:                                                       ┤
+    │  Start / Templates (wizards)      │ Recent models (thumbnails)              │
+    │ a coming-soon module's tab: what it will do, planned scope, what the model │
+    │  will need, and the way to Static Analysis meanwhile (ui_qt/modules.py)     │
+    └────────────────────────────────────────────────────────────────────────────┘
       Keyboard shortcuts · About                        validation note · licence
 
-The caller opens it on ``start_module`` when the user chose to skip the chooser, and saves
-``skip_chooser`` and ``current_page`` (the last module) afterwards.
+The caller opens it on ``start_module`` (the tab used last time) and saves
+``current_page`` afterwards.
 
 Recent-model thumbnails are wireframes drawn from each .slab when the page opens (default
 isometric view for 3D models, elevation for 2D); nothing is written next to the files.
@@ -248,48 +247,52 @@ class _Banner(QWidget):
         p.end()
 
 
-class _ModuleHeader(QFrame):
-    """The top of a module's start page: '← All modules', the module's icon and name over a
-    gradient in its colour, and a line on what it covers."""
+class _ModuleTab(QFrame):
+    """One module in the start page's tab strip: its icon in its colour, its name, and a
+    'soon' badge while it is coming soon. The selected tab is underlined in the module's
+    colour; a coming-soon tab keeps a dashed outline so it never reads as broken."""
 
-    back = pyqtSignal()
+    clicked = pyqtSignal()
 
-    def __init__(self, spec, subtitle: str, badge: str = "") -> None:
+    def __init__(self, spec) -> None:
         super().__init__()
-        self.setObjectName("start_module_header")
-        base = QColor(spec.hue).darker(260).name()
-        self.setStyleSheet(
-            f"QFrame#start_module_header {{ border: 1px solid {theme.FRAME_LINE};"
-            f" border-radius: {theme.FRAME_RADIUS}px; background: qlineargradient(x1:0, y1:0,"
-            f" x2:1, y2:0.4, stop:0 {base}, stop:0.5 {theme.NAVY}, stop:1 {theme.SURFACE}); }}")
+        self.spec = spec
+        self.soon = spec.status == "coming_soon"
+        self.setObjectName("start_tab_soon" if self.soon else "start_tab")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(spec.tooltip if self.soon else spec.summary)
+        self.setMinimumHeight(46)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(22, 10, 22, 14)
-        text = QVBoxLayout()
-        text.setSpacing(4)
-        back = QPushButton("←  All modules")
-        back.setObjectName("start_back")
-        back.setCursor(Qt.CursorShape.PointingHandCursor)
-        back.clicked.connect(self.back.emit)
-        text.addWidget(back, 0, Qt.AlignmentFlag.AlignLeft)
-        title_row = QHBoxLayout()
-        title_row.setSpacing(12)
+        lay.setContentsMargins(10, 6, 14, 6)
+        lay.setSpacing(9)
         ico = QLabel()
-        ico.setPixmap(icon_pixmap(spec.icon, spec.hue, 40, self.devicePixelRatioF()))
+        ico.setPixmap(icon_pixmap(spec.icon, spec.hue, 28, self.devicePixelRatioF()))
         ico.setStyleSheet("background: transparent; border: none;")
-        title_row.addWidget(ico)
+        lay.addWidget(ico)
         name = QLabel(spec.title)
-        name.setObjectName("start_module_title")
-        title_row.addWidget(name)
-        title_row.addStretch(1)
-        text.addLayout(title_row)
-        sub = QLabel(subtitle)
-        sub.setObjectName("start_module_subtitle")
-        text.addWidget(sub)
-        lay.addLayout(text, 1)
-        if badge:
-            tag = QLabel(badge)
-            tag.setObjectName("start_badge_soon")
-            lay.addWidget(tag, 0, Qt.AlignmentFlag.AlignVCenter)
+        name.setObjectName("start_tab_text")
+        lay.addWidget(name)
+        if self.soon:
+            badge = QLabel("soon")
+            badge.setObjectName("start_badge_soon")
+            lay.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)   # a pill, not the tab's height
+        self.set_selected(False)
+
+    def set_selected(self, on: bool) -> None:
+        self.selected = on
+        edge = f"border-bottom: 3px solid {self.spec.hue};" if on else ""
+        fill = "#3a404c" if on else "transparent"
+        line = "dashed" if self.soon else "solid"
+        outline = theme.FRAME_LINE if self.soon else ("transparent" if not on else theme.BORDER)
+        self.setStyleSheet(
+            f"QFrame#{self.objectName()} {{ background: {fill}; border: 1px {line} {outline};"
+            f" border-radius: 5px; {edge} }}"
+            f"QFrame#{self.objectName()}:hover {{ background: #353c48; }}")
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class _Card(QFrame):
@@ -341,55 +344,6 @@ class _Card(QFrame):
         super().mouseReleaseEvent(event)
 
 
-class _ModuleTile(QFrame):
-    """A module on the module-choice page: large icon in its colour, status badge, title,
-    summary and where the click leads. Every tile opens that module's start page."""
-
-    clicked = pyqtSignal()
-
-    def __init__(self, spec) -> None:
-        super().__init__()
-        self.spec = spec
-        soon = spec.status == "coming_soon"
-        self.setObjectName("start_module_soon" if soon else "start_module")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"{spec.title}: " + ("coming soon — see what it will do" if soon
-                                             else "open its start page"))
-        self.setMinimumHeight(260)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 18, 20, 18)
-        lay.setSpacing(8)
-
-        top = QHBoxLayout()
-        ico = QLabel()
-        ico.setPixmap(icon_pixmap(spec.icon, spec.hue, 64, self.devicePixelRatioF()))
-        ico.setStyleSheet("background: transparent; border: none;")
-        top.addWidget(ico)
-        top.addStretch(1)
-        badge = QLabel("Coming soon" if soon else "Available")
-        badge.setObjectName("start_badge_soon" if soon else "start_badge_included")
-        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-        lay.addLayout(top)
-
-        title = QLabel(spec.title)
-        title.setObjectName("start_tile_title")
-        lay.addWidget(title)
-        summary = QLabel(spec.summary)
-        summary.setObjectName("start_tile_sub")
-        summary.setWordWrap(True)
-        lay.addWidget(summary)
-        lay.addStretch(1)
-        more = QLabel("See what it will do  →" if soon else f"Open {spec.title}  →")
-        more.setObjectName("start_module_more")
-        more.setStyleSheet(f"color: {spec.hue if not soon else '#cdb6f5'};")
-        lay.addWidget(more)
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
-            self.clicked.emit()
-        super().mouseReleaseEvent(event)
-
-
 _STYLE = f"""
 QDialog#start_page {{ background: {theme.FRAME_GAP}; }}
 QFrame#start_box {{
@@ -416,13 +370,6 @@ QPushButton#start_link {{
 }}
 QPushButton#start_link:hover {{ color: {theme.CYAN}; }}
 QScrollArea#start_scroll, QWidget#start_recent {{ background: transparent; border: none; }}
-QFrame#start_module {{
-    background: {theme.SURFACE2}; border: 1px solid {theme.BORDER}; border-radius: 6px;
-}}
-QFrame#start_module_soon {{
-    background: #2f3640; border: 1px dashed {theme.FRAME_LINE}; border-radius: 6px;
-}}
-QFrame#start_module_soon:hover {{ border: 1px dashed {theme.RESULT}; background: #353c48; }}
 QLabel#start_badge_included {{
     background: #1d3b2a; color: #8be29a; border-radius: 9px; padding: 1px 8px;
     font-size: 11px; font-weight: bold;
@@ -431,21 +378,15 @@ QLabel#start_badge_soon {{
     background: #3a2f52; color: #cdb6f5; border-radius: 9px; padding: 1px 8px;
     font-size: 11px; font-weight: bold;
 }}
-QLabel#start_module_more {{ font-size: 13px; font-weight: bold; background: transparent; }}
-QLabel#start_tile_title {{
-    color: {theme.TEXT}; font-size: 19px; font-weight: bold; background: transparent; border: none;
+QLabel#start_tab_text {{ color: {theme.TEXT}; font-size: 14px; font-weight: bold;
+    background: transparent; border: none; }}
+QFrame#start_tabs {{
+    background: {theme.SURFACE}; border: 1px solid {theme.FRAME_LINE};
+    border-radius: {theme.FRAME_RADIUS}px;
 }}
-QLabel#start_tile_sub {{
-    color: {theme.TEXT_DIM}; font-size: 12px; background: transparent; border: none;
+QLabel#start_soon_title {{
+    color: {theme.TEXT}; font-size: 20px; font-weight: bold; background: transparent; border: none;
 }}
-QLabel#start_module_title {{
-    color: #ffffff; font-size: 24px; font-weight: bold; background: transparent; border: none;
-}}
-QLabel#start_module_subtitle {{ color: {theme.TEXT_DIM}; background: transparent; border: none; }}
-QPushButton#start_back {{
-    background: transparent; border: none; color: #c9d6e6; padding: 2px 0; font-weight: bold;
-}}
-QPushButton#start_back:hover {{ color: {theme.AQUA}; }}
 QLabel#start_body {{ color: {theme.TEXT}; font-size: 15px; background: transparent; }}
 QLabel#start_scope_item {{
     background: {theme.SURFACE2}; border: 1px solid {theme.BORDER}; border-radius: 6px;
@@ -454,24 +395,20 @@ QLabel#start_scope_item {{
 QLabel#start_requires {{
     background: {theme.BG}; color: {theme.TEXT_DIM}; border-radius: 5px; padding: 9px 12px;
 }}
-QCheckBox#start_skip {{ color: {theme.TEXT_DIM}; background: transparent; }}
 """
 
 
 class WelcomeDialog(QDialog):
     """The start page. See the module docstring for the ``choice`` values."""
 
-    CHOOSER = "modules"                 # the module-choice page's key
-
     def __init__(self, parent=None, recent_files: list[str] | None = None,
-                 banner_art=None, start_module: str | None = None,
-                 skip_chooser: bool = False) -> None:
+                 banner_art=None, start_module: str | None = None) -> None:
         """``banner_art``: the art to show (ui_qt/banner_themes.next_banner); the frame
         element when None. Choosing it is left to the caller so that opening this dialog
         never changes the saved rotation by itself.
 
-        ``start_module``: open straight on that module's page ("static" or a registry key) —
-        the caller passes the last module used when the user ticked ``skip_chooser``."""
+        ``start_module``: the tab to open on ("static" or a registry key) — the caller passes
+        the tab the user was on last time; Static Analysis when None or unknown."""
         super().__init__(parent)
         self._banner_art = banner_art
         self.setObjectName("start_page")
@@ -482,113 +419,106 @@ class WelcomeDialog(QDialog):
         self.choice: str = "blank"
         self.start_mode: str = "3D"
         self.recent_cards: list[_Card] = []
-        self.module_tiles: list[_ModuleTile] = []
+        self.module_tabs: list[_ModuleTab] = []
         self.pages: dict[str, QWidget] = {}
-        self._build_ui(recent_files or [], skip_chooser)
-        self.show_page(start_module if start_module in self.pages else self.CHOOSER)
+        self._build_ui(recent_files or [])
+        from ui_qt.modules import STATIC_ANALYSIS
+        self.show_page(start_module if start_module in self.pages else STATIC_ANALYSIS.key)
 
-    # ── pages ─────────────────────────────────────────────────────────────────
+    # ── tabs ──────────────────────────────────────────────────────────────────
 
     @property
     def current_page(self) -> str:
-        """Key of the page on show: "modules", "static" or a module key."""
+        """Key of the tab on show: "static" or a module key."""
         widget = self._stack.currentWidget()
         return next(k for k, w in self.pages.items() if w is widget)
 
-    @property
-    def skip_chooser(self) -> bool:
-        """The user's choice to open the last module directly next time."""
-        return self._skip.isChecked()
-
     def show_page(self, key: str) -> None:
         self._stack.setCurrentWidget(self.pages[key])
+        for tab in self.module_tabs:
+            tab.set_selected(tab.spec.key == key)
 
     # ── layout ────────────────────────────────────────────────────────────────
 
-    def _build_ui(self, recent_files: list[str], skip_chooser: bool) -> None:
+    def _build_ui(self, recent_files: list[str]) -> None:
         from PyQt6.QtWidgets import QStackedWidget
         from ui_qt.modules import MODULES, STATIC_ANALYSIS
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 10)
         root.setSpacing(10)
+        self.banner = _Banner(self._banner_art)
+        root.addWidget(self.banner)
+        root.addWidget(self._tab_strip((STATIC_ANALYSIS,) + MODULES))
         self._stack = QStackedWidget()
-        self._add_page(self.CHOOSER, self._chooser_page(skip_chooser))
         self._add_page(STATIC_ANALYSIS.key, self._static_page(recent_files))
         for spec in MODULES:
             self._add_page(spec.key, self._module_page(spec))
         root.addWidget(self._stack, 1)
         root.addLayout(self._footer())
 
+    def _tab_strip(self, specs) -> QFrame:
+        """One tab per module (Static Analysis first, then the registry), framed like the boxes."""
+        strip = QFrame()
+        strip.setObjectName("start_tabs")
+        row = QHBoxLayout(strip)
+        row.setContentsMargins(6, 5, 6, 5)
+        row.setSpacing(6)
+        for spec in specs:
+            tab = _ModuleTab(spec)
+            tab.clicked.connect(lambda k=spec.key: self.show_page(k))
+            row.addWidget(tab)
+            self.module_tabs.append(tab)
+        row.addStretch(1)
+        return strip
+
     def _add_page(self, key: str, widget: QWidget) -> None:
         self.pages[key] = widget
         self._stack.addWidget(widget)
 
     @staticmethod
-    def _page() -> tuple[QWidget, QVBoxLayout]:
+    def _page() -> tuple[QWidget, QHBoxLayout]:
         page = QWidget()
-        lay = QVBoxLayout(page)
+        lay = QHBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
         return page, lay
 
-    def _chooser_page(self, skip_chooser: bool) -> QWidget:
-        """The first page: StructLab, then one large tile per module."""
-        from PyQt6.QtWidgets import QCheckBox
-        from ui_qt.modules import MODULES, STATIC_ANALYSIS
-        page, lay = self._page()
-        self.banner = _Banner(self._banner_art, (
-            "StructLab", f"{VERSION_LABEL}   ·   Structural analysis by INSTRA Analysis",
-            "One model, several analyses: choose where to start — switch any time from the ribbon."))
-        lay.addWidget(self.banner)
-        box, inner = self._box()
-        inner.setContentsMargins(20, 16, 20, 14)
-        inner.setSpacing(12)
-        inner.addWidget(self._heading("Choose a module"))
-        row = QHBoxLayout()
-        row.setSpacing(16)
-        for spec in (STATIC_ANALYSIS,) + MODULES:
-            tile = _ModuleTile(spec)
-            tile.clicked.connect(lambda k=spec.key: self.show_page(k))
-            row.addWidget(tile, 1)
-            self.module_tiles.append(tile)
-        inner.addLayout(row)
-        inner.addStretch(1)
-        self._skip = QCheckBox("Skip this page next time and open the last module I used")
-        self._skip.setObjectName("start_skip")
-        self._skip.setChecked(skip_chooser)
-        inner.addWidget(self._skip)
-        lay.addWidget(box, 1)
-        return page
-
     def _static_page(self, recent_files: list[str]) -> QWidget:
         """Static Analysis: new model / open, templates, recent models."""
-        from ui_qt.modules import STATIC_ANALYSIS
         page, lay = self._page()
-        header = _ModuleHeader(STATIC_ANALYSIS, f"StructLab {VERSION_LABEL}   ·   Beams · frames · "
-                                                "trusses · towers  —  Direct Stiffness Method")
-        header.back.connect(lambda: self.show_page(self.CHOOSER))
-        lay.addWidget(header)
-        body = QHBoxLayout()
-        body.setSpacing(10)
-        body.addWidget(self._start_box(), 0)
-        body.addWidget(self._recent_box(recent_files), 1)
-        lay.addLayout(body, 1)
+        lay.addWidget(self._start_box(), 0)
+        lay.addWidget(self._recent_box(recent_files), 1)
         return page
 
     def _module_page(self, spec) -> QWidget:
-        """A module's own page. While it is coming soon: what it will do, its planned scope,
-        what the model will need, and the way to Static Analysis meanwhile."""
+        """A module's tab. While it is coming soon: what it will do, its planned scope, what
+        the model will need, and the way to Static Analysis meanwhile."""
         from ui_qt.modules import STATIC_ANALYSIS
         page, lay = self._page()
-        header = _ModuleHeader(spec, spec.summary, spec.status_label)
-        header.back.connect(lambda: self.show_page(self.CHOOSER))
-        lay.addWidget(header)
-        body = QHBoxLayout()
-        body.setSpacing(10)
 
         main, inner = self._box()
         inner.setContentsMargins(20, 16, 20, 16)
         inner.setSpacing(10)
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        ico = QLabel()
+        ico.setPixmap(icon_pixmap(spec.icon, spec.hue, 40, self.devicePixelRatioF()))
+        ico.setStyleSheet("background: transparent; border: none;")
+        head.addWidget(ico)
+        title = QLabel(spec.title)
+        title.setObjectName("start_soon_title")
+        head.addWidget(title)
+        if spec.status_label:
+            badge = QLabel(spec.status_label)
+            badge.setObjectName("start_badge_soon")
+            head.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        head.addStretch(1)
+        inner.addLayout(head)
+        summary = QLabel(spec.summary)
+        summary.setObjectName("start_body")
+        summary.setWordWrap(True)
+        inner.addWidget(summary)
+        inner.addSpacing(4)
         inner.addWidget(self._heading("Planned scope" if spec.status == "coming_soon" else "Scope"))
         grid = QGridLayout()
         grid.setSpacing(8)
@@ -604,7 +534,7 @@ class WelcomeDialog(QDialog):
             needs.setTextFormat(Qt.TextFormat.RichText)
             inner.addWidget(needs)
         inner.addStretch(1)
-        body.addWidget(main, 1)
+        lay.addWidget(main, 1)
 
         side, s = self._box()
         side.setFixedWidth(330)
@@ -620,8 +550,7 @@ class WelcomeDialog(QDialog):
         to_static.clicked.connect(lambda: self.show_page(STATIC_ANALYSIS.key))
         s.addWidget(to_static)
         s.addStretch(1)
-        body.addWidget(side, 0)
-        lay.addLayout(body, 1)
+        lay.addWidget(side, 0)
         return page
 
     @staticmethod
