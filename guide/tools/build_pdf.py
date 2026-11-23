@@ -39,7 +39,7 @@ h2     { font-size: 15pt; color: #0b6f86; margin-top: 18px; margin-bottom: 6px; 
 h3     { font-size: 12pt; color: #1d2430; margin-top: 12px; margin-bottom: 4px; }
 p, li  { line-height: 135%; }
 code   { font-family: 'Consolas'; font-size: 9.5pt; color: #4a2a7a; }
-pre    { font-family: 'Consolas'; font-size: 9pt; background-color: #f1f4f8; }
+pre    { font-family: 'Consolas'; font-size: 8pt; background-color: #f1f4f8; }
 table  { border-collapse: collapse; margin-top: 4px; margin-bottom: 8px; }
 th     { background-color: #e4eef3; font-weight: bold; padding: 4px; }
 td     { padding: 4px; }

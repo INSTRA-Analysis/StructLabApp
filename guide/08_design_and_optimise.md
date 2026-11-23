@@ -47,8 +47,11 @@ concrete the width b, depth h, cover, tension reinforcement As and fyk.
 
 ## 8.3 Other sections
 
-- **Other steel sections**: N / (A fy) + M / (W<sub>pl</sub> fy), the cross-section only,
-  with no buckling. Use it for members whose stability you check separately.
+- **Other steel sections**: the cross-section only, with no buckling: axial N / (A fy) and
+  bending M / (W<sub>pl</sub> fy). The Design table lists the two as separate rows; the
+  utilisation colours and the hover tooltip add them, N / (A fy) + M / (W<sub>pl</sub> fy),
+  so they show the larger figure. Use this check for members whose stability you check
+  separately.
 - **Concrete**: the bending resistance of a rectangular section with tension reinforcement
   (γc = 1.5, γs = 1.15), and the axial resistance A<sub>c</sub> f<sub>cd</sub> + A<sub>s</sub>
   f<sub>yd</sub> in compression, A<sub>s</sub> f<sub>yd</sub> in tension. Second-order effects

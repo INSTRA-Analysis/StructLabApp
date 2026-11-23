@@ -116,6 +116,11 @@ tension in tower legs. With no variable case, one ULS (1.35 G) and one SLS (1.0 
 combination are made. Running it again replaces the generated combinations and keeps any you
 added yourself.
 
+When there are variable cases, every generated ULS combination includes one of them as the
+leading action. The combination with the permanent load alone (1.35 G) is not generated,
+although it governs wherever the variable actions are favourable; add it with **Add…**
+(chapter 9.1 shows a case where it matters).
+
 **Alternative cases.** Wind from +X and wind from −X never act together. Cases marked as
 alternatives (an *exclusive group*, such as the tower example's two wind cases) are never
 combined with each other. The group is stored in the `.slab` file and set by the tower

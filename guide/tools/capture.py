@@ -415,8 +415,102 @@ def capture_results() -> None:
     close_window(win)
 
 
+# ── Chapter 9: worked examples ───────────────────────────────────────────────────
+PORTAL_ULS = "ULS STR: 1.35G + 1.5·Wind"
+TOWER_ULS = "ULS STR: 1.35G + 1.5·Wind +X + 1.05·Ice"
+
+
+def worked_portal() -> Path:
+    """Chapter 9.1: the 8 m x 4.5 m portal in IPE 300 / S275, cases Dead (G) and Wind (W)."""
+    from ui_qt.combinations import auto_generate_en1990
+    from ui_qt.io import save_model
+    from ui_qt.model_state import DistLoad, MemberLoad, ModelState, NodeLoad, SupportType
+    state = ModelState()
+    state.analysis_type = "plane_xz"
+    n = [state.add_node(0, 0, 0), state.add_node(0, 0, 4.5),
+         state.add_node(8, 0, 4.5), state.add_node(8, 0, 0)]
+    n[0].support_type = n[3].support_type = SupportType.FIXED
+    for i in range(3):
+        m = state.add_member(n[i].id, n[i + 1].id)
+        m.E, m.A, m.I = 210e9, 5381e-6, 8356e-8        # IPE 300 from the section library
+        m.W_pl, m.W_el, m.fy, m.density = 628e-6, 557e-6, 275e6, 7850.0
+    dead = state.active_case
+    dead.name, dead.category = "Dead", "G"
+    dead.member_loads[1] = MemberLoad(dist_loads=[DistLoad("w", 10e3, 10e3)])
+    wind = state.add_load_case("Wind", "W")
+    wind.set_node_load(n[1].id, NodeLoad(fx=15e3))
+    auto_generate_en1990(state)
+    path = _TMP / "worked_portal.slab"
+    save_model(state, str(path))
+    return path
+
+
+def solve_named(win, name: str) -> None:
+    combo = next(c for c in win._scene.model_state.combinations if c.name == name)
+    win._solve_combination(combo)
+    settle()
+
+
+def capture_examples() -> None:
+    win = open_window(worked_portal())
+    win.resize(2000, 900)        # a wide view keeps the gizmo and watermark clear of the frame
+    solve_named(win, PORTAL_ULS)
+    for key in ("ov_def", "ov_sfd", "ov_afd"):
+        win._act[key].setChecked(False)
+    win._act["ov_bmd"].setChecked(True)
+    win._act["ov_labels"].setChecked(True)
+    win._view.zoom_to_fit()
+    settle(15)
+    save(model_crop(win, margin=140), "example_portal_bmd.png")   # room for the eave labels
+    results_tab(win, "Design")
+    table = win._right_dock.grab().toImage()
+    save(table.copy(0, 0, table.width(), 270), "example_portal_design.png")
+    close_window(win)
+
+    shots = []
+    for path in (EXAMPLES / "l8c_d30_tower_seminar.slab", TOWER):
+        win = open_window(path)
+        win._act["util_colours"].setChecked(True)
+        solve_named(win, TOWER_ULS)
+        win._act["ws_results"].trigger()
+        for key in ("ov_bmd", "ov_sfd", "ov_def", "ov_afd", "ov_labels"):
+            win._act[key].setChecked(False)
+        win._act["util_colours"].setChecked(False)
+        win._act["util_colours"].setChecked(True)
+        win._act["view_front"].trigger()
+        win._view.zoom_to_fit()
+        settle(20)
+        shots.append(model_crop(win, margin=40))
+        close_window(win)
+    save(side_by_side(shots, ["Before Optimise: 18,127 kg", "After Optimise: 15,196 kg"]),
+         "example_tower_optimise.png")
+
+
+def side_by_side(images: list[QImage], captions: list[str]) -> QImage:
+    """``images`` next to each other on the viewport colour, a caption above each."""
+    gap, head = 24, 40
+    width = sum(i.width() for i in images) + gap * (len(images) - 1)
+    out = QImage(width, max(i.height() for i in images) + head, QImage.Format.Format_RGB32)
+    out.fill(images[0].pixelColor(4, 4))
+    p = QPainter(out)
+    font = QFont("Bahnschrift")
+    font.setPixelSize(17)
+    p.setFont(font)
+    p.setPen(QColor("#e6edf3"))
+    x = 0
+    for image, caption in zip(images, captions):
+        p.drawText(QRect(x, 0, image.width(), head), int(Qt.AlignmentFlag.AlignCenter), caption)
+        p.drawImage(x, head, image)
+        x += image.width() + gap
+    p.end()
+    return out
+
+
 def main() -> None:
     IMAGES.mkdir(parents=True, exist_ok=True)
+    if sys.argv[1:] == ["examples"]:       # chapter 9 only
+        capture_examples()
+        return
     capture_start_page()
     win = solved_tower()
     capture_window_tour(win)
@@ -429,6 +523,7 @@ def main() -> None:
     capture_supports()
     capture_loads()
     capture_results()
+    capture_examples()
 
 
 if __name__ == "__main__":

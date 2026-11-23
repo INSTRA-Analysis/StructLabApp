@@ -1,7 +1,6 @@
 # StructLab User Guide
 
-For StructLab V3.0 and later. The guide is written in steps; chapters not yet written are
-listed without links.
+For StructLab V3.0 and later.
 
 1. [Getting started](01_getting_started.md): installing, the start page, plane or space
    frame, saving, a first model
@@ -18,16 +17,17 @@ listed without links.
    the PDF report
 8. [Design checks and Optimise](08_design_and_optimise.md): what each check covers,
    steel angles, crossing bracing, choosing angle sizes by group
-9. Worked examples: a portal frame and a transmission tower
-10. Reference: files, CSV import, Python SDK, keyboard shortcuts, sign conventions,
-    limitations
+9. [Worked examples](09_worked_examples.md): a portal frame checked by hand, a
+   transmission tower from loads to Optimise
+10. [Reference](10_reference.md): files, CSV import, Python console and SDK, keyboard
+    shortcuts, units and sign conventions, limitations
 
 ## Building the guide
 
 From the repository root:
 
 ```bash
-python guide/tools/capture.py     # re-take the screenshots in guide/images/
+python guide/tools/capture.py     # re-take the screenshots in guide/images/ (add 'examples' for chapter 9 only)
 python guide/tools/build_pdf.py   # write guide/StructLab_User_Guide.pdf
 ```
 
