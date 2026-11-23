@@ -648,6 +648,9 @@ class MemberItem(QGraphicsLineItem):
         self._qz_label_items: list = []
         self._point_load_items: list = []
         self._partial_items: list = []
+        # A result colour (utilisation / axial force) while one is shown: kept here so that
+        # rebuilding the pen (every zoom, view change, thickness change) keeps it.
+        self._result_colour: QColor | None = None
         self._update_pen()
         self._draw_udl_arrows()
         self._draw_lateral_arrows()
@@ -782,8 +785,13 @@ class MemberItem(QGraphicsLineItem):
             self.setPen(self._base_pen)
 
     def _base_colour_pen(self, width: float) -> QPen:
-        """Default member pen: group colour when 'Colour by Group' is on, else
-        the element-type colour (green = bar, blue = beam)."""
+        """Member pen: the result colour while one is shown (utilisation / axial force),
+        else the group colour when 'Colour by Group' is on, else the element-type colour
+        (green = bar, blue = beam)."""
+        if self._result_colour is not None:
+            pen = QPen(self._result_colour)
+            pen.setWidthF(width * 4.0 / 3.0 * self._scene.section_width_factor(self.member))
+            return pen
         if getattr(self._scene, "_colour_by_group", False) and self.member.group:
             pen = QPen(group_colour(self.member.group))
         else:
@@ -804,10 +812,19 @@ class MemberItem(QGraphicsLineItem):
         self._base_pen = self._base_colour_pen(w)
         self._apply_pen()
 
+    def clear_result_colour(self) -> None:
+        """Back to the normal member colour (group or element type)."""
+        self._result_colour = None
+        self._update_pen()
+
+    def _show_result_colour(self, colour: QColor) -> None:
+        self._result_colour = colour
+        self._update_pen()
+
     def set_force_colour(self, N: float, max_N: float) -> None:
         """Colour member by axial force: red=compression, blue=tension."""
         if max_N < 1e-12:
-            self._update_pen()
+            self.clear_result_colour()
             return
         t = min(abs(N) / max_N, 1.0)
         # Interpolate from light (t=0) to saturated (t=1)
@@ -817,8 +834,7 @@ class MemberItem(QGraphicsLineItem):
             r, g, b = int(180 - 170 * t), int(180 - 170 * t), int(220)
         else:
             r, g, b = 160, 160, 160
-        self._base_pen = QPen(QColor(r, g, b), 4)
-        self._apply_pen()
+        self._show_result_colour(QColor(r, g, b))
 
     def set_util_colour(self, eta: float) -> None:
         """Colour member by utilization ratio η: green→yellow→red (0→1→>1)."""
@@ -841,8 +857,7 @@ class MemberItem(QGraphicsLineItem):
             r = int(220 + 35 * sat)
             g = int(40  - 40 * sat)
             bv = 0
-        self._base_pen = QPen(QColor(min(r, 255), max(g, 0), max(bv, 0)), 4)
-        self._apply_pen()
+        self._show_result_colour(QColor(min(r, 255), max(g, 0), max(bv, 0)))
 
     # ── distributed load arrows (UDL / UVL) ──────────────────────────────────
 

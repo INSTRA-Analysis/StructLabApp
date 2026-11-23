@@ -1661,7 +1661,7 @@ class StructCanvas(QGraphicsScene):
     def clear_member_colours(self) -> None:
         """Reset all member colours back to their default type-based pens."""
         for mitem in self._member_items.values():
-            mitem._update_pen()
+            mitem.clear_result_colour()
 
     def set_colour_by_group(self, enabled: bool) -> None:
         """Toggle the 'Colour by Group' view: members are tinted by their group
@@ -1857,7 +1857,7 @@ class StructCanvas(QGraphicsScene):
                 continue
             eta, _ = display_utilisation(mdata, r, lengths.get(r.element_id, 0.0))
             if eta is None:
-                mitem._update_pen()
+                mitem.clear_result_colour()
             else:
                 mitem.set_util_colour(eta)
         self._util_colour_active = True
