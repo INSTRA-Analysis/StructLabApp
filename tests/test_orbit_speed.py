@@ -128,3 +128,39 @@ def test_a_load_edit_after_a_pass_uses_fresh_maxima(qapp):
     assert arrow_after < arrow_before                  # rescaled to the new largest load
     assert sc.pass_value("x", lambda: -1.0) == -1.0    # outside a pass: computed every call
     sc.clearSelection()
+
+
+def _move(view, x, y):
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    view.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(x, y), QPointF(x, y),
+                                    Qt.MouseButton.NoButton, Qt.MouseButton.MiddleButton,
+                                    Qt.KeyboardModifier.ShiftModifier))
+
+
+def test_mouse_moves_are_merged_into_one_redraw_at_the_latest_angle(qapp):
+    from PyQt6.QtCore import QPoint
+    from ui_qt.canvas import StructView
+    state = _grid(3)
+    sc = _canvas(state)
+    view = StructView(sc)
+    calls = []
+    real = sc.reproject
+    sc.reproject = lambda: (calls.append((_proj.ISO_AZIMUTH, _proj.ISO_ELEVATION)), real())
+    _proj.ISO_AZIMUTH, _proj.ISO_ELEVATION = -45.0, 30.0
+    view._orbit_last = QPoint(100, 100)                # as a Shift + middle press sets it
+    for k in range(1, 6):                              # five moves before the loop runs
+        _move(view, 100 + 10 * k, 100)
+    assert calls == []                                 # nothing drawn yet
+    qapp.processEvents()
+    assert calls == [(pytest.approx(-45.0 + 50 * 0.3), pytest.approx(30.0))]
+    mitem = next(iter(sc._member_items.values()))
+    ni = state.get_node(mitem.member.node_i)
+    assert (mitem.line().x1(), mitem.line().y1()) == pytest.approx(isometric(ni.x, ni.y, ni.z))
+    _move(view, 200, 120)                              # released before the loop runs:
+    view._apply_orbit()                                # the release flushes it
+    qapp.processEvents()                               # and the queued call does nothing
+    assert len(calls) == 2
+    view._orbit_last = None
+    view.deleteLater()
+    sc.clearSelection()

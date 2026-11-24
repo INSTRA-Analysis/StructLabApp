@@ -2331,6 +2331,10 @@ class StructView(QGraphicsView):
         self._pan_last = None    # QPoint when middle-button is held (pan)
         self._orbit_last = None  # QPoint when middle is held (3D orbit)
         self._orbit_center: tuple[float,float,float] | None = None  # world pivot
+        # Mouse moves only change the camera angles; one queued redraw then draws the latest
+        # angles, so a slow redraw skips frames instead of falling behind the mouse.
+        self._orbit_queued: bool = False
+        self._orbit_pivot_before: QPointF | None = None   # pivot on screen before the redraw
         self._view_cube = NavGizmo()
         self.setMouseTracking(True)  # needed for hover updates
         self._rb_start: QPoint | None = None   # rubber-band drag start (viewport px)
@@ -3066,23 +3070,16 @@ class StructView(QGraphicsView):
         if self._orbit_last is not None:
             delta = event.pos() - self._orbit_last
             self._orbit_last = event.pos()
-            # Capture pivot screen position before reprojection
-            if self._orbit_center is not None:
-                sx0, sy0 = _proj.isometric(*self._orbit_center)
-                vp_before = self.mapFromScene(QPointF(sx0, sy0))
+            if not self._orbit_queued:
+                # Pivot's screen position under the angles the scene is drawn with now
+                self._orbit_pivot_before = None
+                if self._orbit_center is not None:
+                    sx0, sy0 = _proj.isometric(*self._orbit_center)
+                    self._orbit_pivot_before = self.mapFromScene(QPointF(sx0, sy0))
+                self._orbit_queued = True
+                QTimer.singleShot(0, self._apply_orbit)
             _proj.ISO_AZIMUTH   = _proj.ISO_AZIMUTH + delta.x() * 0.3
             _proj.ISO_ELEVATION = max(-89.0, min(89.0, _proj.ISO_ELEVATION - delta.y() * 0.3))
-            self.scene().reproject()
-            # Adjust scroll bars so pivot stays at same screen position
-            if self._orbit_center is not None:
-                sx1, sy1 = _proj.isometric(*self._orbit_center)
-                vp_after = self.mapFromScene(QPointF(sx1, sy1))
-                self.horizontalScrollBar().setValue(
-                    self.horizontalScrollBar().value() + int(vp_after.x() - vp_before.x())
-                )
-                self.verticalScrollBar().setValue(
-                    self.verticalScrollBar().value() + int(vp_after.y() - vp_before.y())
-                )
             event.accept()
             return
         if self._pan_last is not None:
@@ -3115,8 +3112,29 @@ class StructView(QGraphicsView):
 
         super().mouseMoveEvent(event)
 
+    def _apply_orbit(self) -> None:
+        """Draw the scene under the latest orbit angles (queued by mouseMoveEvent) and
+        scroll so the pivot stays where it was on screen."""
+        from PyQt6 import sip
+        if sip.isdeleted(self) or not self._orbit_queued:
+            return                                  # window closed, or already flushed
+        self._orbit_queued = False
+        scene = self.scene()
+        if scene is None:
+            return
+        scene.reproject()
+        before, self._orbit_pivot_before = self._orbit_pivot_before, None
+        if self._orbit_center is not None and before is not None:
+            sx1, sy1 = _proj.isometric(*self._orbit_center)
+            after = self.mapFromScene(QPointF(sx1, sy1))
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() + int(after.x() - before.x()))
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() + int(after.y() - before.y()))
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
+            self._apply_orbit()                     # a redraw still queued: draw it now
             was_orbiting = self._orbit_last is not None
             self._pan_last = None
             self._orbit_last = None
