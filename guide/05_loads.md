@@ -106,20 +106,22 @@ action:
 
 | Set | Combination |
 |---|---|
+| ULS STR, permanent alone (one) | 1.35 G |
 | ULS STR, γG,sup | 1.35 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>others</sub> |
 | ULS STR, γG,inf | 1.00 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>others</sub> |
 | SLS characteristic | G + Q<sub>lead</sub> + Σ ψ₀ Q<sub>others</sub> |
 | SLS quasi-permanent (one) | G + Σ ψ₂ Q |
 
-The γG,inf set matters where permanent load is favourable: uplift, overturning, and the
-tension in tower legs. With no variable case, one ULS (1.35 G) and one SLS (1.0 G)
-combination are made. Running it again replaces the generated combinations and keeps any you
-added yourself.
+A variable action is included only where it is unfavourable, so **1.35 G** alone is a
+combination too: it governs wherever the variable actions relieve a member (chapter 9.1
+shows a case). The γG,inf set matters where permanent load is favourable: uplift,
+overturning, and the tension in tower legs. With no variable case, one ULS (1.35 G) and one
+SLS (1.0 G) combination are made. Running it again replaces the generated combinations and
+keeps any you added yourself.
 
-When there are variable cases, every generated ULS combination includes one of them as the
-leading action. The combination with the permanent load alone (1.35 G) is not generated,
-although it governs wherever the variable actions are favourable; add it with **Add…**
-(chapter 9.1 shows a case where it matters).
+The generator always includes every other variable action as a companion. Where a
+companion relieves a member (for example ice reducing the uplift under wind), the
+combination without it is not generated; add it with **Add…** if it can govern.
 
 **Alternative cases.** Wind from +X and wind from −X never act together. Cases marked as
 alternatives (an *exclusive group*, such as the tower example's two wind cases) are never

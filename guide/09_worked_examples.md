@@ -65,18 +65,19 @@ or two results like these against a hand calculation before trusting a model.
 
 ### Combinations
 
-**Loads → Combinations… → Auto-generate EN 1990** makes four combinations from these two
+**Loads → Combinations… → Auto-generate EN 1990** makes five combinations from these two
 cases:
 
 | Combination | Use |
 |---|---|
+| ULS STR: 1.35G | Strength, wind absent |
 | ULS STR: 1.35G + 1.5·Wind | Strength, permanent load unfavourable |
 | ULS STR (γG,inf): G + 1.5·Wind | Strength, permanent load favourable |
 | SLS Char: G + 1·Wind | Deflection and sway |
 | SLS Quasi-permanent: G | Long-term deflection (ψ₂ = 0 for wind) |
 
-**Solve All & Envelope…** solves them all. Choose the first combination in **Result Set**
-and turn on **BMD** with **Labels**:
+**Solve All & Envelope…** solves them all. Choose *ULS STR: 1.35G + 1.5·Wind* in
+**Result Set** and turn on **BMD** with **Labels**:
 
 ![The portal under 1.35G + 1.5 Wind](images/example_portal_bmd.png)
 
@@ -98,14 +99,13 @@ the IPE 300 has plenty in hand, but check them by your usual means.
 
 Sway: under *SLS Char: G + 1·Wind* the eaves move 5.6 mm, against h / 300 = 15 mm.
 
-### What the generator leaves out
+### Why 1.35 G alone is there
 
-With wind as the only variable action, the generated combinations all include the wind.
-EN 1990 also asks for the case where a variable action is absent because it is favourable:
-here **1.35 G** alone. It matters: at the left eave, 1.35 × 41.57 = 56.1 kN·m, more than the
-36.6 kN·m of the wind combination. Add it yourself with **Add…** (ULS, factor 1.35 on the dead
-load, 0 on the wind). The frame is symmetric, so wind from the other side mirrors the results
-and the right column's figures cover both columns.
+EN 1990 includes a variable action only where it is unfavourable. At the left eave the wind
+relieves the dead-load moment, so the combination without it governs there:
+1.35 × 41.57 = 56.1 kN·m under **1.35G**, against 36.6 kN·m under 1.35G + 1.5·Wind. The
+envelope takes the larger. The frame is symmetric, so wind from the other side mirrors the
+results and the right column's figures cover both columns.
 
 ## 9.2 A transmission tower
 
@@ -137,7 +137,8 @@ crossarm members) shows its count, length, mass and profile; hide groups to look
 
 The cable loads are illustrative estimates for a suspension tower, not the values of
 EN 50341-1 and its UK National Annex. The two wind cases are alternatives (chapter 5.6), so
-the 13 generated combinations never add them together.
+the file's 13 generated combinations never add them together. (Auto-generate again and a
+fourteenth, 1.35G alone, is added; it does not govern any member of this tower.)
 
 **Model → Crossing Bracing Connected** is on in this file: the crossing diagonals are bolted
 together, so a compressed diagonal crossed by one in tension buckles over half its length
