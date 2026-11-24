@@ -164,3 +164,58 @@ def test_mouse_moves_are_merged_into_one_redraw_at_the_latest_angle(qapp):
     view._orbit_last = None
     view.deleteLater()
     sc.clearSelection()
+
+
+def _arrows_shown(sc):
+    return sum(1 for n in sc._node_items.values() for it in n._load_items if it.isVisible())
+
+
+def test_loads_hidden_with_l_or_by_isolation_stay_hidden_after_an_orbit(qapp):
+    state = _grid(3)
+    sc = _canvas(state)
+    assert _arrows_shown(sc) == 9
+    sc.set_loads_visible(False)                        # View > Show Loads off (L)
+    _turn(sc, 25)
+    assert _arrows_shown(sc) == 0                      # they used to come back
+    sc.set_loads_visible(True)
+    top = state.nodes[-1].id
+    sc._node_items[top].set_visible_all(False)         # as isolation / a hidden group does
+    _turn(sc, 40)
+    assert _arrows_shown(sc) == 8
+    sc.clearSelection()
+
+
+def _press_release(view, kind):
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    t = QEvent.Type.MouseButtonPress if kind == "press" else QEvent.Type.MouseButtonRelease
+    ev = QMouseEvent(t, QPointF(100, 100), QPointF(100, 100), Qt.MouseButton.MiddleButton,
+                     Qt.MouseButton.MiddleButton if kind == "press" else Qt.MouseButton.NoButton,
+                     Qt.KeyboardModifier.ShiftModifier)
+    (view.mousePressEvent if kind == "press" else view.mouseReleaseEvent)(ev)
+
+
+def test_a_drag_shows_the_light_picture_and_the_release_restores_it(qapp):
+    from PyQt6.QtGui import QPainter
+    from ui_qt.canvas import StructView
+    state = _grid(3)
+    sc = _canvas(state)
+    view = StructView(sc)
+    aa = QPainter.RenderHint.Antialiasing
+    _press_release(view, "press")                      # Shift + middle button: orbit
+    assert _arrows_shown(sc) == 0 and not (view.renderHints() & aa)
+    redraws = []
+    real = sc.refresh_all_loads
+    sc.refresh_all_loads = lambda: (redraws.append(1), real())
+    for k in range(1, 4):
+        _move(view, 100 + 20 * k, 90)
+        qapp.processEvents()
+    assert redraws == []                               # no load arrows while dragging
+    _press_release(view, "release")
+    assert redraws == [1]                              # drawn once, at the end
+    assert _arrows_shown(sc) == 9 and bool(view.renderHints() & aa)
+    node = state.nodes[-1]                             # and they sit at the final angle
+    arrow = sc._node_items[node.id]._load_items[0]
+    assert (arrow.pos().x(), arrow.pos().y()) == pytest.approx(isometric(node.x, node.y, node.z))
+    view.deleteLater()
+    sc.clearSelection()

@@ -1606,6 +1606,23 @@ class StructCanvas(RedrawPass, QGraphicsScene):
         if abs(self.sceneRect().right() - half) > 1e-6:
             self.setSceneRect(-half, -half, 2 * half, 2 * half)
 
+    # While the view is being dragged round (begin_orbit .. end_orbit) only the structure
+    # follows the mouse: load arrows are hidden and the front-to-back order is left alone;
+    # both are brought up to date once, when the drag ends.
+    _orbit_light: bool = False
+
+    def begin_orbit(self) -> None:
+        """A continuous orbit starts: draw the light picture until end_orbit()."""
+        self._orbit_light = True
+        self._apply_load_visibility()
+
+    def end_orbit(self) -> None:
+        """The orbit ended: redraw everything under the final angles."""
+        if not self._orbit_light:
+            return
+        self._orbit_light = False
+        self.reproject()
+
     def reproject(self) -> None:
         """Reposition all items after the projection angles change. A camera move changes
         only where things are drawn: nodes and members move, the support glyphs and load
@@ -1615,9 +1632,19 @@ class StructCanvas(RedrawPass, QGraphicsScene):
                 nitem.reproject()
             for mitem in self._member_items.values():
                 mitem.reproject()
-            self.refresh_all_loads()
-            self.update_depth_order()
+            if not self._orbit_light:
+                self.refresh_all_loads()
+                self.update_depth_order()
         self.invalidate(self.sceneRect())
+
+    def _apply_load_visibility(self) -> None:
+        """Load arrows show only when loads are switched on (L), their node or member is
+        shown (isolation, hidden groups, section cut) and no orbit drag is under way.
+        Called after every load redraw, since redrawn arrows start out visible."""
+        show = self._show_loads and not self._orbit_light
+        for item in (*self._node_items.values(), *self._member_items.values()):
+            if item.has_load_symbols():
+                item.set_loads_visible(show and item.isVisible())
 
     def set_view(self, azimuth: float = -45.0, elevation: float = 30.0) -> None:
         """Set the 3D view angle and reproject.  Elevation clamped to 0–90°."""
@@ -1914,6 +1941,7 @@ class StructCanvas(RedrawPass, QGraphicsScene):
         """Redraw load symbols.  In 'all cases' mode overlays every load case."""
         with self.redraw_pass():
             self._refresh_all_loads()
+        self._apply_load_visibility()
 
     def _refresh_all_loads(self) -> None:
         state = self.model_state
@@ -3058,6 +3086,8 @@ class StructView(QGraphicsView):
                 self._orbit_last = event.pos()
                 self._orbit_center = self._selected_centroid()
                 self.scene().clear_overlays()
+                self.scene().begin_orbit()
+                self.setRenderHint(QPainter.RenderHint.Antialiasing, False)   # until release
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
             else:
                 self._pan_last = event.pos()
@@ -3140,6 +3170,8 @@ class StructView(QGraphicsView):
             self._orbit_last = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             if was_orbiting:
+                self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                self.scene().end_orbit()            # loads and depth order, once
                 self.scene().view_changed.emit()
             event.accept()
             return
