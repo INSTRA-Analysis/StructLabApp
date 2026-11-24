@@ -21,7 +21,7 @@ from PyQt6.QtGui import QColor
 from ui_qt import theme
 from ui_qt.dialog_style import apply_dialog_style, mark_primary
 from ui_qt.icons import icon
-from ui_qt.model_state import ModelState, LoadCombination
+from ui_qt.model_state import ModelState, LoadCombination, VARIABLE_CATEGORIES
 
 
 # ── EN 1990 auto-generation ───────────────────────────────────────────────────
@@ -39,6 +39,12 @@ def _companion_sets(cases: list) -> list[list]:
         if c.exclusive_group:
             groups.setdefault(c.exclusive_group, []).append(c)
     return [free + list(pick) for pick in itertools.product(*groups.values())]
+
+
+def cases_left_out(state: ModelState) -> list:
+    """Load cases the generator ignores: neither permanent nor a known variable category."""
+    return [lc for lc in state.load_cases
+            if lc.category != "G" and lc.category not in VARIABLE_CATEGORIES]
 
 
 def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
@@ -66,23 +72,25 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
 
     γG = 1.35 (unfavourable permanent, γG,sup) and 1.00 (favourable, γG,inf)
     γQ = 1.50 (leading variable)
-    ψ₀ per category: Q=0.7, W=0.6, S=0.5  (default 0.7 for unknown categories)
-    ψ₂ per category: Q=0.3, W=0.0, S=0.2  (default 0.3 for unknown categories)
+    ψ₀ per category: Q=0.7, W=0.6, S=0.5
+    ψ₂ per category: Q=0.3, W=0.0, S=0.2
+    Cases of any other category (seismic "E" in older files) are left out: see
+    ``cases_left_out``.
     """
     # Remove old auto-generated combinations; keep manually-added ones
     for cid in [c.id for c in state.combinations if c.is_auto]:
         state.remove_combination(cid)
 
     g_cases   = [lc for lc in state.load_cases if lc.category == "G"]
-    var_cases = [lc for lc in state.load_cases if lc.category != "G"]
+    var_cases = [lc for lc in state.load_cases if lc.category in VARIABLE_CATEGORIES]
 
     generated: list[LoadCombination] = []
 
     def _psi0(lc) -> float:
-        return _PSI0.get(lc.category, 0.7)
+        return _PSI0[lc.category]
 
     def _psi2(lc) -> float:
-        return _PSI2.get(lc.category, 0.3)
+        return _PSI2[lc.category]
 
     def _combo(name: str, ls: str, pairs: list) -> LoadCombination:
         c = state.add_combination(name, ls)
@@ -272,18 +280,24 @@ class CombinationsDialog(QDialog):
                                     "Add at least one load case to the model first.")
             return
         generated = auto_generate_en1990(self._state)
+        left_out = cases_left_out(self._state)
+        note = ""
+        if left_out:
+            names = ", ".join(f"{lc.name} ({lc.category})" for lc in left_out)
+            note = (f"\n\nLeft out: {names}. Only G, Q, W and S cases are combined "
+                    "automatically; add a combination by hand with Add… to use them.")
         if not generated:
             QMessageBox.information(
                 self, "Nothing generated",
                 "Could not determine standard combinations.\n"
-                "Ensure your load cases have EN 1990 categories (G, Q, W, S)."
+                "Ensure your load cases have EN 1990 categories (G, Q, W, S)." + note
             )
             return
         self._rebuild_table()
         QMessageBox.information(
             self, "Combinations generated",
             f"{len(generated)} combination(s) created from EN 1990 Table A1.2(B).\n\n"
-            "Select one and click Solve Selected."
+            "Select one and click Solve Selected." + note
         )
 
     def _on_add(self) -> None:

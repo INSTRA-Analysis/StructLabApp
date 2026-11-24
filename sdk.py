@@ -157,7 +157,7 @@ class Model:
     # ── Loads ─────────────────────────────────────────────────────────────────
 
     def add_load_case(self, name: str, category: str = "Q") -> None:
-        """Register a named load case (category: G/Q/W/S/E)."""
+        """Register a named load case (category: G/Q/W/S)."""
         lc = self._state.add_load_case(name, category)
         self._lc_name_to_id[name] = lc.id
 

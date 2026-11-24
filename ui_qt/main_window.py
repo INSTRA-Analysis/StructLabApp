@@ -1810,6 +1810,7 @@ class MainWindow(QMainWindow):
                 build_assessment_message,
             )
             from ui_qt.model_builder import build_model_pattern
+            from ui_qt.model_state import VARIABLE_CATEGORIES
             from ui_qt.model_state import LoadCombination as _LC
 
             assessment = detect_pattern_loading(state)
@@ -1817,7 +1818,8 @@ class MainWindow(QMainWindow):
 
             if assessment.needed:
                 g_cases = [lc for lc in state.load_cases if lc.category == "G"]
-                q_cases = [lc for lc in state.load_cases if lc.category != "G"]
+                q_cases = [lc for lc in state.load_cases
+                           if lc.category in VARIABLE_CATEGORIES]
 
                 for pr in generate_pattern_runs(assessment):
                     try:

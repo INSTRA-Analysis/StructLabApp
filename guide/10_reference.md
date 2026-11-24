@@ -243,9 +243,9 @@ Mouse navigation is in chapter 2.
 - Optimise chooses equal angles only, and runs as a script.
 
 **Loads and combinations** (chapter 5)
-- Combinations follow EN 1990 Table A1.2(B) with the recommended factors. The seismic design
-  situation is not generated, nor the combinations that leave out a favourable companion
-  action.
+- Combinations follow EN 1990 Table A1.2(B) with the recommended factors. Combinations that leave
+  out a favourable companion action are not generated. There are no seismic actions yet
+  (Dynamic Analysis module).
 - A load case's name and category, and its alternative group, cannot be changed in the
   window.
 - Member loads are per metre of member length; there is no load per metre on plan for

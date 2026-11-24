@@ -127,8 +127,13 @@ LOAD_CATEGORIES: dict[str, str] = {
     "Q": "Variable (Q)",
     "W": "Wind (W)",
     "S": "Snow (S)",
-    "E": "Seismic (E)",
 }
+
+# Categories the combination generator and pattern loading treat as variable actions.
+# A case with any other category (e.g. "E" from an older file) keeps its loads and can be
+# used in a combination built by hand, but is left out of the automatic ones: seismic
+# actions need their own design situation (EN 1990 6.4.3.4), which comes with dynamics.
+VARIABLE_CATEGORIES: tuple[str, ...] = ("Q", "W", "S")
 
 
 @dataclass

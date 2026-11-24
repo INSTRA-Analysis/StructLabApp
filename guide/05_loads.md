@@ -22,7 +22,6 @@ The **Loads** tab holds the case list:
 | **Variable (Q)** | Imposed load | 0.7 | 0.3 |
 | **Wind (W)** | Variable action | 0.6 | 0 |
 | **Snow (S)** | Variable action | 0.5 | 0.2 |
-| **Seismic (E)** | See the note in 5.6 | 0.7 | 0.3 |
 
 The ψ values are the EN 1990 Annex A1 recommended values for buildings.
 
@@ -128,10 +127,10 @@ alternatives (an *exclusive group*, such as the tower example's two wind cases) 
 combined with each other. The group is stored in the `.slab` file and set by the tower
 generator and the SDK; the window does not edit it yet.
 
-> **Seismic cases.** The generator treats a Seismic (E) case like any variable action
-> (factor 1.5). It does not build the seismic design situation of EN 1990 6.4.3.4. Build
-> seismic combinations yourself with **Add…**, or leave seismic cases out of the
-> auto-generation.
+> **Seismic actions** are not part of StructLab yet; they will come with the Dynamic
+> Analysis module. A seismic (E) case in a file from an older version still opens with its
+> loads, but the generator leaves it out (and says so); use it only in a combination you
+> build with **Add…**.
 
 ### Your own combinations
 

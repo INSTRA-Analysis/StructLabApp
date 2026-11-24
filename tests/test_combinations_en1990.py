@@ -159,3 +159,25 @@ def test_regeneration_replaces_the_automatic_set_and_keeps_manual_ones():
     second = len(auto_generate_en1990(s))
     assert first == second == 14                 # 9 ULS + 4 SLS characteristic + 1 quasi-permanent
     assert manual in s.combinations
+
+
+def test_a_seismic_case_from_an_older_file_is_left_out():
+    """StructLab has no seismic design situation yet (EN 1990 6.4.3.4): an "E" case keeps its
+    loads but is neither combined automatically nor pattern-loaded, and the window says so."""
+    from ui_qt.combinations import cases_left_out
+    from ui_qt.model_state import LOAD_CATEGORIES
+    from ui_qt.pattern_loading import detect_pattern_loading
+    assert "E" not in LOAD_CATEGORIES                  # not offered for new cases
+    with_e = _state([("G", "G", ""), ("Q", "Q", ""), ("Quake", "E", "")])
+    without_e = _state([("G", "G", ""), ("Q", "Q", "")])
+    quake = with_e.load_cases[2]
+    got = {(c.name.replace("Quake", ""), _freeze(c.factors)) for c in auto_generate_en1990(with_e)}
+    assert all(quake.id not in c.factors for c in with_e.combinations)
+    assert got == {(c.name, _freeze(c.factors)) for c in auto_generate_en1990(without_e)}
+    assert cases_left_out(with_e) == [quake] and cases_left_out(without_e) == []
+    from ui_qt.model_state import DistLoad, MemberLoad
+    a, b = with_e.add_node(2, 0, 0).id, with_e.add_node(3, 0, 0).id
+    m1, m2 = with_e.add_member(1, a).id, with_e.add_member(a, b).id
+    for mid in (m1, m2):
+        quake.set_member_load(mid, MemberLoad(dist_loads=[DistLoad("w", 1e3, 1e3)]))
+    assert not detect_pattern_loading(with_e).needed

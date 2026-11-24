@@ -44,7 +44,8 @@ def detect_pattern_loading(state) -> PatternAssessment:
     Members with only nodal Q loads are excluded (point loads at joints do
     not benefit from span-by-span alternation).
     """
-    q_cases = [lc for lc in state.load_cases if lc.category != "G"]
+    from ui_qt.model_state import VARIABLE_CATEGORIES
+    q_cases = [lc for lc in state.load_cases if lc.category in VARIABLE_CATEGORIES]
 
     # Members with distributed or member point loads in any Q case
     q_loaded: set[int] = set()
