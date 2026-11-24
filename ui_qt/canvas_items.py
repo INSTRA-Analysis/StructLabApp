@@ -7,6 +7,7 @@ separate.  No scene-management logic here — just how nodes and members look.
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -243,6 +244,64 @@ def _proj_y_screen_dir() -> tuple[float, float]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# One redraw pass: lookups shared by every item
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RedrawPass:
+    """Mixin for the scene the items live in (it needs only ``model_state``).
+
+    Items used to scan the whole model for each node lookup, load-arrow scale and hinge
+    check, which made a camera move quadratic in the model size. Inside a pass those are
+    worked out once and shared; outside one each call computes them as before."""
+
+    _pass: dict | None = None
+
+    @contextmanager
+    def redraw_pass(self):
+        """Within one redraw the model does not change, so node lookups, the load-arrow
+        scale maxima and the set of hinged nodes are worked out once and shared by every
+        item. Outside a pass each item computes them itself, as before. Nested passes share
+        the outer one."""
+        if self._pass is not None:
+            yield
+            return
+        self._pass = {"nodes": {n.id: n for n in self.model_state.nodes}, "max": {}}
+        try:
+            yield
+        finally:
+            self._pass = None
+
+    def node_by_id(self, node_id: int):
+        """The node with this id (from the pass's table inside a redraw pass)."""
+        if self._pass is not None:
+            return self._pass["nodes"].get(node_id)
+        return self.model_state.get_node(node_id)
+
+    def pass_value(self, key: str, compute):
+        """``compute()`` once per redraw pass and active load case; every call outside a
+        pass. For whole-model figures such as the largest load, which scale the arrows."""
+        if self._pass is None:
+            return compute()
+        cache = self._pass["max"]
+        k = (self.model_state.active_case_id, key)
+        if k not in cache:
+            cache[k] = compute()
+        return cache[k]
+
+    def hinged_node_ids(self) -> set[int]:
+        """Nodes that are the released end of some member (they get the orange ring)."""
+        def compute() -> set[int]:
+            ids = set()
+            for m in self.model_state.members:
+                if m.element_type == ElementType.PIN_RIGHT:
+                    ids.add(m.node_j)
+                elif m.element_type == ElementType.PIN_LEFT:
+                    ids.add(m.node_i)
+            return ids
+        return self.pass_value("hinged nodes", compute)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # NodeItem
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -417,12 +476,7 @@ class NodeItem(QGraphicsEllipseItem):
             self._scene.removeItem(self._hinge_item)
             self._hinge_item = None
 
-        is_hinge = any(
-            (m.element_type == ElementType.PIN_RIGHT and m.node_j == self.node.id)
-            or (m.element_type == ElementType.PIN_LEFT  and m.node_i == self.node.id)
-            for m in self._scene.model_state.members
-        )
-        if not is_hinge:
+        if self.node.id not in self._scene.hinged_node_ids():
             return
 
         hr = NODE_R + 4
@@ -463,14 +517,17 @@ class NodeItem(QGraphicsEllipseItem):
         # Scale arrow length relative to the largest nodal force in this load case
         # so different magnitudes are visually distinguishable.
         _lc = ms.active_case
-        _max_nf = max(
-            (max(abs(_lc.get_node_load(n.id).fx),
-                 abs(_lc.get_node_load(n.id).fy),
-                 abs(_lc.get_node_load(n.id).fz),
-                 abs(_lc.get_node_load(n.id).moment))
-             for n in ms.nodes),
-            default=1.0,
-        ) or 1.0
+
+        def largest_nodal_load() -> float:
+            return max(
+                (max(abs(_lc.get_node_load(n.id).fx),
+                     abs(_lc.get_node_load(n.id).fy),
+                     abs(_lc.get_node_load(n.id).fz),
+                     abs(_lc.get_node_load(n.id).moment))
+                 for n in ms.nodes),
+                default=1.0,
+            ) or 1.0
+        _max_nf = self._scene.pass_value("largest nodal load", largest_nodal_load)
         _this_f = max(abs(nl.fx), abs(nl.fy), abs(nl.fz), abs(nl.moment))
         _f_ratio = max(0.35, _this_f / _max_nf)  # floor at 35 % so small loads stay visible
         arr_len = ARROW_LEN * _f_ratio
@@ -570,15 +627,28 @@ class NodeItem(QGraphicsEllipseItem):
     # ── refresh / cleanup ─────────────────────────────────────────────────────
 
     def refresh(self) -> None:
-        sx, sy = _node_pos(self.node, self._scene)
-        self.setPos(sx, sy)
-        self._draw_support_symbol()
-        self._draw_hinge_indicator()
-        self._draw_load_symbols()
-        for item in self._scene.items():
-            if isinstance(item, MemberItem):
+        """Redraw this node and its members after the model changed."""
+        with self._scene.redraw_pass():
+            sx, sy = _node_pos(self.node, self._scene)
+            self.setPos(sx, sy)
+            self._draw_support_symbol()
+            self._draw_hinge_indicator()
+            self._draw_load_symbols()
+            for item in self._scene._member_items.values():
                 if item.member.node_i == self.node.id or item.member.node_j == self.node.id:
                     item.refresh()
+
+    def has_load_symbols(self) -> bool:
+        """True while load arrows or labels are drawn at this node."""
+        return bool(self._load_items or self._load_label_items)
+
+    def reproject(self) -> None:
+        """Follow a camera move: new position and camera-facing support glyph. The hinge ring
+        only moves; load arrows are redrawn by the scene once every item is in place."""
+        self.setPos(*_node_pos(self.node, self._scene))
+        self._draw_support_symbol()
+        if self._hinge_item is not None:
+            self._hinge_item.setPos(self.pos())
 
     def remove_extra_items(self) -> None:
         for it in self._support_items:
@@ -707,8 +777,8 @@ class MemberItem(QGraphicsLineItem):
 
     def update_endpoints(self) -> None:
         """Redraw line and load arrows after a connected node has moved."""
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if ni and nj:
             ix, iy = _node_pos(ni, self._scene)
             jx, jy = _node_pos(nj, self._scene)
@@ -728,8 +798,8 @@ class MemberItem(QGraphicsLineItem):
         option.state = option.state & ~QStyle.StateFlag.State_Selected
         super().paint(painter, option, widget)
         if _SHOW_LOCAL_AXES_ALL or self._is_selected:
-            ni = self._scene.model_state.get_node(self.member.node_i)
-            nj = self._scene.model_state.get_node(self.member.node_j)
+            ni = self._scene.node_by_id(self.member.node_i)
+            nj = self._scene.node_by_id(self.member.node_j)
             if ni and nj:
                 self._paint_triad(painter, ni, nj)
 
@@ -874,8 +944,8 @@ class MemberItem(QGraphicsLineItem):
         if w_start == 0.0 and w_end == 0.0:
             return
 
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if not ni or not nj:
             return
 
@@ -900,12 +970,12 @@ class MemberItem(QGraphicsLineItem):
         # Normalise arrow lengths to the model-wide max UDL so members with
         # different load intensities show proportionally different arrow lengths.
         _lc2 = self._scene.model_state.active_case
-        w_global_max = max(
+        w_global_max = self._scene.pass_value("largest w", lambda: max(
             (max(abs(_lc2.get_member_load(m.id).net("w")[0]),
                  abs(_lc2.get_member_load(m.id).net("w")[1]))
              for m in self._scene.model_state.members),
-            default=w_max,
-        ) or w_max
+            default=0.0,
+        )) or w_max
 
         # Shift entire group away from member so multiple LCs stack without overlap
         if perp_offset != 0.0:
@@ -982,9 +1052,10 @@ class MemberItem(QGraphicsLineItem):
         _lc2    = ms.active_case
         _mlist  = ms.members
         def _gmax(direction: str) -> float:
-            v = max((max(abs(_lc2.get_member_load(m.id).net(direction)[0]),
-                         abs(_lc2.get_member_load(m.id).net(direction)[1]))
-                     for m in _mlist), default=0.0)
+            v = self._scene.pass_value("largest " + direction, lambda: max(
+                (max(abs(_lc2.get_member_load(m.id).net(direction)[0]),
+                     abs(_lc2.get_member_load(m.id).net(direction)[1]))
+                 for m in _mlist), default=0.0))
             return v or 0.0
 
         # Draw qx arrows
@@ -1031,8 +1102,8 @@ class MemberItem(QGraphicsLineItem):
         global_max: float = 0.0,
     ) -> None:
         """Draw a set of distributed load arrows along the member for one global axis."""
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if not ni or not nj:
             return
         ix, iy = _node_pos(ni, self._scene)
@@ -1108,8 +1179,11 @@ class MemberItem(QGraphicsLineItem):
                 self._scene.removeItem(item)
             self._point_load_items.clear()
 
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ml = self._scene.model_state.active_case.get_member_load(self.member.id)
+        if not ml.point_loads:
+            return
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if not ni or not nj:
             return
 
@@ -1128,7 +1202,6 @@ class MemberItem(QGraphicsLineItem):
         draw_color = color if color else QColor(180, 80, 200)
         prefix = f"{lc_name}: " if lc_name else ""
 
-        ml = self._scene.model_state.active_case.get_member_load(self.member.id)
         for pl in ml.point_loads:
             t = max(0.0, min(1.0, pl.position))
             px = ix + t * dx
@@ -1201,8 +1274,8 @@ class MemberItem(QGraphicsLineItem):
         if not ml.partial_loads:
             return
 
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if not ni or not nj:
             return
 
@@ -1220,7 +1293,7 @@ class MemberItem(QGraphicsLineItem):
         # Model-wide max across full-span and partial loads so sizes are comparable
         _lc2   = ms.active_case
         _mlist = ms.members
-        w_global_max = max(
+        w_global_max = self._scene.pass_value("largest w or partial", lambda: max(
             (max(
                 abs(_lc2.get_member_load(m.id).net("w")[0]),
                 abs(_lc2.get_member_load(m.id).net("w")[1]),
@@ -1229,7 +1302,7 @@ class MemberItem(QGraphicsLineItem):
                 0.0,
             ) for m in _mlist),
             default=1.0,
-        ) or 1.0
+        )) or 1.0
 
         draw_color = QColor("#cc5500")   # orange-red: distinct from full-span red
         ah = 4
@@ -1301,9 +1374,22 @@ class MemberItem(QGraphicsLineItem):
 
     # ── refresh / cleanup ─────────────────────────────────────────────────────
 
+    def has_load_symbols(self) -> bool:
+        """True while any load arrow or label is drawn on this member."""
+        return any((self._udl_items, self._udl_label_items, self._qx_items, self._qx_label_items,
+                    self._qy_items, self._qy_label_items, self._qz_items, self._qz_label_items,
+                    self._point_load_items, self._partial_items))
+
+    def reproject(self) -> None:
+        """Follow a camera move: only the line moves (load arrows: the scene redraws them)."""
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
+        if ni and nj:
+            self.setLine(*_node_pos(ni, self._scene), *_node_pos(nj, self._scene))
+
     def refresh(self) -> None:
-        ni = self._scene.model_state.get_node(self.member.node_i)
-        nj = self._scene.model_state.get_node(self.member.node_j)
+        ni = self._scene.node_by_id(self.member.node_i)
+        nj = self._scene.node_by_id(self.member.node_j)
         if ni and nj:
             ix, iy = _node_pos(ni, self._scene)
             jx, jy = _node_pos(nj, self._scene)

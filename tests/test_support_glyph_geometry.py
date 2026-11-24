@@ -10,6 +10,7 @@ import pytest
 
 import ui_qt.projection as _proj
 from ui_qt import support_glyphs as sg
+from ui_qt.canvas_items import RedrawPass
 from ui_qt.model_state import ModelState, NodeData, SupportType
 
 
@@ -138,7 +139,7 @@ def test_spring_without_stiffness_still_shows_a_coil():
 
 # ── through the real NodeItem ────────────────────────────────────────────────
 
-class _FakeScene:
+class _FakeScene(RedrawPass):
     def __init__(self, model_state):
         self.model_state = model_state
 

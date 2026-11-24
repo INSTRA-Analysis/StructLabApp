@@ -26,7 +26,7 @@ from ui_qt.model_state import (
 from ui_qt.canvas_items import (
     PX_PER_M, GRID_STEP, SNAP_PX,
     _GHOST_PEN,
-    NodeItem, MemberItem, _node_pos, group_colour,
+    NodeItem, MemberItem, RedrawPass, _node_pos, group_colour,
 )
 import ui_qt.projection as _proj
 from ui_qt.projection import (
@@ -112,7 +112,7 @@ class WorkingPlane(Enum):
 # StructCanvas
 # ─────────────────────────────────────────────────────────────────────────────
 
-class StructCanvas(QGraphicsScene):
+class StructCanvas(RedrawPass, QGraphicsScene):
     """Interactive 2-D canvas for building structural models."""
 
     model_changed        = pyqtSignal()              # emitted after any structural change
@@ -1607,10 +1607,16 @@ class StructCanvas(QGraphicsScene):
             self.setSceneRect(-half, -half, 2 * half, 2 * half)
 
     def reproject(self) -> None:
-        """Reposition all items after the isometric projection angles change."""
-        for nitem in self._node_items.values():
-            nitem.refresh()
-        self.update_depth_order()
+        """Reposition all items after the projection angles change. A camera move changes
+        only where things are drawn: nodes and members move, the support glyphs and load
+        arrows (which face the camera) are redrawn, nothing else is rebuilt."""
+        with self.redraw_pass():
+            for nitem in self._node_items.values():
+                nitem.reproject()
+            for mitem in self._member_items.values():
+                mitem.reproject()
+            self.refresh_all_loads()
+            self.update_depth_order()
         self.invalidate(self.sceneRect())
 
     def set_view(self, azimuth: float = -45.0, elevation: float = 30.0) -> None:
@@ -1631,12 +1637,15 @@ class StructCanvas(QGraphicsScene):
     def update_depth_order(self) -> None:
         """Update member Z-values so nearer members render on top."""
         from ui_qt.projection import depth_order
+        with self.redraw_pass():
+            self._update_depth_order(depth_order)
+
+    def _update_depth_order(self, depth_order) -> None:
         members_coords = []
         mitem_list = list(self._member_items.values())
         for mitem in mitem_list:
-            ms = self.model_state
-            ni = ms.get_node(mitem.member.node_i)
-            nj = ms.get_node(mitem.member.node_j)
+            ni = self.node_by_id(mitem.member.node_i)
+            nj = self.node_by_id(mitem.member.node_j)
             if ni and nj:
                 members_coords.append((ni.x, ni.y, getattr(ni, 'z', 0.0),
                                        nj.x, nj.y, getattr(nj, 'z', 0.0)))
@@ -1903,6 +1912,10 @@ class StructCanvas(QGraphicsScene):
 
     def refresh_all_loads(self) -> None:
         """Redraw load symbols.  In 'all cases' mode overlays every load case."""
+        with self.redraw_pass():
+            self._refresh_all_loads()
+
+    def _refresh_all_loads(self) -> None:
         state = self.model_state
         if self._show_all_cases:
             original_id = state.active_case_id
@@ -1913,8 +1926,12 @@ class StructCanvas(QGraphicsScene):
                 perp_off = i * _PERP_OFFSET_STEP
                 lc_name = lc.name or f"LC{i}"
                 for item in self._node_items.values():
-                    item._draw_load_symbols(clear=first, color=color, lc_name=lc_name)
+                    if item.node.id in lc.node_loads or (first and item.has_load_symbols()):
+                        item._draw_load_symbols(clear=first, color=color, lc_name=lc_name)
                 for item in self._member_items.values():
+                    if not (item.member.id in lc.member_loads
+                            or (first and item.has_load_symbols())):
+                        continue                  # nothing to draw and nothing to clear
                     item._draw_udl_arrows(clear=first, color=color,
                                           perp_offset=perp_off, lc_name=lc_name)
                     item._draw_lateral_arrows(clear=first, color=color,
@@ -1924,9 +1941,13 @@ class StructCanvas(QGraphicsScene):
                 first = False
             state.active_case_id = original_id
         else:
+            case = state.active_case
             for item in self._node_items.values():
-                item._draw_load_symbols()
+                if item.node.id in case.node_loads or item.has_load_symbols():
+                    item._draw_load_symbols()
             for item in self._member_items.values():
+                if item.member.id not in case.member_loads and not item.has_load_symbols():
+                    continue                      # nothing to draw and nothing to clear
                 item._draw_udl_arrows()
                 item._draw_lateral_arrows()
                 item._draw_point_loads()
@@ -1977,10 +1998,11 @@ class StructCanvas(QGraphicsScene):
 
     def _rebuild_items(self) -> None:
         self._suppress_changed = True
-        for node in self.model_state.nodes:
-            self._add_node_item(node)
-        for member in self.model_state.members:
-            self._add_member_item(member)
+        with self.redraw_pass():
+            for node in self.model_state.nodes:
+                self._add_node_item(node)
+            for member in self.model_state.members:
+                self._add_member_item(member)
         self._suppress_changed = False
         self.model_changed.emit()
         # Redraw all load arrows now that every member exists so w_global_max

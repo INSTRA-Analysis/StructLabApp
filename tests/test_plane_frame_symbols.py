@@ -65,9 +65,9 @@ def test_springs_and_restraint_view_map_to_the_plane(qapp):
 
 def test_node_item_uses_2d_symbols_only_for_a_plane_frame_in_elevation(qapp):
     import ui_qt.projection as proj
-    from ui_qt.canvas_items import NodeItem
+    from ui_qt.canvas_items import NodeItem, RedrawPass
 
-    class Scene:
+    class Scene(RedrawPass):
         def __init__(self, ms):
             self.model_state = ms
 
