@@ -40,11 +40,6 @@ def _oracle(state, limit_state):
     var = [c for c in state.load_cases if c.category != "G"]
     out = set()
 
-    def blocked(assign, i):
-        grp = var[i].exclusive_group
-        return bool(grp) and any(j != i and assign[j] > 0 and var[j].exclusive_group == grp
-                                 for j in range(len(var)))
-
     def valid_alternatives(assign):
         groups = {}
         for i, f in enumerate(assign):
@@ -57,16 +52,13 @@ def _oracle(state, limit_state):
             out.add(_freeze({c.id: GAMMA_SUP for c in perm}))
         for g in (GAMMA_SUP, GAMMA_INF):
             for assign in itertools.product(*[(0.0, GAMMA_Q * PSI0[c.category], GAMMA_Q) for c in var]):
+                # a companion is present only where unfavourable (6.4.3.2): any subset
                 if sum(1 for f in assign if f == GAMMA_Q) != 1 or not valid_alternatives(assign):
                     continue
-                if any(f == 0 and not blocked(assign, i) for i, f in enumerate(assign)):
-                    continue                      # a companion that could act must act
                 out.add(_freeze({**{c.id: g for c in perm}, **{c.id: f for c, f in zip(var, assign)}}))
     else:                                         # SLS characteristic
         for assign in itertools.product(*[(0.0, PSI0[c.category], 1.0) for c in var]):
             if sum(1 for f in assign if f == 1.0) != 1 or not valid_alternatives(assign):
-                continue
-            if any(f == 0 and not blocked(assign, i) for i, f in enumerate(assign)):
                 continue
             out.add(_freeze({**{c.id: 1.0 for c in perm}, **{c.id: f for c, f in zip(var, assign)}}))
     return out
@@ -79,6 +71,7 @@ CASE_SETS = {
     "one permanent, one variable": [("G", "G", ""), ("Q", "Q", "")],
     "alternatives of two kinds": [("G", "G", ""), ("W+", "W", "w"), ("W-", "W", "w"),
                                   ("S+", "S", "s"), ("S-", "S", "s")],
+    "variable actions only": [("Q", "Q", ""), ("W", "W", "")],
 }
 
 
@@ -112,17 +105,19 @@ def test_quasi_permanent_uses_psi2(name):
             assert c.id not in qp[0].factors
 
 
-def test_tower_has_the_eight_uls_combinations_written_out():
+def test_tower_uls_combinations_written_out():
     s = _state(CASE_SETS["tower"])
     ids = {c.name: c.id for c in s.load_cases}
     uls = {_freeze(c.factors) for c in auto_generate_en1990(s) if c.limit_state == "ULS"}
     G, C, I, WP, WM = (ids[n] for n in ("Self weight", "Conductor weight", "Ice", "Wind +X", "Wind -X"))
     expected = {_freeze({G: 1.35, C: 1.35})}                          # permanent load alone
     for g in (1.35, 1.0):
+        expected.add(_freeze({G: g, C: g, I: 1.5}))                     # ice leading, no wind
         for w in (WP, WM):
             expected.add(_freeze({G: g, C: g, I: 1.5, w: 0.9}))         # ice leading, wind companion
             expected.add(_freeze({G: g, C: g, I: 1.05, w: 1.5}))        # wind leading, ice companion
-    assert uls == expected and len(uls) == 9
+            expected.add(_freeze({G: g, C: g, w: 1.5}))                 # wind leading, no ice
+    assert uls == expected and len(uls) == 15
 
 
 def test_favourable_permanent_combinations_exist_only_with_variable_actions():
@@ -152,12 +147,30 @@ def test_permanent_alone_governs_where_the_wind_relieves_the_member():
     assert abs(with_wind) < abs(alone)
 
 
+def test_wind_without_ice_governs_the_uplift_of_a_tower_leg():
+    """Ice adds weight, so it relieves a leg lifted by the wind: the governing combination is
+    1.0G + 1.5W with the ice left out, which the generator used to miss (EN 1990 6.4.3.2)."""
+    s = _state(CASE_SETS["tower"])
+    ids = {c.name: c.id for c in s.load_cases}
+    # Axial force in the windward leg per unit case (kN, tension +): weight compresses it,
+    # ice compresses it more, wind lifts it.
+    leg = {ids["Self weight"]: -40.0, ids["Conductor weight"]: -20.0, ids["Ice"]: -30.0,
+           ids["Wind +X"]: 90.0, ids["Wind -X"]: -90.0}
+    uls = [c for c in auto_generate_en1990(s) if c.limit_state == "ULS"]
+    tension = {c.name: sum(f * leg[cid] for cid, f in c.factors.items()) for c in uls}
+    worst = max(tension, key=tension.get)
+    assert ids["Ice"] not in next(c for c in uls if c.name == worst).factors
+    assert tension[worst] == pytest.approx(-60.0 + 1.5 * 90.0)               # 75 kN
+    with_ice = max(v for n, v in tension.items() if "Ice" in n)
+    assert with_ice == pytest.approx(-60.0 + 1.5 * 90.0 - 1.05 * 30.0)       # 43.5 kN: unsafe
+
+
 def test_regeneration_replaces_the_automatic_set_and_keeps_manual_ones():
     s = _state(CASE_SETS["tower"])
     manual = s.add_combination("mine", "ULS")
     first = len(auto_generate_en1990(s))
     second = len(auto_generate_en1990(s))
-    assert first == second == 14                 # 9 ULS + 4 SLS characteristic + 1 quasi-permanent
+    assert first == second == 23                 # 15 ULS + 7 SLS characteristic + 1 quasi-permanent
     assert manual in s.combinations
 
 

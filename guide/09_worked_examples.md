@@ -137,8 +137,10 @@ crossarm members) shows its count, length, mass and profile; hide groups to look
 
 The cable loads are illustrative estimates for a suspension tower, not the values of
 EN 50341-1 and its UK National Annex. The two wind cases are alternatives (chapter 5.6), so
-the file's 13 generated combinations never add them together. (Auto-generate again and a
-fourteenth, 1.35G alone, is added; it does not govern any member of this tower.)
+the file's 13 generated combinations never add them together. Auto-generate again and the
+set grows to 23: 1.35G alone, and the combinations that leave a companion out (wind without
+ice, ice without wind). None of them governs a member of this tower: Optimise chooses the same
+sections with all 23, because the legs are sized by buckling in compression, not by uplift.
 
 **Model → Crossing Bracing Connected** is on in this file: the crossing diagonals are bolted
 together, so a compressed diagonal crossed by one in tension buckles over half its length
@@ -146,7 +148,7 @@ together, so a compressed diagonal crossed by one in tension buckles over half i
 
 ### Solving and checking
 
-**Solve All & Envelope…** solves the 13 combinations, about a second each. Choose a ULS
+**Solve All & Envelope…** solves the combinations, about a second each. Choose a ULS
 combination in **Result Set** and turn on **Utilisation**: members go from green to red as
 they approach their resistance, and the hover tooltip names the governing check.
 

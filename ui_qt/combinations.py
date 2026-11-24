@@ -30,15 +30,25 @@ from ui_qt.model_state import ModelState, LoadCombination, VARIABLE_CATEGORIES
 _PSI0: dict[str, float] = {"Q": 0.7, "W": 0.6, "S": 0.5}   # companion ψ₀
 _PSI2: dict[str, float] = {"Q": 0.3, "W": 0.0, "S": 0.2}   # quasi-permanent ψ₂
 
+# Above this many generated combinations the Generate message explains where they come from.
+MANY_COMBINATIONS = 60
+
 
 def _companion_sets(cases: list) -> list[list]:
-    """Every way to take the companions with at most one case per exclusive group."""
-    free = [c for c in cases if not c.exclusive_group]
+    """Every set of companions that may act together, the empty set included.
+
+    EN 1990 6.4.3.2: a variable action is included only where it is unfavourable, so a
+    companion that relieves the member must be left out — each one is in or out. Cases
+    sharing an exclusive group (wind +X / -X) are alternatives: none or one of them.
+    The largest set comes first, the empty set last.
+    """
+    choices: list[list] = [[c, None] for c in cases if not c.exclusive_group]
     groups: dict[str, list] = {}
     for c in cases:
         if c.exclusive_group:
             groups.setdefault(c.exclusive_group, []).append(c)
-    return [free + list(pick) for pick in itertools.product(*groups.values())]
+    choices += [members + [None] for members in groups.values()]
+    return [[c for c in pick if c is not None] for pick in itertools.product(*choices)]
 
 
 def cases_left_out(state: ModelState) -> list:
@@ -50,14 +60,15 @@ def cases_left_out(state: ModelState) -> list:
 def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     """Generate EN 1990 Table A1.2(B) combinations — general algorithm.
 
-    For N variable load cases this produces:
-      - 1 × ULS combination of the permanent actions alone (1.35G), when there are any
-      - N × ULS fundamental combinations with unfavourable permanent actions (γG,sup)
-      - N × ULS fundamental combinations with favourable permanent actions (γG,inf)
-      - N × SLS characteristic combinations
-      - 1 × SLS quasi-permanent combination
-    i.e. 3N + 2 total (ψ₂ = 0 cases are excluded from the QP combo). With exclusive
-    alternatives (wind +X / -X) N counts every choice of companions, not just every case.
+    For every leading variable action and every set of companions (each companion in or
+    out, EN 1990 6.4.3.2 — see ``_companion_sets``) this produces:
+      - one ULS fundamental combination with unfavourable permanent actions (γG,sup)
+      - one ULS fundamental combination with favourable permanent actions (γG,inf),
+        when there are permanent cases (without them it would repeat the γG,sup one)
+      - one SLS characteristic combination
+    plus 1.35G alone (ULS) and one SLS quasi-permanent combination (all ψ₂ > 0 actions).
+    With N independent variable cases that is N·2^(N-1) sets: 3N·2^(N-1) + 2 combinations
+    (N = 3: 38). Alternatives (an exclusive group) count as one case with more choices.
 
     The favourable set (EN 1990 Table A1.2(B), γG,inf = 1.00) is what governs uplift and
     the minimum compression: leg tension in a tower is larger with 1.0G than with 1.35G.
@@ -131,8 +142,9 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
             uls_parts += [_fmt(_psi0(c) * 1.5, c.name) for c in companions]
             variable = [(leading, 1.50)] + [(c, _psi0(c) * 1.5) for c in companions]
             _combo("ULS STR: " + " + ".join(uls_parts), "ULS", g_uls + variable)
-            _combo("ULS STR (γG,inf): " + " + ".join(["G"] + uls_parts[1:]), "ULS",
-                   g_uls_inf + variable)
+            if g_cases:
+                _combo("ULS STR (γG,inf): " + " + ".join(["G"] + uls_parts[1:]), "ULS",
+                       g_uls_inf + variable)
 
             sls_parts = ["G", _fmt(1.00, leading.name)]
             sls_parts += [_fmt(_psi0(c), c.name) for c in companions]
@@ -294,10 +306,16 @@ class CombinationsDialog(QDialog):
             )
             return
         self._rebuild_table()
+        many = ""
+        if len(generated) > MANY_COMBINATIONS:
+            many = ("\n\nEach companion action is taken both with and without (it is left "
+                    "out where it would relieve a member), so the number doubles with every "
+                    "independent variable case. Cases that never act together (wind from "
+                    "opposite directions) belong in one alternative group.")
         QMessageBox.information(
             self, "Combinations generated",
             f"{len(generated)} combination(s) created from EN 1990 Table A1.2(B).\n\n"
-            "Select one and click Solve Selected." + note
+            "Select one and click Solve Selected." + many + note
         )
 
     def _on_add(self) -> None:

@@ -106,21 +106,27 @@ action:
 | Set | Combination |
 |---|---|
 | ULS STR, permanent alone (one) | 1.35 G |
-| ULS STR, γG,sup | 1.35 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>others</sub> |
-| ULS STR, γG,inf | 1.00 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>others</sub> |
-| SLS characteristic | G + Q<sub>lead</sub> + Σ ψ₀ Q<sub>others</sub> |
+| ULS STR, γG,sup | 1.35 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>companions</sub> |
+| ULS STR, γG,inf | 1.00 G + 1.5 Q<sub>lead</sub> + Σ 1.5 ψ₀ Q<sub>companions</sub> |
+| SLS characteristic | G + Q<sub>lead</sub> + Σ ψ₀ Q<sub>companions</sub> |
 | SLS quasi-permanent (one) | G + Σ ψ₂ Q |
 
-A variable action is included only where it is unfavourable, so **1.35 G** alone is a
-combination too: it governs wherever the variable actions relieve a member (chapter 9.1
-shows a case). The γG,inf set matters where permanent load is favourable: uplift,
+A variable action is included only where it is unfavourable (EN 1990 6.4.3.2). The
+generator does not know in advance which actions relieve which member, so it makes every
+possibility: for each leading action, each companion is taken both with and without (Σ runs
+over every subset of the other cases, none included). Wind without ice, for example, is what
+lifts a tower leg most, since the ice adds weight. For the same reason **1.35 G** alone is a
+combination: it governs wherever the variable actions relieve a member (chapter 9.1 shows a
+case). The γG,inf set matters where permanent load is favourable: uplift,
 overturning, and the tension in tower legs. With no variable case, one ULS (1.35 G) and one
 SLS (1.0 G) combination are made. Running it again replaces the generated combinations and
 keeps any you added yourself.
 
-The generator always includes every other variable action as a companion. Where a
-companion relieves a member (for example ice reducing the uplift under wind), the
-combination without it is not generated; add it with **Add…** if it can govern.
+The number of combinations doubles with every independent variable case: 3 cases (imposed,
+wind, snow) give 38, 4 give 98, and each one is solved by **Solve All**. Cases that can never
+act together, such as wind from opposite directions, belong in one alternative group (below):
+a group counts as one case. The quasi-permanent combination stays a single one with every
+ψ₂ > 0 action.
 
 **Alternative cases.** Wind from +X and wind from −X never act together. Cases marked as
 alternatives (an *exclusive group*, such as the tower example's two wind cases) are never
