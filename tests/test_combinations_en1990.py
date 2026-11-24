@@ -53,6 +53,8 @@ def _oracle(state, limit_state):
         return all(n == 1 for n in groups.values())
 
     if limit_state == "ULS":
+        if perm:                                  # every variable action favourable: absent
+            out.add(_freeze({c.id: GAMMA_SUP for c in perm}))
         for g in (GAMMA_SUP, GAMMA_INF):
             for assign in itertools.product(*[(0.0, GAMMA_Q * PSI0[c.category], GAMMA_Q) for c in var]):
                 if sum(1 for f in assign if f == GAMMA_Q) != 1 or not valid_alternatives(assign):
@@ -115,12 +117,12 @@ def test_tower_has_the_eight_uls_combinations_written_out():
     ids = {c.name: c.id for c in s.load_cases}
     uls = {_freeze(c.factors) for c in auto_generate_en1990(s) if c.limit_state == "ULS"}
     G, C, I, WP, WM = (ids[n] for n in ("Self weight", "Conductor weight", "Ice", "Wind +X", "Wind -X"))
-    expected = set()
+    expected = {_freeze({G: 1.35, C: 1.35})}                          # permanent load alone
     for g in (1.35, 1.0):
         for w in (WP, WM):
             expected.add(_freeze({G: g, C: g, I: 1.5, w: 0.9}))         # ice leading, wind companion
             expected.add(_freeze({G: g, C: g, I: 1.05, w: 1.5}))        # wind leading, ice companion
-    assert uls == expected and len(uls) == 8
+    assert uls == expected and len(uls) == 9
 
 
 def test_favourable_permanent_combinations_exist_only_with_variable_actions():
@@ -129,10 +131,31 @@ def test_favourable_permanent_combinations_exist_only_with_variable_actions():
     assert names == ["ULS: 1.35G", "SLS: 1.0G"]
 
 
+def test_permanent_alone_governs_where_the_wind_relieves_the_member():
+    """The portal of guide chapter 9.1: at the windward eave 1.35G gives more moment than
+    1.35G + 1.5W, so leaving 1.35G out would under-design that column."""
+    import sdk as sl
+    m = sl.Model()
+    n = [m.add_node(0, 0, 0), m.add_node(0, 0, 4.5), m.add_node(8, 0, 4.5), m.add_node(8, 0, 0)]
+    m.fixed(n[0]); m.fixed(n[3])
+    mem = [m.add_member(n[i], n[i + 1], E=210e9, A=5381e-6, I=8356e-8) for i in range(3)]
+    m.add_udl(mem[1], 10e3, lc="default")            # the model's own permanent (G) case
+    m.add_load_case("Wind", "W")
+    m.add_point_load(n[1], Fx=15e3, lc="Wind")
+    eave = {lc: m.solve(lc).member_forces(mem[0])["M_j"] for lc in ("default", "Wind")}
+    ids = {c.name: c.id for c in m._state.load_cases}
+    uls = [c.factors for c in auto_generate_en1990(m._state) if c.limit_state == "ULS"]
+    assert {ids["default"]: 1.35} in uls
+    alone = 1.35 * eave["default"]
+    with_wind = 1.35 * eave["default"] + 1.5 * eave["Wind"]
+    assert abs(alone) == pytest.approx(56.1e3, rel=1e-3)
+    assert abs(with_wind) < abs(alone)
+
+
 def test_regeneration_replaces_the_automatic_set_and_keeps_manual_ones():
     s = _state(CASE_SETS["tower"])
     manual = s.add_combination("mine", "ULS")
     first = len(auto_generate_en1990(s))
     second = len(auto_generate_en1990(s))
-    assert first == second == 13                 # 8 ULS + 4 SLS characteristic + 1 quasi-permanent
+    assert first == second == 14                 # 9 ULS + 4 SLS characteristic + 1 quasi-permanent
     assert manual in s.combinations

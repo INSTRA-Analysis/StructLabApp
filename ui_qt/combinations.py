@@ -45,11 +45,12 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
     """Generate EN 1990 Table A1.2(B) combinations — general algorithm.
 
     For N variable load cases this produces:
+      - 1 × ULS combination of the permanent actions alone (1.35G), when there are any
       - N × ULS fundamental combinations with unfavourable permanent actions (γG,sup)
       - N × ULS fundamental combinations with favourable permanent actions (γG,inf)
       - N × SLS characteristic combinations
       - 1 × SLS quasi-permanent combination
-    i.e. 3N + 1 total (ψ₂ = 0 cases are excluded from the QP combo). With exclusive
+    i.e. 3N + 2 total (ψ₂ = 0 cases are excluded from the QP combo). With exclusive
     alternatives (wind +X / -X) N counts every choice of companions, not just every case.
 
     The favourable set (EN 1990 Table A1.2(B), γG,inf = 1.00) is what governs uplift and
@@ -104,6 +105,13 @@ def auto_generate_en1990(state: ModelState) -> list[LoadCombination]:
             _combo("ULS: 1.35G", "ULS", g_uls)
             _combo("SLS: 1.0G",  "SLS", g_sls)
         return generated
+
+    # Permanent actions alone: a variable action is included only where it is unfavourable
+    # (EN 1990 6.4.3.2), so 1.35G with no variable action is a combination in its own right —
+    # it governs wherever the variable actions relieve the member. 1.0G alone never governs
+    # (every effect is 1/1.35 of the 1.35G one), so it is not generated.
+    if g_cases:
+        _combo("ULS STR: 1.35G", "ULS", g_uls)
 
     # One ULS + one SLS Char per leading variable action (and per choice among alternatives)
     for i, leading in enumerate(var_cases):
